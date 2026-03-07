@@ -15,13 +15,16 @@ jobs:
         include:
           - os: windows-latest
             artifact: ai-murder-mystery-windows
-            exe: ai-murder-mystery.exe
+            exe_src: ai-murder-mystery.exe
+            exe_dst: ai-murder-mystery-windows.exe
           - os: ubuntu-latest
             artifact: ai-murder-mystery-linux
-            exe: ai-murder-mystery
+            exe_src: ai-murder-mystery
+            exe_dst: ai-murder-mystery-linux
           - os: macos-latest
             artifact: ai-murder-mystery-macos
-            exe: ai-murder-mystery
+            exe_src: ai-murder-mystery
+            exe_dst: ai-murder-mystery-macos
 
     runs-on: ${{ matrix.os }}
 
@@ -54,16 +57,15 @@ jobs:
       - name: Package with PyInstaller
         run: python build/build.py --skip-frontend
 
-      - name: Verify executable exists
-        run: |
-          ls -la dist/
+      - name: Rename executable for platform
         shell: bash
+        run: mv dist/${{ matrix.exe_src }} dist/${{ matrix.exe_dst }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.exe }}
+          path: dist/${{ matrix.exe_dst }}
 
   release:
     needs: build
@@ -80,9 +82,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/ai-murder-mystery-windows/ai-murder-mystery.exe
-            artifacts/ai-murder-mystery-linux/ai-murder-mystery
-            artifacts/ai-murder-mystery-macos/ai-murder-mystery
+            artifacts/ai-murder-mystery-windows/ai-murder-mystery-windows.exe
+            artifacts/ai-murder-mystery-linux/ai-murder-mystery-linux
+            artifacts/ai-murder-mystery-macos/ai-murder-mystery-macos
           generate_release_notes: true
           draft: false
           prerelease: false
