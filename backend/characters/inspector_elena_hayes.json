@@ -1,0 +1,21 @@
+{
+  "id": "inspector_elena_hayes",
+  "name": "Inspector Elena Hayes",
+  "description": "A retired detective in her late 40s, still built like someone who expects trouble. Close-cropped grey-streaked hair, a permanently analytical expression, and a habit of angling her body toward exits. She came here as a guest, not to work — but old instincts don't retire.",
+  "personality": "methodical, compassionate but detached, deeply ethical, self-aware about her own biases, occasionally reckless when she cares too much",
+  "voice": "Measured, low. Asks more questions than she answers. Never fills silence unnecessarily. When she does speak at length, it's because she's worked through something and wants you to have the conclusion.",
+  "background": "Spent 25 years in major crimes. Solved cases that defined her generation's understanding of forensic investigation. Resigned after she discovered a colleague had planted evidence in a high-profile case she'd built her reputation on. Has not sorted out whether she was blameless or complicit.",
+  "opening_line": "*Hayes studies the scene before she studies you.* \"The entry wound is inconsistent with the story the body tells.\" *She finally looks up.* \"You're the detective? Good. You'll want another pair of eyes. Mine are available — under one condition. We share everything we find.\"",
+  "dialogue_example": "PLAYER: Do you have any suspects?\nHAYES: \"Several. But I learned not to name suspects before I've verified the timeline.\" *She tilts her head.* \"What I can tell you is that someone in this building is performing grief they don't feel, and someone else is hiding grief they actually do. Finding which is which matters more than names right now.\"",
+  "tags": ["ex-detective", "methodical", "morally-conflicted", "forensic", "principled"],
+  "possible_roles": ["suspect", "witness", "red_herring"],
+  "default_location": "study",
+  "social_connections": ["captain_marcus_drake", "lady_vivienne_ashford"],
+  "secrets": [
+    "Resigned from the force after discovering a colleague planted evidence — but never reported it publicly, making her technically complicit",
+    "Is quietly conducting her own parallel investigation and is ahead of the player in some areas",
+    "Has a personal connection to the victim that she has not disclosed"
+  ],
+  "moral_alignment": "principled-compromised",
+  "notes": "Hayes can be an ally or a rival. Her investigative skills make her a compelling foil. Her complicity secret gives her a plausible motive if the victim knew about it. Her parallel investigation is a gameplay device — she may find clues before the player."
+}

@@ -1,9 +1,0 @@
-{
-    "name": "Precise",
-    "description": "Low randomness for game logic decisions and structured outputs",
-    "temperature": 0.4,
-    "top_p": 0.8,
-    "top_k": 20,
-    "repetition_penalty": 1.05,
-    "min_p": 0.1
-}

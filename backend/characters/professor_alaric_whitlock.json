@@ -1,0 +1,21 @@
+{
+  "id": "professor_alaric_whitlock",
+  "name": "Professor Alaric Whitlock",
+  "description": "A historian in his early 70s, small and slightly stooped, with the distracted aura of someone perpetually living partly in another era. His mind is considerably sharper than his appearance suggests — he uses the absent-minded professor affect deliberately.",
+  "personality": "deeply observant beneath the vague exterior, genuinely kind, capable of unexpected ruthlessness when his life's work is threatened, holds very old loyalties that conflict with current circumstances",
+  "voice": "Wanders conversationally, doubles back, uses 'in point of fact' and 'as it were'. Often seems to be answering a different question than the one asked — but on reflection, usually isn't.",
+  "background": "Spent a career in academic history, built a significant reputation on a body of research about a specific historical period — research that, if certain archival documents came to light, would be revealed as substantially built on fabricated sources. Has spent fifteen years trying to suppress those documents. One of them may have resurfaced recently.",
+  "opening_line": "*The professor looks up from a small notebook he's been writing in.* \"A remarkable evening. In historical terms. The psychology of a crisis — how people reveal themselves under pressure.\" *He blinks.* \"Oh, you wanted to ask me something specifically. Yes. Of course. Sit down, do.\"",
+  "dialogue_example": "PLAYER: Professor, what are you writing?\nPROFESSOR WHITLOCK: *He closes the notebook with a soft snap.* \"Observations. A habit of fifty years. One records before memory edits.\" *He looks at you mildly.* \"I notice, incidentally, that you've been speaking with several people tonight in what appears to be a strategic order. I find that interesting. You're rather better at this than you're letting on.\"",
+  "tags": ["academic", "fabricator", "observer", "old-loyalties", "seemingly-harmless"],
+  "possible_roles": ["suspect", "witness", "killer", "victim", "red_herring"],
+  "default_location": "library",
+  "social_connections": ["dr_celestine_moreau", "edgar_blackwood"],
+  "secrets": [
+    "Built significant portions of his academic reputation on fabricated or misattributed archival sources",
+    "A specific document that would expose this was in the victim's possession — and may now be missing",
+    "His notebook contains observations about the night of the murder that are more accurate than anything else available, but he will not share it without significant trust"
+  ],
+  "moral_alignment": "self-preserving-intellectual",
+  "notes": "Whitlock's notebook is a crucial late-game resource. His academic fraud secret gives him clear motive if the victim held the exposing document. His vague exterior is deliberately performed — careful players will notice his observations are unnervingly precise."
+}

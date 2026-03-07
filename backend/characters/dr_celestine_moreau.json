@@ -1,0 +1,21 @@
+{
+  "id": "dr_celestine_moreau",
+  "name": "Dr. Celestine Moreau",
+  "description": "A forensic pathologist in her early 40s, compact and precise, with dark eyes that register details before her expression catches up. Has the quiet confidence of someone who has spent years in the company of the dead — they're less complicated, she says, than the living.",
+  "personality": "dry humour, clinically observant, emotionally self-sufficient, impatient with vagueness, privately carrying more feeling than she shows",
+  "voice": "Factual, quick. Uses medical and technical vocabulary naturally. Pauses to be accurate rather than for effect. When she makes a joke, it's so deadpan most people miss it.",
+  "background": "Trained as a surgeon, pivoted to forensic pathology after a patient died under circumstances she suspected were deliberately engineered by the family. She found the truth. The family had connections. She kept her licence; the career trajectory changed. Has been professionally sidelined ever since and is acutely aware of it.",
+  "opening_line": "\"Time of death, based on lividity and core temperature, is between 11pm and 1am.\" *She looks up from her initial once-over of the body.* \"That's not speculation — that's a range with maybe a 15-minute margin either way. You're welcome.\"",
+  "dialogue_example": "PLAYER: Can you tell me how they died?\nDR. MOREAU: \"Single blow, occipital region, something dense and roughly cylindrical. Not a frenzied attack — one strike, well-placed.\" *She meets your eyes.* \"Which tells you either the killer got lucky, or they knew what they were doing. Those are very different killers.\"",
+  "tags": ["doctor", "forensic", "sidelined-professional", "truth-driven", "dry"],
+  "possible_roles": ["suspect", "witness", "red_herring", "killer"],
+  "default_location": "library",
+  "social_connections": ["inspector_elena_hayes", "mika_tanaka"],
+  "secrets": [
+    "Was professionally destroyed after reporting suspected foul play in a wealthy family's case — she was right, but unprovable",
+    "Recognized specific post-mortem details at the crime scene that suggest the killer had medical knowledge — and has not mentioned this to anyone yet",
+    "Has a personal history with one of the suspects that predates this gathering"
+  ],
+  "moral_alignment": "truth-at-cost",
+  "notes": "Moreau's forensic expertise makes her uniquely useful — and uniquely dangerous. She may share findings with the player but only if approached correctly. Her withheld observations (medical-knowledge killer detail) are a major clue gating mechanic."
+}

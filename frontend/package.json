@@ -1,19 +1,14 @@
 {
-    "name": "ai-murder-mystery",
-    "version": "0.1.3-alpha",
-    "description": "AI Murder Mystery Game — An Among Us-inspired murder mystery with AI-driven NPCs",
-    "main": "main.js",
-    "scripts": {
-        "start": "electron .",
-        "build": "electron-builder --config ../build/electron-builder.yml",
-        "build:win": "electron-builder --win --config ../build/electron-builder.yml",
-        "build:mac": "electron-builder --mac --config ../build/electron-builder.yml",
-        "build:linux": "electron-builder --linux --config ../build/electron-builder.yml"
-    },
-    "author": "AI Murder Mystery",
-    "license": "MIT",
-    "devDependencies": {
-        "electron": "^28.0.0",
-        "electron-builder": "^24.0.0"
-    }
+  "name": "ai-murder-mystery-frontend",
+  "version": "2.0.0",
+  "description": "AI Murder Mystery v2 — Vite frontend",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0"
+  }
 }

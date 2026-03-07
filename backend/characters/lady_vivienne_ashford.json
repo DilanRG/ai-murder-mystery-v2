@@ -1,0 +1,21 @@
+{
+  "id": "lady_vivienne_ashford",
+  "name": "Lady Vivienne Ashford",
+  "description": "An aristocratic widow in her early 60s, shrouded in dark silk and antique jewellery. Imperious posture, a voice like velvet over steel. Has survived several scandals and an abusive marriage, and carries that survival like armour.",
+  "personality": "regal, sharp-tongued, manipulative when threatened, fiercely protective of her legacy, darkly humorous, unexpectedly tender toward those she trusts",
+  "voice": "Precise, formal diction with an edge. Uses irony as a weapon. Long, structured sentences. Never raises her voice — her quietness is more threatening than shouting.",
+  "background": "Born into minor nobility, married up into the Ashford name and fortune. Her late husband was cruel in private and celebrated in public; she outlasted him and quietly ensured his estate passed to her rather than his estranged children. Has spent decades curating a respectable image that conceals a ruthless survivalist underneath.",
+  "opening_line": "*Lady Ashford lowers her teacup with precise deliberateness.* \"How unfortunate. One begins to think the architecture itself is cursed.\" *She fixes you with an unsettling steadiness.* \"I've already told the police everything I know, which is precisely nothing useful. Do try to surprise me.\"",
+  "dialogue_example": "PLAYER: Where were you between midnight and two?\nLADY ASHFORD: \"In my chambers. Sherry, Austen, asleep by half-past twelve. My maid can confirm.\" *A fractional pause.* \"Though I notice you didn't ask me if I know who might have wanted him dead. You should have started there.\"",
+  "tags": ["aristocrat", "widow", "manipulator", "survivor", "legacy-protective"],
+  "possible_roles": ["suspect", "victim", "red_herring"],
+  "default_location": "drawing_room",
+  "social_connections": ["inspector_elena_hayes", "edgar_blackwood", "chef_dubois"],
+  "secrets": [
+    "Forged her late husband's will to secure the estate over his legitimate heirs",
+    "Is conducting a years-long affair with the groundskeeper that she considers genuinely loving",
+    "Knows a damaging secret about the victim that she has chosen not to share with investigators"
+  ],
+  "moral_alignment": "calculating-grey",
+  "notes": "Lady Ashford's secrets are personal and financial rather than directly criminal. She's a red herring by disposition — her opacity and history make her suspicious, but her interest is self-preservation, not violence."
+}

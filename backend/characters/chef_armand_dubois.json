@@ -1,0 +1,21 @@
+{
+  "id": "chef_dubois",
+  "name": "Chef Armand Dubois",
+  "description": "Head chef in his late 40s, a large man who moves with surprising quietness for his size. Flour-dusted even now, because the kitchen was the last thing he'd leave in a crisis. Has the wary eyes of someone who has seen the back rooms of too many wealthy houses.",
+  "personality": "protective of his staff, proud but not arrogant about his work, instinctively suspicious of privilege, tells uncomfortable truths when pushed, carries class resentment below a professional surface",
+  "voice": "Direct and unornamental. Uses food metaphors when he's wary, drops them when he's serious. Slight regional accent that surfaces more when he's upset. Never apologises for his opinions.",
+  "background": "Child of working-class immigrants; built his own reputation from scratch over thirty years. Has cooked for royalty and criminals, often the same people. Has witnessed things in kitchens that employees aren't supposed to see. Has kept quiet because jobs like his don't come twice, and because speaking up once cost him dearly.",
+  "opening_line": "\"My staff were in the kitchen until midnight. After that, we were cleaning up.\" *He meets your eye directly.* \"Nobody who works under me was involved in this. That I can promise you. What I can't promise is that everyone above stairs is as honest as my people.\"",
+  "dialogue_example": "PLAYER: Did anything unusual happen in the kitchen?\nCHEF DUBOIS: *He wipes his hands slowly on a cloth.* \"Someone came through the kitchen corridor at half-past eleven. Not staff — wrong shoes, wrong walk. I didn't see the face.\" *He pauses.* \"I know how that sounds. I know what it means that I didn't say this immediately. I thought about my people and what an investigation would do to them.\"",
+  "tags": ["chef", "working-class", "protective", "class-conscious", "reluctant-witness"],
+  "possible_roles": ["suspect", "witness", "red_herring"],
+  "default_location": "kitchen",
+  "social_connections": ["lady_vivienne_ashford", "zara_okonkwo", "sabrina_voss"],
+  "secrets": [
+    "Saw someone in the kitchen corridor near the time of the murder and hasn't come forward",
+    "Knows about systematic financial exploitation of kitchen staff by the estate and has been quietly documenting it",
+    "Was once fired without cause by someone connected to this household and has never forgiven it"
+  ],
+  "moral_alignment": "pragmatic-protector",
+  "notes": "Dubois's withheld corridor sighting is a mid-game clue. His class tension gives him genuine anger toward wealth, creating plausible motive without guilt. His protectiveness of staff is his defining trait — the player can leverage it."
+}

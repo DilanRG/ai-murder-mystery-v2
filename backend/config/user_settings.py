@@ -1,102 +1,71 @@
 """
-Persistent user settings — saves/loads to a local JSON file.
-Overrides .env defaults with user-configured values from the settings UI.
+User preferences — persisted to disk (user_config.json).
+Separate from settings.py which holds app-level constants.
 """
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from config.settings import BASE_DIR
+from config.settings import (
+    USER_CONFIG_FILE,
+    DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_TOP_P,
+    DEFAULT_TOP_K, DEFAULT_MAX_TOKENS, DEFAULT_CONTEXT_TOKENS,
+)
 
 logger = logging.getLogger(__name__)
 
-CONFIG_FILE = BASE_DIR / "user_config.json"
+# In-memory config cache
+_config: dict[str, Any] = {}
 
-# Default structure
-_DEFAULTS: dict[str, Any] = {
+DEFAULTS: dict[str, Any] = {
     "api_key": "",
-    "model": "",
-    "providers": [],
-    "instruct_template": "chatml",
-    "context_length": 8192,
-    "response_length": 1024,
-    "temperature": 0.9,
-    "top_p": 0.95,
-    "top_k": 40,
-    "repetition_penalty": 1.1,
-    "min_p": 0.05,
+    "model": DEFAULT_MODEL,
+    "temperature": DEFAULT_TEMPERATURE,
+    "top_p": DEFAULT_TOP_P,
+    "top_k": DEFAULT_TOP_K,
+    "max_tokens": DEFAULT_MAX_TOKENS,
+    "context_tokens": DEFAULT_CONTEXT_TOKENS,
+    "autonomy": "high",        # "low" | "high"
+    "timer_mode": "event",     # "none" | "realtime" | "event"
+    "timer_minutes": 30,       # only used in "realtime" mode
+    "difficulty": "normal",    # "easy" | "normal" | "hard"
 }
-
-# In-memory cache
-_user_config: Optional[dict[str, Any]] = None
 
 
 def load_user_config() -> dict[str, Any]:
-    """Load user config from JSON file, merging with defaults."""
-    global _user_config
-    config = dict(_DEFAULTS)
-
-    if CONFIG_FILE.exists():
+    """Load user config from disk into the in-memory cache."""
+    global _config
+    _config = dict(DEFAULTS)
+    if USER_CONFIG_FILE.exists():
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(USER_CONFIG_FILE, "r", encoding="utf-8") as f:
                 saved = json.load(f)
-            config.update(saved)
-            logger.info("Loaded user config from %s", CONFIG_FILE)
+            _config.update(saved)
+            logger.info("Loaded user config from %s", USER_CONFIG_FILE)
         except Exception as e:
-            logger.warning("Failed to load user config: %s", e)
-
-    _user_config = config
-    return config
-
-
-def save_user_config(config: dict[str, Any]) -> None:
-    """Save user config to JSON file."""
-    global _user_config
-    _user_config = config
-
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-        logger.info("Saved user config to %s", CONFIG_FILE)
-    except Exception as e:
-        logger.error("Failed to save user config: %s", e)
-        raise
+            logger.warning("Failed to load user config: %s — using defaults", e)
+    return _config
 
 
 def get_user_config() -> dict[str, Any]:
-    """Get the current user config (from cache or file)."""
-    global _user_config
-    if _user_config is None:
-        return load_user_config()
-    return _user_config
+    """Return the current in-memory config (load from disk if not yet loaded)."""
+    if not _config:
+        load_user_config()
+    return dict(_config)
 
 
-def apply_user_config_to_settings() -> None:
-    """
-    Apply user config values onto the runtime Pydantic settings.
-    Called on startup and after settings changed from the UI.
-    """
-    from config.settings import get_settings
-
-    config = get_user_config()
-    settings = get_settings()
-
-    if config.get("api_key"):
-        settings.llm.openrouter_api_key = config["api_key"]
-    if config.get("model"):
-        settings.llm.model = config["model"]
-    if config.get("context_length"):
-        settings.llm.max_context_tokens = config["context_length"]
-    if config.get("response_length"):
-        settings.llm.max_response_tokens = config["response_length"]
-    if config.get("temperature") is not None:
-        settings.sampler.temperature = config["temperature"]
-    if config.get("top_p") is not None:
-        settings.sampler.top_p = config["top_p"]
-    if config.get("top_k") is not None:
-        settings.sampler.top_k = config["top_k"]
-    if config.get("repetition_penalty") is not None:
-        settings.sampler.repetition_penalty = config["repetition_penalty"]
-    if config.get("min_p") is not None:
-        settings.sampler.min_p = config["min_p"]
+def save_user_config(updates: dict[str, Any]) -> dict[str, Any]:
+    """Merge updates into config and persist to disk."""
+    global _config
+    if not _config:
+        load_user_config()
+    _config.update(updates)
+    try:
+        USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(USER_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(_config, f, indent=2)
+        logger.info("User config saved.")
+    except Exception as e:
+        logger.error("Failed to save user config: %s", e)
+    return dict(_config)

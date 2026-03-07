@@ -3,11 +3,10 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 dist/
-build/_pybuild/
-build/.cache/
-*.spec
+build/work/
 venv/
 .venv/
+user_config.json
 
 # Environment
 .env

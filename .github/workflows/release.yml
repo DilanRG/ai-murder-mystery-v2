@@ -14,111 +14,75 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            platform: win
-            backend_ext: .exe
-            artifact_pattern: "dist/electron/MurderMystery-*-win.exe"
-          - os: macos-latest
-            platform: mac
-            backend_ext: ""
-            artifact_pattern: "dist/electron/MurderMystery-*-mac-*.dmg"
+            artifact: ai-murder-mystery-windows
+            exe: ai-murder-mystery.exe
           - os: ubuntu-latest
-            platform: linux
-            backend_ext: ""
-            artifact_pattern: "dist/electron/MurderMystery-*-linux.AppImage"
+            artifact: ai-murder-mystery-linux
+            exe: ai-murder-mystery
+          - os: macos-latest
+            artifact: ai-murder-mystery-macos
+            exe: ai-murder-mystery
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.12'
 
-      - name: Setup Node.js
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
 
       - name: Install Python dependencies
-        working-directory: backend
         run: |
-          pip install -r requirements.txt
+          pip install -r backend/requirements.txt
           pip install pyinstaller
 
-      - name: Build backend (PyInstaller)
-        working-directory: backend
-        run: |
-          python ../build/build_backend.py
-
-      - name: Verify backend build
-        run: |
-          ls -la dist/backend/ || dir dist\backend\
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfuse2
-
       - name: Install frontend dependencies
-        working-directory: frontend
         run: npm install
-
-      - name: Build Electron app
         working-directory: frontend
-        run: npx electron-builder --${{ matrix.platform }} --config ../build/electron-builder.yml
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Upload artifacts
+      - name: Build frontend
+        run: npx vite build
+        working-directory: frontend
+
+      - name: Package with PyInstaller
+        run: python build/build.py --skip-frontend
+
+      - name: Verify executable exists
+        run: |
+          ls -la dist/
+        shell: bash
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MurderMystery-${{ matrix.platform }}
-          path: ${{ matrix.artifact_pattern }}
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.exe }}
 
   release:
     needs: build
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release-assets
-          merge-multiple: true
+          path: artifacts
 
-      - name: List release assets
-        run: find release-assets -type f
-
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "${{ github.ref_name }} — AI Murder Mystery"
-          body: |
-            ## AI Murder Mystery — Alpha Release
-
-            A single-player murder mystery game with AI-driven NPCs.
-
-            ### Downloads
-            - **Windows**: `MurderMystery-*-win.exe` — portable, no installation needed
-            - **macOS**: `MurderMystery-*-mac-*.dmg` — drag to Applications
-            - **Linux**: `MurderMystery-*-linux.AppImage` — make executable and run
-
-            ### First Run
-            1. Launch the executable
-            2. Click **Settings** ⚙ on the title screen
-            3. Enter your [OpenRouter API key](https://openrouter.ai)
-            4. Search and select a model (e.g. DeepSeek V3.2)
-            5. Click **Save Settings**
-            6. Click **Begin Investigation** to play!
-
-            > Your settings are saved automatically for future sessions.
+          files: |
+            artifacts/ai-murder-mystery-windows/ai-murder-mystery.exe
+            artifacts/ai-murder-mystery-linux/ai-murder-mystery
+            artifacts/ai-murder-mystery-macos/ai-murder-mystery
+          generate_release_notes: true
           draft: false
-          prerelease: true
-          files: release-assets/**/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          prerelease: false

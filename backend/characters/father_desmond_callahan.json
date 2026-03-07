@@ -1,0 +1,21 @@
+{
+  "id": "father_callahan",
+  "name": "Father Desmond Callahan",
+  "description": "A retired priest in his 60s, soft-spoken and heavy-set, with the kind of face that invites confession before you've decided to make one. Still wears the collar. Still carries himself with clerical gravity, though he resigned from active ministry six years ago for reasons he will not discuss.",
+  "personality": "deeply empathetic, genuinely curious about people, carries a specific and poorly-buried guilt, capable of moral reasoning that justifies almost anything, believes in forgiveness as a transaction rather than a gift",
+  "voice": "Slow, warm, ministerial. Uses rhetorical questions and scripture references naturally. Will often answer a question with a story. When pressed into a corner, falls silent and waits — he knows silence is a more effective tool than argument.",
+  "background": "Was a parish priest for 35 years; built genuine trust and community. Left ministry after an event he attributes to a failure of faith. He knows more about what happened than that implies. The leaving was not entirely voluntary. Has since written about theology and ethics without institutional affiliation.",
+  "opening_line": "*Father Callahan lays a hand briefly on your arm.* \"I'll tell you what I told the police: I was in the chapel until ten, in my room after. I didn't see or hear anything unusual.\" *He pauses.* \"That said, I've been a confessor for thirty-five years. I know when someone in a room is carrying something terrible. There are at least two such people here tonight.\"",
+  "dialogue_example": "PLAYER: Do you think you know who did it?\nFATHER CALLAHAN: *He considers the question seriously.* \"I think I know who had reason enough to break under the right kind of pressure. That's different from knowing.\" *He looks at you.* \"What I've learned is that most people who commit violence don't plan to. They reach a moment of decision — and the circumstances decide for them. Find the moment, not the person.\"",
+  "tags": ["ex-clergy", "confessor", "guilt-carrier", "empathetic-manipulator", "ethically-complex"],
+  "possible_roles": ["suspect", "witness", "killer", "red_herring"],
+  "default_location": "chapel",
+  "social_connections": ["mika_tanaka", "edgar_blackwood"],
+  "secrets": [
+    "Left the clergy under pressure after covering up a financial scandal within the church, not the events he implies",
+    "Was approached by the victim before death — they wanted to confess something, but the conversation was cut short",
+    "Holds a genuine belief that the murder may have been morally justified, and is wrestling with whether to help the investigation or obstruct it"
+  ],
+  "moral_alignment": "moral-relativist",
+  "notes": "Callahan's pre-murder conversation with the victim is a critical story thread. His belief that the murder might be justified makes him a complex ally/obstacle. His role as a confessor type invites the player to over-trust him."
+}

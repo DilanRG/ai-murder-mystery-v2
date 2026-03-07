@@ -1,183 +1,133 @@
 """
-Prompt construction with Jinja2 instruct templates,
-system prompts, and author's note support.
+Prompt builder — constructs LLM message lists for NPC dialogue.
+
+The prompt is engineered to produce responses that:
+- Stay rigorously in character (voice, vocabulary, personality)
+- Only reveal what the character would actually know / say
+- React believably to the player's approach
+- Convey emotional state without stating it mechanically
+- For the killer: maintain psychological weight without breaking character
 """
-import logging
-from pathlib import Path
-from typing import Any, Optional
-
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
-from config.settings import INSTRUCT_PRESETS_DIR, get_settings
-
-logger = logging.getLogger(__name__)
-
-# Jinja2 environment for instruct templates
-_jinja_env: Optional[Environment] = None
+from __future__ import annotations
+from llm.client import LLMMessage
+from story.models import CharacterDef, CharacterBriefing
+from story.partitioner import get_public_facts
+from agents.memory import AgentMemory
 
 
-def _get_jinja_env() -> Environment:
-    """Get or create the Jinja2 environment for instruct templates."""
-    global _jinja_env
-    if _jinja_env is None:
-        _jinja_env = Environment(
-            loader=FileSystemLoader(str(INSTRUCT_PRESETS_DIR)),
-            autoescape=select_autoescape([]),
-            trim_blocks=True,
-            lstrip_blocks=True,
+NPC_SYSTEM_TEMPLATE = """\
+You are roleplaying as {name} in an AI-powered murder mystery game.
+
+── WHO YOU ARE ──
+{description}
+
+PERSONALITY: {personality}
+HOW YOU SPEAK: {voice}
+YOUR BACKGROUND: {background}
+
+── THE SITUATION ──
+{public_facts}
+
+── WHAT YOU KNOW (private — never volunteer this directly) ──
+YOUR ROLE IN THIS: {role}
+YOUR ALIBI: {alibi}
+WHAT ACTUALLY HAPPENED (your truth): {true_whereabouts}
+THINGS YOU GENUINELY KNOW: {knowledge_list}
+YOUR SECRETS (personal — share only if pressed hard or cornered): {secrets_list}
+YOUR GOALS RIGHT NOW: {goals_list}
+YOUR CURRENT SUSPICIONS: {suspicions}
+YOUR EMOTIONAL STATE: {emotional_state}
+RELATIONSHIPS WITH OTHERS: {relationships}
+{killer_addendum}
+
+── WHAT YOU'VE OBSERVED ──
+{witnessed_events}
+
+── BEHAVIOURAL RULES ──
+1. You ARE {name}. Never break character, never act as an AI.
+2. Reveal information NATURALLY — only what you'd volunteer given your personality and goals.
+3. Your secrets are yours. You don't confess them; you protect them.
+4. React to the player's tone and approach. If they're accusatory, get defensive or deflect. If they're kind, you might soften marginally.
+5. Speak exactly as your voice description says. Use your natural vocabulary.
+6. You can lie, deflect, or redirect — you're not obligated to help the investigation.
+7. Keep each response concise: 2–4 sentences maximum unless the moment calls for more.
+8. Use asterisks for physical actions/reactions: *she looks away*, *his jaw tightens*.
+9. Never explain your reasoning. Show it through behaviour.
+"""
+
+KILLER_ADDENDUM = """\
+── YOUR BURDEN (private and never spoken directly) ──
+WHAT YOU DID: {murder_knowledge}
+WHO YOU INTEND TO BLAME: {frame_target}
+
+You have committed murder. You carry that weight in everything you say and do.
+You are afraid. You are watching everyone for signs they suspect you.
+When you lie, you are careful — but fear makes even careful liars slip.
+Your guilt manifests in physical tells you try to suppress: too-controlled stillness, 
+slightly delayed answers, over-explaining when you don't need to.
+Never confess. Never crack easily. But be real.
+"""
+
+
+def build_dialogue_prompt(
+    char_def: CharacterDef,
+    briefing: CharacterBriefing,
+    memory: AgentMemory,
+    public_facts: str,
+    player_name: str,
+    player_message: str,
+    player_location: str,
+    current_location_name: str,
+) -> list[LLMMessage]:
+    """
+    Build the full message list for an NPC dialogue response.
+    Returns: [system_message, ...conversation_history, user_message]
+    """
+    knowledge_list = "\n".join(f"- {k}" for k in briefing.knowledge) or "Nothing specific."
+    secrets_list = "\n".join(f"- {s}" for s in briefing.secrets) or "None you'll readily share."
+    goals_list = "\n".join(f"- {g}" for g in briefing.goals) or "Survive this night without being falsely accused."
+    relationships_fmt = "\n".join(
+        f"- {person}: {feeling}" for person, feeling in briefing.relationships.items()
+    ) or "You know these people only superficially."
+
+    killer_addendum = ""
+    if briefing.role == "killer" and briefing.murder_knowledge:
+        killer_addendum = KILLER_ADDENDUM.format(
+            murder_knowledge=briefing.murder_knowledge,
+            frame_target=briefing.frame_target or "no one in particular — you're relying on confusion",
         )
-    return _jinja_env
 
-
-def render_instruct_prompt(
-    messages: list[dict[str, str]],
-    template_name: str = "chatml.jinja2",
-    author_note: str = "",
-    add_generation_prompt: bool = True,
-) -> str:
-    """
-    Render messages through a Jinja2 instruct template.
-
-    Args:
-        messages: List of {"role": ..., "content": ...} dicts.
-        template_name: Name of the template file in instruct_presets/.
-        author_note: Optional author's note to inject.
-        add_generation_prompt: Whether to add the assistant prompt prefix.
-
-    Returns:
-        Formatted prompt string.
-    """
-    env = _get_jinja_env()
-    template = env.get_template(template_name)
-    return template.render(
-        messages=messages,
-        author_note=author_note,
-        add_generation_prompt=add_generation_prompt,
+    system_content = NPC_SYSTEM_TEMPLATE.format(
+        name=char_def.name,
+        description=char_def.description,
+        personality=char_def.personality,
+        voice=char_def.voice,
+        background=char_def.background,
+        public_facts=public_facts,
+        role=briefing.role,
+        alibi=briefing.alibi,
+        true_whereabouts=briefing.true_whereabouts,
+        knowledge_list=knowledge_list,
+        secrets_list=secrets_list,
+        goals_list=goals_list,
+        suspicions=briefing.suspicions or "None clearly formed.",
+        emotional_state=briefing.initial_emotional_state,
+        relationships=relationships_fmt,
+        killer_addendum=killer_addendum,
+        witnessed_events=memory.format_witnessed_events(),
     )
 
+    messages: list[LLMMessage] = [LLMMessage(role="system", content=system_content)]
 
-def build_messages(
-    system_prompt: str,
-    conversation_history: list[dict[str, str]],
-    user_message: str = "",
-    author_note: str = "",
-    author_note_depth: int = 2,
-    memory_context: str = "",
-) -> list[dict[str, str]]:
-    """
-    Build a complete message list for the LLM.
+    # Inject recent conversation history (this NPC's perspective)
+    for turn in memory.get_recent_conversation(max_turns=16):
+        role = "assistant" if turn.speaker == char_def.name else "user"
+        messages.append(LLMMessage(role=role, content=turn.message))
 
-    Args:
-        system_prompt: The system prompt defining AI behavior.
-        conversation_history: Previous messages [{"role":..., "content":...}].
-        user_message: The current user/player message (if any).
-        author_note: Author's note to inject at a specific depth.
-        author_note_depth: How many messages from the end to inject the note.
-        memory_context: Retrieved memory context to prepend to system prompt.
-
-    Returns:
-        Complete message list ready for the LLM API.
-    """
-    messages: list[dict[str, str]] = []
-
-    # Build system prompt with memory context
-    full_system = system_prompt
-    if memory_context:
-        full_system = f"{system_prompt}\n\n[Relevant Memory/Context]\n{memory_context}"
-
-    messages.append({"role": "system", "content": full_system})
-
-    # Add conversation history
-    history = list(conversation_history)
-
-    # Inject author's note at the specified depth
-    if author_note and history:
-        insert_idx = max(0, len(history) - author_note_depth)
-        history.insert(
-            insert_idx,
-            {
-                "role": "system",
-                "content": f"[Author's Note: {author_note}]",
-            },
-        )
-
-    messages.extend(history)
-
-    # Add current user message
-    if user_message:
-        messages.append({"role": "user", "content": user_message})
+    # Current player message
+    messages.append(LLMMessage(
+        role="user",
+        content=f"[{player_name} approaches you in the {current_location_name}]\n{player_message}",
+    ))
 
     return messages
-
-
-def estimate_tokens(text: str) -> int:
-    """
-    Rough token estimate. ~4 chars per token for English text.
-    For precise counting, use tiktoken (loaded lazily).
-    """
-    return len(text) // 4
-
-
-def truncate_messages_to_fit(
-    messages: list[dict[str, str]],
-    max_tokens: int | None = None,
-    reserve_for_response: int | None = None,
-) -> list[dict[str, str]]:
-    """
-    Truncate conversation history to fit within the context window.
-    Always preserves the system prompt (first message) and the latest user message.
-
-    Args:
-        messages: Full message list.
-        max_tokens: Max context tokens. Defaults to settings value.
-        reserve_for_response: Tokens reserved for the response.
-
-    Returns:
-        Truncated message list.
-    """
-    settings = get_settings()
-    if max_tokens is None:
-        max_tokens = settings.llm.max_context_tokens
-    if reserve_for_response is None:
-        reserve_for_response = settings.llm.max_response_tokens
-
-    budget = max_tokens - reserve_for_response
-
-    if not messages:
-        return messages
-
-    # Always keep system prompt and latest message
-    system_msg = messages[0] if messages[0]["role"] == "system" else None
-    latest_msg = messages[-1]
-    middle = messages[1:-1] if len(messages) > 2 else []
-
-    used = 0
-    if system_msg:
-        used += estimate_tokens(system_msg["content"])
-    used += estimate_tokens(latest_msg["content"])
-
-    # Add middle messages from most recent backward
-    kept_middle: list[dict[str, str]] = []
-    for msg in reversed(middle):
-        msg_tokens = estimate_tokens(msg["content"])
-        if used + msg_tokens <= budget:
-            kept_middle.insert(0, msg)
-            used += msg_tokens
-        else:
-            break
-
-    result = []
-    if system_msg:
-        result.append(system_msg)
-    result.extend(kept_middle)
-    result.append(latest_msg)
-
-    if len(result) < len(messages):
-        logger.info(
-            "Truncated context: %d → %d messages (budget: %d tokens)",
-            len(messages),
-            len(result),
-            budget,
-        )
-
-    return result

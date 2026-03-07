@@ -1,9 +1,0 @@
-{
-    "name": "Creative",
-    "description": "High creativity for scenario generation and varied NPC responses",
-    "temperature": 1.05,
-    "top_p": 0.95,
-    "top_k": 60,
-    "repetition_penalty": 1.15,
-    "min_p": 0.03
-}
