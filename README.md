@@ -1,157 +1,67 @@
-# AI Murder Mystery v2
+# 🔪 AI Murder Mystery
 
-A **single-player, AI-driven murder mystery game** where autonomous NPC agents live in a continuous simulated world. Interrogate suspects, find evidence, and accuse the killer before time runs out, while the NPCs are actively scheming against you.
-
----
-
-## Gameplay
-
-You play as a detective investigating a murder. The other 7 characters (including the killer) live in the game world in real time — they move between rooms, talk to each other, plant or destroy evidence, and generally try to survive investigation. The killer knows who they are, and will act accordingly.
-
-- **Chat with NPCs** to gather information
-- **Investigate locations** to find physical clues
-- **Watch the event log** — NPC movements and conversations are visible
-- **Accuse** when you're confident — wrong accusation ends the game
+A murder mystery game where the suspects are powered by AI. They move around, talk to each other, lie, and try to cover their tracks — all in real time. Your job is to figure out who did it before time runs out.
 
 ---
 
-## Quick Start (Development)
+## Download & Play
 
-### Prerequisites
-- Python 3.11+
-- [uv](https://github.com/astral-sh/uv) — `pip install uv`
-- Node.js 18+
-- An [OpenRouter](https://openrouter.ai) API key *(free tier works)*
+**No installation required.** Just download, run, and play.
 
-### 1. Install dependencies
-```bash
-# Backend
-uv venv backend/.venv
-uv pip install -r backend/requirements.txt --python backend/.venv/Scripts/python.exe
+👉 **[Download the latest release](https://github.com/DilanRG/ai-murder-mystery-v2/releases/latest)**
 
-# Frontend
-cd frontend && npm install
-```
+| Platform | File |
+|---|---|
+| Windows | `ai-murder-mystery.exe` |
+| macOS | `ai-murder-mystery` |
+| Linux | `ai-murder-mystery` |
 
-### 2. Start the backend
-```bash
-cd backend
-uv run uvicorn main:app --host 127.0.0.1 --port 8765 --reload
-```
-
-### 3. Start the Vite dev server (second terminal)
-```bash
-cd frontend && npm run dev
-# Open http://localhost:5173
-```
+> **You'll need a free API key** from [OpenRouter](https://openrouter.ai) to power the AI. Sign up, copy your key, and paste it into the game's Settings screen when prompted. Free models are available.
 
 ---
 
-## Production Build (Single Executable)
+## How to Play
 
-```bash
-python build/build.py
-# Output: dist/ai-murder-mystery.exe  (~13 MB)
-```
+1. **Launch** the downloaded file — it opens your browser automatically
+2. **Enter your name** and choose a difficulty
+3. **Explore** the map by clicking locations
+4. **Question suspects** — type your questions and read their responses
+5. **Search rooms** to find physical clues
+6. **Watch the event log** — the suspects are doing things in real time
+7. **Make your accusation** when you think you know who did it
 
-The executable bundles FastAPI + the Vite-built frontend. On launch it finds a free port, starts the server, and opens your browser automatically.
-
-```bash
-# Options
-python build/build.py --clean          # Clean dist/ and build/ first
-python build/build.py --skip-frontend  # Skip Vite build (use existing static/)
-```
+If you're right, you solved the case. If you're wrong... the killer walks free.
 
 ---
 
-## Running Tests
+## What makes it different?
 
-```bash
-cd backend
-uv run pytest tests/ -v
-```
+Unlike a normal mystery game, the suspects here are **fully autonomous AI agents**. Each one has a secret briefing — their alibi, what they know, what they're hiding. The killer knows who they are, and will actively try to mislead you: moving evidence, telling half-truths, and avoiding your questions.
 
----
-
-## Architecture
-
-```
-game/
-├── backend/                 # FastAPI server
-│   ├── main.py              # Endpoints: /api/game/*, /api/settings, WebSocket
-│   ├── launcher.py          # Executable entry point
-│   ├── agents/              # NPC autonomous agents (perceive → think → act)
-│   │   ├── base.py          # NPCAgent: LLM tool-call loop
-│   │   ├── manager.py       # Start/stop all agent loops
-│   │   ├── memory.py        # Short-term NPC memory
-│   │   ├── perception.py    # Filtered world view per agent
-│   │   └── tools.py         # 7 tools: move, speak, whisper, examine, plant, destroy, do_nothing
-│   ├── world/               # Game world
-│   │   ├── state.py         # WorldState: ground truth, all mutations
-│   │   ├── event_bus.py     # Event emission → WebSocket broadcast
-│   │   └── clock.py         # Timer: none / realtime countdown / event-driven
-│   ├── story/               # Story generation
-│   │   ├── generator.py     # LLM prompt → full mystery scenario (JSON)
-│   │   ├── models.py        # Pydantic models: Scenario, LocationDef, ClueDef, etc.
-│   │   ├── characters.py    # Load character pool from JSON files
-│   │   └── partitioner.py   # Split scenario into per-NPC knowledge briefings
-│   ├── llm/                 # LLM client
-│   │   ├── client.py        # OpenRouter API wrapper (standard + tool-calling)
-│   │   └── prompt_builder.py # NPC system prompt construction
-│   ├── config/              # Configuration
-│   │   ├── settings.py      # App constants (paths, defaults)
-│   │   └── user_settings.py # User config persistence (API key, model, etc.)
-│   ├── characters/          # Character card pool (12 JSON files)
-│   └── tests/               # pytest suite
-│       ├── test_world.py    # WorldState mutations and queries
-│       ├── test_tools.py    # Agent tool execution
-│       └── test_event_bus.py # Event recording and broadcast
-├── frontend/                # Vite + vanilla JS (built → backend/static/)
-│   ├── index.html           # 5 screens: title, setup, loading, game, results
-│   ├── css/styles.css       # 1180-line noir design system
-│   └── js/
-│       ├── app.js           # Screen orchestration, WS, toast notifications
-│       ├── game.js          # Map, chat feed, timer, debrief (4 tabs)
-│       ├── api.js           # fetch/WebSocket wrapper
-│       ├── settings.js      # Model search, sampler controls
-│       └── screens.js       # Screen transition logic
-├── build/                   # Build system
-│   ├── build.py             # Orchestrator: Vite → PyInstaller
-│   └── murder-mystery.spec  # PyInstaller bundle config
-├── docs/                    # Documentation
-│   ├── architecture.md
-│   ├── implementation_plan.md
-│   └── roadmap.md
-└── .github/workflows/
-    └── release.yml          # CI: build Win/Mac/Linux on version tags
-```
+Every game generates a completely new mystery: new characters, new locations, new motive, new story.
 
 ---
 
-## Roadmap
+## Screenshots
 
-All 5 phases complete as of v2.0:
-
-| Phase | Status | Description |
-|---|---|---|
-| 1 | ✅ | Story generation, LLM client, world state, FastAPI endpoints |
-| 2 | ✅ | NPC agents, dialogue, frontend (5 screens, noir CSS) |
-| 3 | ✅ | Autonomous agent loops (perceive-think-act), game clock |
-| 4 | ✅ | Accusation + AI narrative ending, debrief + timeline, game over |
-| 5 | ✅ | Single-file executable, GitHub Actions CI |
-
-See [`docs/roadmap.md`](docs/roadmap.md) for detailed milestone tracking.
+*Coming soon*
 
 ---
 
-## Configuration
+## Troubleshooting
 
-Settings are persisted in `user_config.json` (gitignored). The most important ones:
+**The game won't start?**
+- On macOS/Linux you may need to make the file executable first:
+  `chmod +x ai-murder-mystery` then double-click or run it
 
-| Setting | Default | Description |
-|---|---|---|
-| API Key | *(required)* | OpenRouter API key |
-| Model | `deepseek/deepseek-r1:free` | Any OpenRouter-hosted model |
-| Timer Mode | `none` | `none` / `realtime` / `event` |
-| Timer Minutes | 30 | Used when `timer_mode=realtime` |
-| Difficulty | `normal` | `easy` / `normal` / `hard` |
+**Nothing happens after I click Send?**
+- Check that your API key is set in Settings (top-right gear icon)
+
+**The AI responses are slow?**
+- This depends on the model you've chosen. Free models can be slower during busy periods. Try a different one in Settings.
+
+---
+
+## License
+
+MIT — free to use, modify, and share.
