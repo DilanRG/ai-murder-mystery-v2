@@ -9,6 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CHARACTERS_DIR = BASE_DIR / "characters"
 STATIC_DIR = BASE_DIR / "static"          # Vite-built frontend (production)
 USER_CONFIG_FILE = BASE_DIR / "user_config.json"
+SAVE_ROOT = BASE_DIR / "saves"
 
 # ── Server ───────────────────────────────────────────────────────────────────
 DEFAULT_HOST = "127.0.0.1"

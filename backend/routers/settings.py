@@ -1,13 +1,14 @@
-"""
-routers/settings.py — Settings, health, model list, and character pool endpoints.
-"""
+"""Settings, optional OpenRouter discovery, and public character card data."""
+
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Any
 
 from config.user_settings import get_user_config, save_user_config
+from game.content import CHARACTER_CARDS_DIR, list_content_ids, load_character_card
 from llm.client import LLMClient
-from story.characters import load_all_characters
+
 
 router = APIRouter()
 
@@ -20,80 +21,84 @@ class SettingsUpdateRequest(BaseModel):
     top_k: int | None = None
     max_tokens: int | None = None
     context_tokens: int | None = None
-    autonomy: str | None = None       # "low" | "high"
-    timer_mode: str | None = None     # "none" | "realtime" | "event"
+    autonomy: str | None = None
+    timer_mode: str | None = None
     timer_minutes: int | None = None
     difficulty: str | None = None
 
 
 @router.get("/api/health")
-async def health(session=None):
-    """Health check — used by frontend to detect backend connection."""
-    # session injected via dependency in main.py
+async def health() -> dict[str, object]:
     from routers._deps import get_session
-    _session = get_session()
-    cfg = get_user_config()
+
+    session = get_session()
+    config = get_user_config()
     return {
         "status": "ok",
-        "llm_connected": bool(cfg.get("api_key")),
-        "model": cfg.get("model", ""),
-        "game_active": _session.is_active(),
+        "llm_connected": bool(config.get("api_key")),
+        "model": config.get("model", ""),
+        "game_active": bool(session and session.is_active()),
     }
 
 
 @router.get("/api/settings")
-async def get_settings():
-    cfg = get_user_config()
-    api_key = cfg.get("api_key", "")
+async def get_settings() -> dict[str, object]:
+    config = get_user_config()
+    api_key = config.get("api_key", "")
     masked = ("***" + api_key[-6:]) if len(api_key) > 6 else ("•" * len(api_key))
-    return {**cfg, "api_key": masked, "api_key_set": bool(api_key)}
+    return {**config, "api_key": masked, "api_key_set": bool(api_key)}
 
 
 @router.post("/api/settings")
-async def update_settings(req: SettingsUpdateRequest):
+async def update_settings(request: SettingsUpdateRequest) -> dict[str, object]:
     from routers._deps import get_session, make_llm_client
-    _session = get_session()
-    updates = req.model_dump(exclude_none=True)
+
+    session = get_session()
+    updates = request.model_dump(exclude_none=True)
     save_user_config(updates)
-    if any(k in updates for k in ("api_key", "model", "temperature", "top_p", "top_k", "max_tokens")):
-        _session.llm = make_llm_client()
+    if any(key in updates for key in ("api_key", "model", "temperature", "top_p", "top_k", "max_tokens")):
+        session.llm = make_llm_client()
     return {
         "status": "ok",
-        "llm_connected": _session.llm is not None,
+        "llm_connected": session.llm is not None,
         "model": get_user_config().get("model", ""),
     }
 
 
 @router.get("/api/models")
-async def list_models(q: str = "", provider: str = ""):
-    """Fetch and search available models from OpenRouter (with pricing)."""
-    cfg = get_user_config()
+async def list_models(q: str = "", provider: str = "") -> dict[str, object]:
+    """Fetch OpenRouter models only when a user deliberately configures it."""
+
+    config = get_user_config()
     try:
-        models = await LLMClient.fetch_models(cfg.get("api_key", ""))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not fetch models: {e}")
+        models = await LLMClient.fetch_models(config.get("api_key", ""))
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"Could not fetch models: {error}") from error
     if q:
-        q_lower = q.lower()
-        models = [m for m in models if q_lower in m["id"].lower() or q_lower in m["name"].lower()]
+        query = q.lower()
+        models = [model for model in models if query in model["id"].lower() or query in model["name"].lower()]
     if provider:
-        models = [m for m in models if m["provider"].lower() == provider.lower()]
+        models = [model for model in models if model["provider"].lower() == provider.lower()]
     return {"models": models[:150]}
 
 
 @router.get("/api/characters")
-async def list_characters():
-    """Return the character pool summary for setup screen preview."""
-    chars = load_all_characters()
-    return {
-        "characters": [
+async def list_characters() -> dict[str, object]:
+    """Public CCv3 summaries only; no case-assigned role or private truth."""
+
+    characters = []
+    for character_id in list_content_ids(CHARACTER_CARDS_DIR):
+        card = load_character_card(character_id)
+        extension = card.data.extensions.murder_mystery
+        characters.append(
             {
-                "id": c.id,
-                "name": c.name,
-                "description": c.description[:120] + "…",
-                "tags": c.tags,
-                "possible_roles": c.possible_roles,
-                "moral_alignment": c.moral_alignment,
+                "id": character_id,
+                "name": card.data.name,
+                "description": card.data.description,
+                "tags": list(card.data.tags),
+                "public_biography": extension.public_biography,
+                "appearance": extension.appearance,
+                "speaking_style": extension.speaking_style,
             }
-            for c in chars
-        ]
-    }
+        )
+    return {"characters": characters}

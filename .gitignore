@@ -7,6 +7,7 @@ build/work/
 venv/
 .venv/
 user_config.json
+saves/
 
 # Environment
 .env
