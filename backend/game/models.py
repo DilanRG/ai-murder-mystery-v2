@@ -645,6 +645,12 @@ class GameResult(StrictModel):
     accused_character_id: str
     correct_culprit: bool
     support_score: int = Field(ge=0, le=3)
+    submitted_method: str
+    submitted_motive: str
+    submitted_timeline: str
+    method_supported: bool = False
+    motive_supported: bool = False
+    timeline_supported: bool = False
     solved: bool
     selected_evidence_ids: list[str]
     selected_timeline_fact_ids: list[str]
