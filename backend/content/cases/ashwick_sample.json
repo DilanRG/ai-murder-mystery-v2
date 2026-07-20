@@ -1,0 +1,731 @@
+{
+  "schema_version": 1,
+  "id": "ashwick_sample",
+  "title": "The Ashwick Trust",
+  "seed": 2142,
+  "location_package_id": "ashwick_manor",
+  "investigation_start_minute": 1340,
+  "turn_minutes": 10,
+  "max_turns": 36,
+  "initial_player_room_id": "great_hall",
+  "character_ids": [
+    "lady_vivienne_ashford",
+    "edgar_blackwood",
+    "dr_celestine_moreau",
+    "inspector_elena_hayes",
+    "captain_marcus_drake",
+    "chef_armand_dubois",
+    "sabrina_voss",
+    "zara_okonkwo"
+  ],
+  "murder": {
+    "victim_id": "lady_vivienne_ashford",
+    "murderer_id": "edgar_blackwood",
+    "method": "blunt_force",
+    "means": "Edgar struck Lady Ashford once on the back of the head with the library fireplace poker.",
+    "weapon_id": "library_poker",
+    "motive": "Lady Ashford had found that Edgar falsified the Ashwick Family Preservation Trust and used its hidden exposure to conceal his own unauthorised loans. She summoned him to the library, intended to give the papers to Zara, and would have ended his career and exposed him to prosecution.",
+    "minute": 1302,
+    "room_id": "library",
+    "opportunity": "Edgar left the study at 21:32, reached the library at 21:42, killed Vivienne immediately, then reached the great hall at 21:52 and falsely placed himself in the study throughout the interval.",
+    "cover_story": "Edgar says he remained in the study reviewing estate papers from 21:30 until the alarm, and portrays the financial documents as Lady Ashford's own irregularities."
+  },
+  "facts": {
+    "fact_murderer_identity": {
+      "id": "fact_murderer_identity",
+      "category": "identity",
+      "statement": "Edgar Blackwood murdered Lady Vivienne Ashford.",
+      "related_character_ids": ["edgar_blackwood", "lady_vivienne_ashford"],
+      "related_evidence_ids": ["ev_edgar_cuff_fibre", "ev_inspector_arrival", "ev_zara_departure"]
+    },
+    "fact_financial_exposure": {
+      "id": "fact_financial_exposure",
+      "category": "motive",
+      "statement": "The Ashwick Family Preservation Trust contains unauthorised loans arranged by Edgar Blackwood; the resulting exposure would make both the diversion and Edgar's false certifications visible.",
+      "related_character_ids": ["edgar_blackwood", "lady_vivienne_ashford", "zara_okonkwo"],
+      "related_evidence_ids": ["ev_vivienne_memo", "ev_trust_draft", "ev_audit_fragments"]
+    },
+    "fact_vivienne_intent": {
+      "id": "fact_vivienne_intent",
+      "category": "motive",
+      "statement": "Lady Ashford intended to give Zara Okonkwo the trust papers after confronting Edgar in the library.",
+      "related_character_ids": ["lady_vivienne_ashford", "zara_okonkwo", "edgar_blackwood"],
+      "related_evidence_ids": ["ev_vivienne_memo", "ev_trust_draft"]
+    },
+    "fact_murder_method": {
+      "id": "fact_murder_method",
+      "category": "means",
+      "statement": "Lady Ashford died from one deliberate blunt strike to the back of the head.",
+      "related_character_ids": ["lady_vivienne_ashford", "edgar_blackwood", "dr_celestine_moreau"],
+      "related_evidence_ids": ["ev_library_poker", "ev_medical_assessment", "ev_fireplace_trace"]
+    },
+    "fact_weapon": {
+      "id": "fact_weapon",
+      "category": "means",
+      "statement": "The iron fireplace poker from the library was the murder weapon.",
+      "related_character_ids": ["edgar_blackwood", "lady_vivienne_ashford"],
+      "related_evidence_ids": ["ev_library_poker", "ev_fireplace_trace"]
+    },
+    "fact_murder_time": {
+      "id": "fact_murder_time",
+      "category": "timeline",
+      "statement": "The fatal blow was struck at 21:42, during the brief interval after Vivienne reached the library and before Edgar returned to the great hall.",
+      "related_character_ids": ["lady_vivienne_ashford", "edgar_blackwood", "dr_celestine_moreau"],
+      "related_evidence_ids": ["ev_library_clock", "ev_medical_assessment", "ev_inspector_arrival"]
+    },
+    "fact_vivienne_library_arrival": {
+      "id": "fact_vivienne_library_arrival",
+      "category": "timeline",
+      "statement": "Lady Ashford left the dining room at 21:20 and, via the great hall, reached the library at 21:40 for a private appointment.",
+      "related_character_ids": ["lady_vivienne_ashford", "chef_armand_dubois"],
+      "related_evidence_ids": ["ev_vivienne_memo"]
+    },
+    "fact_edgar_left_study": {
+      "id": "fact_edgar_left_study",
+      "category": "opportunity",
+      "statement": "Edgar Blackwood left the study at 21:32 and had the ten minutes needed to reach the library at 21:42.",
+      "related_character_ids": ["edgar_blackwood", "zara_okonkwo"],
+      "related_evidence_ids": ["ev_zara_departure", "ev_trust_draft"]
+    },
+    "fact_edgar_library_presence": {
+      "id": "fact_edgar_library_presence",
+      "category": "opportunity",
+      "statement": "Edgar was in the library during the confrontation and left a charcoal cuff fibre on the writing desk.",
+      "related_character_ids": ["edgar_blackwood", "lady_vivienne_ashford"],
+      "related_evidence_ids": ["ev_edgar_cuff_fibre", "ev_library_poker"]
+    },
+    "fact_edgar_hall_arrival": {
+      "id": "fact_edgar_hall_arrival",
+      "category": "opportunity",
+      "statement": "Inspector Hayes saw Edgar enter the great hall from the library side at 21:52, ten minutes after the fatal blow.",
+      "related_character_ids": ["edgar_blackwood", "inspector_elena_hayes"],
+      "related_evidence_ids": ["ev_inspector_arrival", "ev_library_clock"]
+    },
+    "fact_discovery": {
+      "id": "fact_discovery",
+      "category": "timeline",
+      "statement": "Dr. Celestine Moreau entered the library and found Lady Ashford dead at 22:00.",
+      "related_character_ids": ["dr_celestine_moreau", "lady_vivienne_ashford"],
+      "related_evidence_ids": ["ev_medical_assessment"]
+    },
+    "fact_sabrina_earring": {
+      "id": "fact_sabrina_earring",
+      "category": "secret",
+      "statement": "Sabrina Voss lost an earring in the library during a private, nonviolent conversation with Lady Ashford at 20:50, before dinner.",
+      "related_character_ids": ["sabrina_voss", "lady_vivienne_ashford"],
+      "related_evidence_ids": ["ev_sabrina_earring"]
+    },
+    "fact_captain_threat": {
+      "id": "fact_captain_threat",
+      "category": "secret",
+      "statement": "Captain Drake wrote an angry letter after Lady Ashford threatened to expose his old naval cover-up, but he did not act on it and remained in the drawing room during the murder window.",
+      "related_character_ids": ["captain_marcus_drake", "lady_vivienne_ashford", "sabrina_voss"],
+      "related_evidence_ids": ["ev_captain_letter", "ev_sabrina_captain_alibi"]
+    },
+    "fact_wine_rag": {
+      "id": "fact_wine_rag",
+      "category": "alibi",
+      "statement": "The red stain on a kitchen cloth is port spilled during dinner service, not blood; Chef Dubois was dealing with it in the kitchen during the murder window.",
+      "related_character_ids": ["chef_armand_dubois"],
+      "related_evidence_ids": ["ev_port_rag"]
+    }
+  },
+  "timeline": [
+    {
+      "id": "timeline_dinner_ends",
+      "minute": 1280,
+      "event_type": "schedule",
+      "room_id": "dining_room",
+      "actor_ids": ["lady_vivienne_ashford", "edgar_blackwood", "dr_celestine_moreau", "inspector_elena_hayes", "captain_marcus_drake", "chef_armand_dubois", "sabrina_voss", "zara_okonkwo"],
+      "summary": "Dinner ends. Lady Ashford asks Edgar to meet her privately, while the remaining guests disperse through the manor.",
+      "fact_ids": ["fact_vivienne_library_arrival"],
+      "observed_by": ["chef_armand_dubois", "sabrina_voss"]
+    },
+    {
+      "id": "timeline_vivienne_departs",
+      "minute": 1280,
+      "event_type": "schedule",
+      "room_id": "dining_room",
+      "actor_ids": ["lady_vivienne_ashford"],
+      "summary": "Vivienne leaves the dining room at 21:20 and takes the twenty-minute route through the great hall to the library.",
+      "fact_ids": ["fact_vivienne_library_arrival"],
+      "observed_by": ["chef_armand_dubois"]
+    },
+    {
+      "id": "timeline_zara_study",
+      "minute": 1290,
+      "event_type": "schedule",
+      "room_id": "study",
+      "actor_ids": ["zara_okonkwo", "edgar_blackwood"],
+      "summary": "Zara works in the study while Edgar pretends to review estate papers nearby.",
+      "fact_ids": ["fact_financial_exposure"],
+      "observed_by": ["zara_okonkwo"]
+    },
+    {
+      "id": "timeline_edgar_leaves_study",
+      "minute": 1292,
+      "event_type": "observation",
+      "room_id": "study",
+      "actor_ids": ["edgar_blackwood", "zara_okonkwo"],
+      "summary": "Zara sees Edgar leave the study at 21:32 with no papers in his hands. The listed library route takes ten minutes.",
+      "fact_ids": ["fact_edgar_left_study"],
+      "observed_by": ["zara_okonkwo"]
+    },
+    {
+      "id": "timeline_vivienne_arrives_library",
+      "minute": 1300,
+      "event_type": "schedule",
+      "room_id": "library",
+      "actor_ids": ["lady_vivienne_ashford"],
+      "summary": "Vivienne reaches the library at 21:40 and places her memorandum on the writing desk.",
+      "fact_ids": ["fact_vivienne_library_arrival", "fact_vivienne_intent"],
+      "observed_by": ["lady_vivienne_ashford"]
+    },
+    {
+      "id": "timeline_murder",
+      "minute": 1302,
+      "event_type": "murder",
+      "room_id": "library",
+      "actor_ids": ["edgar_blackwood", "lady_vivienne_ashford"],
+      "summary": "At 21:42 Edgar confronts Vivienne over the falsified trust, strikes her once with the library poker, wipes it, and leaves it among the fireplace tools.",
+      "fact_ids": ["fact_murderer_identity", "fact_murder_method", "fact_weapon", "fact_murder_time", "fact_edgar_library_presence"],
+      "observed_by": ["edgar_blackwood"]
+    },
+    {
+      "id": "timeline_edgar_hall_arrival",
+      "minute": 1312,
+      "event_type": "observation",
+      "room_id": "great_hall",
+      "actor_ids": ["edgar_blackwood", "inspector_elena_hayes"],
+      "summary": "At 21:52, exactly ten minutes after the murder, Inspector Hayes sees Edgar arrive in the great hall from the library side, composing himself before he notices her.",
+      "fact_ids": ["fact_edgar_hall_arrival"],
+      "observed_by": ["inspector_elena_hayes"]
+    },
+    {
+      "id": "timeline_discovery",
+      "minute": 1320,
+      "event_type": "discovery",
+      "room_id": "library",
+      "actor_ids": ["dr_celestine_moreau", "lady_vivienne_ashford"],
+      "summary": "At 22:00 Dr. Moreau reaches the library, finds Vivienne's body, and raises the alarm.",
+      "fact_ids": ["fact_discovery", "fact_murder_method"],
+      "observed_by": ["dr_celestine_moreau"]
+    },
+    {
+      "id": "timeline_meeting",
+      "minute": 1340,
+      "event_type": "meeting",
+      "room_id": "great_hall",
+      "actor_ids": ["edgar_blackwood", "dr_celestine_moreau", "inspector_elena_hayes", "captain_marcus_drake", "chef_armand_dubois", "sabrina_voss", "zara_okonkwo"],
+      "summary": "At 22:20, after the alarm has travelled through the house, the survivors assemble in the great hall. The flooded causeway makes immediate outside help impossible.",
+      "fact_ids": ["fact_discovery"],
+      "observed_by": ["edgar_blackwood", "dr_celestine_moreau", "inspector_elena_hayes", "captain_marcus_drake", "chef_armand_dubois", "sabrina_voss", "zara_okonkwo"]
+    }
+  ],
+  "overlays": {
+    "lady_vivienne_ashford": {
+      "character_id": "lady_vivienne_ashford",
+      "role": "victim",
+      "starting_room_id": "library",
+      "public_relationship_to_victim": "Self; mistress of Ashwick Manor.",
+      "private_motive": "She intended to protect the estate by exposing the falsified trust before Edgar could move the remaining money.",
+      "secrets": ["She knew the trust was compromised and had arranged to give Zara the papers after confronting Edgar."],
+      "schedule": [
+        {"start_minute": 1260, "end_minute": 1280, "room_id": "dining_room", "activity": "Finishes dinner and summons Edgar to a private meeting.", "witnessed_by": ["chef_armand_dubois", "sabrina_voss"]},
+        {"start_minute": 1300, "end_minute": 1303, "room_id": "library", "activity": "Waits at the writing desk with the trust memorandum.", "witnessed_by": []}
+      ],
+      "observations": [
+        {"id": "obs_vivienne_trust", "minute": 1300, "room_id": "library", "summary": "Vivienne rereads the memorandum showing Edgar's unauthorised trust loans and prepares it for Zara.", "fact_ids": ["fact_financial_exposure", "fact_vivienne_intent"], "certainty": 1.0},
+        {"id": "obs_vivienne_murder", "minute": 1302, "room_id": "library", "summary": "Edgar arrives for the confrontation and kills Vivienne with the fireplace poker.", "fact_ids": ["fact_murderer_identity", "fact_murder_method", "fact_weapon", "fact_murder_time"], "certainty": 1.0}
+      ],
+      "alibi_claim": "Not applicable; Lady Ashford is the victim.",
+      "alibi_type": "true",
+      "supporting_evidence_ids": ["ev_vivienne_memo"],
+      "goals": ["Preserve the truth of the exposure through the documents she left behind."],
+      "hides_fact_ids": [],
+      "lies": [],
+      "relationships": [
+        {"target_character_id": "edgar_blackwood", "public_summary": "Long-serving family solicitor.", "private_summary": "She had concluded he had falsified the trust and intended to remove him.", "affinity": -80},
+        {"target_character_id": "zara_okonkwo", "public_summary": "A guest with an interest in estate finance.", "private_summary": "Vivienne selected Zara as a secure recipient for the evidence.", "affinity": 30}
+      ],
+      "initial_emotional_state": "deceased",
+      "initial_suspicions": {"edgar_blackwood": 100}
+    },
+    "edgar_blackwood": {
+      "character_id": "edgar_blackwood",
+      "role": "murderer",
+      "starting_room_id": "study",
+      "public_relationship_to_victim": "Lady Ashford's long-serving solicitor and trustee.",
+      "private_motive": "Vivienne's discovery of the falsified trust would expose Edgar's unauthorised loans and his false professional certifications.",
+      "secrets": ["He routed unauthorised loans through the Ashwick trust.", "He killed Vivienne at 21:42 with the library poker.", "He returned to the great hall at 21:52 and constructed a study alibi."],
+      "schedule": [
+        {"start_minute": 1260, "end_minute": 1292, "room_id": "study", "activity": "Pretends to review estate papers while monitoring Zara's work.", "witnessed_by": ["zara_okonkwo"]},
+        {"start_minute": 1302, "end_minute": 1303, "room_id": "library", "activity": "Confronts Vivienne, kills her, and returns the poker to the fireplace tools.", "witnessed_by": []},
+        {"start_minute": 1312, "end_minute": 1340, "room_id": "great_hall", "activity": "Waits for the alarm while claiming to have remained in the study.", "witnessed_by": ["inspector_elena_hayes"]}
+      ],
+      "observations": [
+        {"id": "obs_edgar_notice", "minute": 1292, "room_id": "study", "summary": "Edgar sees the trust papers and understands Vivienne will give them to Zara unless he stops her.", "fact_ids": ["fact_financial_exposure", "fact_vivienne_intent"], "certainty": 1.0},
+        {"id": "obs_edgar_murder", "minute": 1302, "room_id": "library", "summary": "Edgar kills Vivienne with the poker and wipes the weapon before leaving.", "fact_ids": ["fact_murderer_identity", "fact_murder_method", "fact_weapon", "fact_murder_time", "fact_edgar_library_presence"], "certainty": 1.0},
+        {"id": "obs_edgar_hayes", "minute": 1312, "room_id": "great_hall", "summary": "Edgar notices Inspector Hayes in the hall after arriving from the library.", "fact_ids": ["fact_edgar_hall_arrival"], "certainty": 1.0}
+      ],
+      "alibi_claim": "I remained in the study reviewing estate papers from 21:30 until the alarm.",
+      "alibi_type": "false",
+      "supporting_evidence_ids": [],
+      "goals": ["Keep the trust documents from being connected to him.", "Make the murder look like an estate scandal with several plausible suspects.", "Discourage Zara from sharing her audit."],
+      "hides_fact_ids": ["fact_murderer_identity", "fact_financial_exposure", "fact_vivienne_intent", "fact_murder_method", "fact_weapon", "fact_murder_time", "fact_edgar_left_study", "fact_edgar_library_presence", "fact_edgar_hall_arrival"],
+      "lies": [
+        {"id": "lie_edgar_study", "topic": "alibi", "claim": "I was in the study continuously from 21:30 until the alarm.", "contradicts_fact_ids": ["fact_edgar_left_study", "fact_edgar_hall_arrival"], "reason": "He needs to erase his ten-minute trip to the library and return to the great hall."},
+        {"id": "lie_edgar_trust", "topic": "trust", "claim": "Any irregularity in the Ashwick trust was Lady Ashford's own discretionary decision.", "contradicts_fact_ids": ["fact_financial_exposure", "fact_vivienne_intent"], "reason": "He wants financial suspicion to settle on the victim rather than his certifications."}
+      ],
+      "relationships": [
+        {"target_character_id": "lady_vivienne_ashford", "public_summary": "Professional adviser and client.", "private_summary": "Vivienne had become an existential threat to him.", "affinity": -95},
+        {"target_character_id": "zara_okonkwo", "public_summary": "A visiting financial investigator.", "private_summary": "Her audit could corroborate every part of Vivienne's accusation.", "affinity": -75}
+      ],
+      "initial_emotional_state": "controlled and watchful",
+      "initial_suspicions": {"zara_okonkwo": 80, "inspector_elena_hayes": 60}
+    },
+    "dr_celestine_moreau": {
+      "character_id": "dr_celestine_moreau",
+      "role": "innocent",
+      "starting_room_id": "library",
+      "public_relationship_to_victim": "A guest invited for her medical expertise.",
+      "private_motive": "She has no reason to harm Vivienne; she wants the scene preserved and the time of death stated accurately.",
+      "secrets": ["She delayed announcing a preliminary time of death until she could phrase it with medical caution."],
+      "schedule": [
+        {"start_minute": 1260, "end_minute": 1310, "room_id": "great_hall", "activity": "Reads by the hall fire and notices the house settling after dinner.", "witnessed_by": ["inspector_elena_hayes"]},
+        {"start_minute": 1320, "end_minute": 1330, "room_id": "library", "activity": "Finds the body at 22:00, raises the alarm, and preserves the immediate scene before walking to the meeting.", "witnessed_by": []}
+      ],
+      "observations": [
+        {"id": "obs_moreau_body", "minute": 1320, "room_id": "library", "summary": "Moreau finds a single occipital wound, the warm body, and no signs of a prolonged struggle; her preliminary estimate places the blow at about 21:42, within a few minutes.", "fact_ids": ["fact_discovery", "fact_murder_method", "fact_murder_time"], "certainty": 0.9}
+      ],
+      "alibi_claim": "I was in the great hall until I left at 21:50 to look for Lady Ashford, then I found her in the library at 22:00.",
+      "alibi_type": "true",
+      "supporting_evidence_ids": ["ev_medical_assessment"],
+      "goals": ["Protect the scene.", "Give the player medically defensible conclusions rather than dramatic certainty."],
+      "hides_fact_ids": [],
+      "lies": [],
+      "relationships": [
+        {"target_character_id": "inspector_elena_hayes", "public_summary": "Professional acquaintance.", "private_summary": "She trusts Hayes to keep the scene orderly but insists on speaking only to what she observed.", "affinity": 35}
+      ],
+      "initial_emotional_state": "clinically focused",
+      "initial_suspicions": {"edgar_blackwood": 20}
+    },
+    "inspector_elena_hayes": {
+      "character_id": "inspector_elena_hayes",
+      "role": "innocent",
+      "starting_room_id": "great_hall",
+      "public_relationship_to_victim": "A guest and retired detective known to Lady Ashford.",
+      "private_motive": "She has no motive to kill Vivienne and wants a defensible timeline before naming any suspect.",
+      "secrets": ["She noticed Edgar's composed arrival at 21:52 but initially keeps the detail back until asked directly."],
+      "schedule": [
+        {"start_minute": 1260, "end_minute": 1340, "room_id": "great_hall", "activity": "Remains in the hall, listening to the storm and observing anyone who enters.", "witnessed_by": ["dr_celestine_moreau", "edgar_blackwood"]}
+      ],
+      "observations": [
+        {"id": "obs_hayes_edgar", "minute": 1312, "room_id": "great_hall", "summary": "Hayes sees Edgar arrive from the library side at 21:52, not from the study, and notes the soot at one cuff before he smooths it away.", "fact_ids": ["fact_edgar_hall_arrival"], "certainty": 1.0}
+      ],
+      "alibi_claim": "I remained in the great hall throughout the relevant period.",
+      "alibi_type": "true",
+      "supporting_evidence_ids": ["ev_inspector_arrival"],
+      "goals": ["Build the timeline from observations.", "Avoid contaminating the player with an unsupported accusation."],
+      "hides_fact_ids": [],
+      "lies": [],
+      "relationships": [
+        {"target_character_id": "lady_vivienne_ashford", "public_summary": "An old acquaintance.", "private_summary": "Hayes respected Vivienne's resilience but knew little of the trust.", "affinity": 20},
+        {"target_character_id": "edgar_blackwood", "public_summary": "The household solicitor.", "private_summary": "His arrival from the library makes his polished alibi immediately suspect.", "affinity": -45}
+      ],
+      "initial_emotional_state": "alert and restrained",
+      "initial_suspicions": {"edgar_blackwood": 55}
+    },
+    "captain_marcus_drake": {
+      "character_id": "captain_marcus_drake",
+      "role": "innocent",
+      "starting_room_id": "drawing_room",
+      "public_relationship_to_victim": "A longtime family friend with a volatile history.",
+      "private_motive": "Vivienne had leverage over his naval cover-up, but he did not intend to harm her and could not reach the library during the murder window.",
+      "secrets": ["He wrote an angry unsent letter to Vivienne about the blackmail.", "He is ashamed that he burned part of the letter in the drawing-room grate."],
+      "schedule": [
+        {"start_minute": 1260, "end_minute": 1300, "room_id": "drawing_room", "activity": "Drinks and argues quietly with Sabrina about Vivienne's cruelty.", "witnessed_by": ["sabrina_voss"]},
+        {"start_minute": 1300, "end_minute": 1330, "room_id": "drawing_room", "activity": "Remains in the drawing room, drinking alone after Sabrina leaves, until the alarm sends him to the meeting.", "witnessed_by": []}
+      ],
+      "observations": [
+        {"id": "obs_drake_sabrina", "minute": 1290, "room_id": "drawing_room", "summary": "Drake sees Sabrina in the drawing room until 21:40 and learns that her old earring is missing.", "fact_ids": ["fact_sabrina_earring"], "certainty": 0.9}
+      ],
+      "alibi_claim": "I was in the drawing room after dinner; Sabrina was with me until 21:40, then I stayed there alone.",
+      "alibi_type": "incomplete",
+      "supporting_evidence_ids": ["ev_sabrina_captain_alibi"],
+      "goals": ["Keep his naval disgrace out of the inquiry.", "Protect Sabrina from being blamed for an old private quarrel."],
+      "hides_fact_ids": ["fact_captain_threat"],
+      "lies": [
+        {"id": "lie_drake_letter", "topic": "letter", "claim": "I never threatened Lady Ashford.", "contradicts_fact_ids": ["fact_captain_threat"], "reason": "He fears the letter will be read as proof of murderous intent."}
+      ],
+      "relationships": [
+        {"target_character_id": "lady_vivienne_ashford", "public_summary": "Old friend with frequent quarrels.", "private_summary": "She knew enough about his naval failure to wound him.", "affinity": -30},
+        {"target_character_id": "sabrina_voss", "public_summary": "Fellow guest.", "private_summary": "He believes she was frightened of Vivienne, not violent toward her.", "affinity": 15}
+      ],
+      "initial_emotional_state": "angry and grief-stricken",
+      "initial_suspicions": {"edgar_blackwood": 15, "sabrina_voss": 25}
+    },
+    "chef_armand_dubois": {
+      "character_id": "chef_armand_dubois",
+      "role": "innocent",
+      "starting_room_id": "kitchen",
+      "public_relationship_to_victim": "Ashwick's head chef and employee.",
+      "private_motive": "He resented estate exploitation but had no wish to harm Vivienne; he was protecting the kitchen staff from scrutiny.",
+      "secrets": ["He has documented staff underpayments.", "He initially withholds that the stained cloth in the bin is from spilled port because he fears a false accusation against his staff."],
+      "schedule": [
+        {"start_minute": 1260, "end_minute": 1320, "room_id": "kitchen", "activity": "Supervises cleanup, handles the spilled port cloth, and keeps his staff together until the alarm sends him to the meeting.", "witnessed_by": []}
+      ],
+      "observations": [
+        {"id": "obs_dubois_vivienne", "minute": 1280, "room_id": "dining_room", "summary": "Dubois sees Vivienne leave dinner at 21:20 looking composed and carrying a folded memorandum.", "fact_ids": ["fact_vivienne_library_arrival"], "certainty": 0.9},
+        {"id": "obs_dubois_rag", "minute": 1295, "room_id": "kitchen", "summary": "Dubois knows the red-stained cloth in the kitchen bin is soaked with port from dinner service, not blood.", "fact_ids": ["fact_wine_rag"], "certainty": 1.0}
+      ],
+      "alibi_claim": "I was in the kitchen managing cleanup from dinner until the alarm.",
+      "alibi_type": "true",
+      "supporting_evidence_ids": ["ev_port_rag"],
+      "goals": ["Protect his staff.", "Tell the truth once the player distinguishes the port cloth from evidence of violence."],
+      "hides_fact_ids": ["fact_wine_rag"],
+      "lies": [
+        {"id": "lie_dubois_rag", "topic": "kitchen cloth", "claim": "I do not know how that stained cloth reached the bin.", "contradicts_fact_ids": ["fact_wine_rag"], "reason": "He worries an investigation will burden the kitchen staff."}
+      ],
+      "relationships": [
+        {"target_character_id": "lady_vivienne_ashford", "public_summary": "Employer and employee.", "private_summary": "He resented the estate's treatment of staff but did not seek revenge on Vivienne.", "affinity": -15}
+      ],
+      "initial_emotional_state": "protective and defensive",
+      "initial_suspicions": {"captain_marcus_drake": 25}
+    },
+    "sabrina_voss": {
+      "character_id": "sabrina_voss",
+      "role": "innocent",
+      "starting_room_id": "conservatory",
+      "public_relationship_to_victim": "A guest whose past dealings with Lady Ashford were strained.",
+      "private_motive": "Vivienne possessed embarrassing material about Sabrina, but Sabrina's fear was of exposure rather than a plan to kill.",
+      "secrets": ["She lost an earring in the library during a 20:50 conversation with Vivienne.", "She had begged Vivienne not to revive an old blackmail threat."],
+      "schedule": [
+        {"start_minute": 1245, "end_minute": 1255, "room_id": "library", "activity": "Has a private pre-dinner conversation with Vivienne and loses an earring.", "witnessed_by": ["lady_vivienne_ashford"]},
+        {"start_minute": 1260, "end_minute": 1300, "room_id": "drawing_room", "activity": "Sits with Captain Drake after dinner.", "witnessed_by": ["captain_marcus_drake"]},
+        {"start_minute": 1310, "end_minute": 1320, "room_id": "conservatory", "activity": "Sits alone in the conservatory after the ten-minute walk from the drawing room, until the alarm sends her to the meeting.", "witnessed_by": []}
+      ],
+      "observations": [
+        {"id": "obs_sabrina_earring", "minute": 1250, "room_id": "library", "summary": "During a private pre-dinner conversation, Sabrina loses an earring beside the library desk and leaves before dinner begins.", "fact_ids": ["fact_sabrina_earring"], "certainty": 1.0},
+        {"id": "obs_sabrina_drake", "minute": 1290, "room_id": "drawing_room", "summary": "Sabrina is with Drake in the drawing room until 21:40; she knows his anger was about an old threat, not the murder.", "fact_ids": ["fact_captain_threat"], "certainty": 0.8}
+      ],
+      "alibi_claim": "I was with Captain Drake in the drawing room until 21:40, then alone in the conservatory before the alarm.",
+      "alibi_type": "incomplete",
+      "supporting_evidence_ids": ["ev_sabrina_captain_alibi"],
+      "goals": ["Keep the blackmail episode private.", "Explain the earring if it is found before it becomes a false solution."],
+      "hides_fact_ids": ["fact_sabrina_earring"],
+      "lies": [
+        {"id": "lie_sabrina_earring", "topic": "earring", "claim": "I have not been in the library tonight.", "contradicts_fact_ids": ["fact_sabrina_earring"], "reason": "She fears the old blackmail conversation will ruin her."}
+      ],
+      "relationships": [
+        {"target_character_id": "lady_vivienne_ashford", "public_summary": "An uncomfortable social acquaintance.", "private_summary": "Vivienne held compromising material over her, but Sabrina had asked for mercy rather than threatened violence.", "affinity": -55},
+        {"target_character_id": "captain_marcus_drake", "public_summary": "Fellow guest.", "private_summary": "He can confirm her location until 21:40.", "affinity": 15}
+      ],
+      "initial_emotional_state": "frightened beneath a performed composure",
+      "initial_suspicions": {"captain_marcus_drake": 20, "edgar_blackwood": 10}
+    },
+    "zara_okonkwo": {
+      "character_id": "zara_okonkwo",
+      "role": "innocent",
+      "starting_room_id": "study",
+      "public_relationship_to_victim": "A financial investigator invited to review estate affairs.",
+      "private_motive": "She wants the trust records preserved for her investigation; Vivienne was becoming a cooperating witness, not an obstacle.",
+      "secrets": ["Her audit had identified the Ashwick trust exposure before Vivienne approached her.", "She saw Edgar leave the study at 21:32 and does not volunteer it until she decides the player is reliable."],
+      "schedule": [
+        {"start_minute": 1260, "end_minute": 1320, "room_id": "study", "activity": "Reviews trust records while Edgar works nearby, then watches him leave at 21:32 and remains at the desk until the alarm.", "witnessed_by": ["edgar_blackwood"]}
+      ],
+      "observations": [
+        {"id": "obs_zara_audit", "minute": 1290, "room_id": "study", "summary": "Zara matches the trust's unauthorised loans to Edgar's certifications and understands why the file is dangerous to him.", "fact_ids": ["fact_financial_exposure"], "certainty": 0.95},
+        {"id": "obs_zara_edgar", "minute": 1292, "room_id": "study", "summary": "Zara sees Edgar leave the study at 21:32 without any papers. The library is ten minutes away by the listed door.", "fact_ids": ["fact_edgar_left_study"], "certainty": 1.0}
+      ],
+      "alibi_claim": "I was reviewing the trust in the study until 21:40, then answered the alarm and reached the great hall at 22:20.",
+      "alibi_type": "true",
+      "supporting_evidence_ids": ["ev_zara_departure", "ev_audit_fragments"],
+      "goals": ["Secure the trust record.", "Test whether the player can use financial evidence without prematurely exposing her wider inquiry."],
+      "hides_fact_ids": ["fact_financial_exposure", "fact_edgar_left_study"],
+      "lies": [
+        {"id": "lie_zara_scope", "topic": "audit", "claim": "My interest in Ashwick is routine compliance work.", "contradicts_fact_ids": ["fact_financial_exposure"], "reason": "She cannot disclose the full external investigation before the evidence is secure."}
+      ],
+      "relationships": [
+        {"target_character_id": "lady_vivienne_ashford", "public_summary": "Professional contact.", "private_summary": "Vivienne had become a prospective source against Edgar.", "affinity": 35},
+        {"target_character_id": "edgar_blackwood", "public_summary": "Opposing professional interests.", "private_summary": "His departure time and financial certifications make him her primary concern.", "affinity": -70}
+      ],
+      "initial_emotional_state": "controlled and privately urgent",
+      "initial_suspicions": {"edgar_blackwood": 70}
+    }
+  },
+  "evidence": {
+    "ev_library_poker": {
+      "id": "ev_library_poker",
+      "name": "Wiped library poker",
+      "kind": "physical",
+      "description": "The iron fireplace poker has a wiped dark residue in its square head and a fresh bend consistent with one heavy impact.",
+      "initial_slot_id": "slot_library_fireplace",
+      "fact_ids": ["fact_murder_method", "fact_weapon"],
+      "implicates_character_ids": [],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["search:library_fireplace", "examine:body"],
+      "difficulty": 2,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "means_forensics"
+    },
+    "ev_fireplace_trace": {
+      "id": "ev_fireplace_trace",
+      "name": "Fresh soot and damp ash disturbance",
+      "kind": "physical",
+      "description": "The fireplace tools were recently rearranged; damp ash on the poker's rack contains a tiny charcoal wool fibre matching the fabric caught at the writing desk.",
+      "initial_slot_id": "slot_library_fireplace",
+      "fact_ids": ["fact_weapon", "fact_edgar_library_presence"],
+      "implicates_character_ids": ["edgar_blackwood"],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["search:library_fireplace"],
+      "difficulty": 2,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "means_forensics"
+    },
+    "ev_medical_assessment": {
+      "id": "ev_medical_assessment",
+      "name": "Dr. Moreau's preliminary assessment",
+      "kind": "testimonial",
+      "description": "Moreau can explain that a single blunt blow caused death and that the body's condition places it at approximately 21:42, within a few minutes.",
+      "initial_slot_id": null,
+      "fact_ids": ["fact_discovery", "fact_murder_method", "fact_murder_time"],
+      "implicates_character_ids": [],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["interview:dr_celestine_moreau", "examine:body"],
+      "difficulty": 1,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "means_forensics"
+    },
+    "ev_library_clock": {
+      "id": "ev_library_clock",
+      "name": "Stopped mantel clock",
+      "kind": "physical",
+      "description": "The mantel clock's cracked glass and stopped hands read 21:42; the position of the nearby chair suggests it was jolted during the single blow.",
+      "initial_slot_id": "slot_library_clock",
+      "fact_ids": ["fact_murder_time"],
+      "implicates_character_ids": [],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["search:library_clock", "examine:body"],
+      "difficulty": 1,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "timeline_opportunity"
+    },
+    "ev_edgar_cuff_fibre": {
+      "id": "ev_edgar_cuff_fibre",
+      "name": "Charcoal cuff fibre at the writing desk",
+      "kind": "physical",
+      "description": "A charcoal wool fibre is caught beneath the library desk blotter. It matches the frayed cuff of Edgar's charcoal suit and the trace in the fireplace ash.",
+      "initial_slot_id": "slot_library_desk",
+      "fact_ids": ["fact_edgar_library_presence"],
+      "implicates_character_ids": ["edgar_blackwood"],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["search:library_desk", "examine:edgar_blackwood"],
+      "difficulty": 2,
+      "manipulable": true,
+      "essential": false,
+      "redundancy_group": "timeline_opportunity"
+    },
+    "ev_inspector_arrival": {
+      "id": "ev_inspector_arrival",
+      "name": "Hayes's hallway observation",
+      "kind": "testimonial",
+      "description": "Inspector Hayes saw Edgar enter the great hall from the library side at 21:52, despite his claim that he never left the study.",
+      "initial_slot_id": null,
+      "fact_ids": ["fact_edgar_hall_arrival"],
+      "implicates_character_ids": ["edgar_blackwood"],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["interview:inspector_elena_hayes"],
+      "difficulty": 1,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "timeline_opportunity"
+    },
+    "ev_zara_departure": {
+      "id": "ev_zara_departure",
+      "name": "Zara's study observation",
+      "kind": "testimonial",
+      "description": "Zara saw Edgar leave the study at 21:32 empty-handed. The direct library route requires ten minutes, placing him there at 21:42.",
+      "initial_slot_id": null,
+      "fact_ids": ["fact_edgar_left_study"],
+      "implicates_character_ids": ["edgar_blackwood"],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["interview:zara_okonkwo"],
+      "difficulty": 2,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "timeline_opportunity"
+    },
+    "ev_vivienne_memo": {
+      "id": "ev_vivienne_memo",
+      "name": "Vivienne's memorandum to Zara",
+      "kind": "documentary",
+      "description": "A memorandum on Lady Ashford's stationery says she will give Zara the trust papers after confronting Edgar tonight; it names unauthorised loans concealed by his certifications.",
+      "initial_slot_id": "slot_library_desk",
+      "fact_ids": ["fact_financial_exposure", "fact_vivienne_intent"],
+      "implicates_character_ids": ["edgar_blackwood"],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["search:library_desk"],
+      "difficulty": 2,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "motive_financial"
+    },
+    "ev_trust_draft": {
+      "id": "ev_trust_draft",
+      "name": "Corrected trust schedule",
+      "kind": "documentary",
+      "description": "A draft trust schedule beneath the study blotter bears Edgar's handwritten corrections beside loans omitted from the filed version.",
+      "initial_slot_id": "slot_study_desk",
+      "fact_ids": ["fact_financial_exposure"],
+      "implicates_character_ids": ["edgar_blackwood"],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["search:study_desk", "interview:zara_okonkwo"],
+      "difficulty": 2,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "motive_financial"
+    },
+    "ev_audit_fragments": {
+      "id": "ev_audit_fragments",
+      "name": "Reconstructed audit fragments",
+      "kind": "documentary",
+      "description": "Discarded financial pages reconstruct to show the Ashwick trust's hidden exposure and Edgar's certification code beside every unauthorised loan.",
+      "initial_slot_id": "slot_study_waste",
+      "fact_ids": ["fact_financial_exposure"],
+      "implicates_character_ids": ["edgar_blackwood"],
+      "exonerates_character_ids": [],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["search:study_wastebasket", "interview:zara_okonkwo"],
+      "difficulty": 2,
+      "manipulable": true,
+      "essential": false,
+      "redundancy_group": "motive_financial"
+    },
+    "ev_sabrina_earring": {
+      "id": "ev_sabrina_earring",
+      "name": "Sabrina's pearl earring",
+      "kind": "physical",
+      "description": "A pearl earring matching Sabrina Voss's remaining earring lies behind the library desk.",
+      "initial_slot_id": "slot_library_desk",
+      "fact_ids": ["fact_sabrina_earring"],
+      "implicates_character_ids": ["sabrina_voss"],
+      "exonerates_character_ids": [],
+      "is_red_herring": true,
+      "red_herring_explanation": "Sabrina lost it during a tense but nonviolent private conversation at 20:50, before dinner and well before the murder window.",
+      "discoverable_via": ["search:library_desk", "interview:sabrina_voss"],
+      "difficulty": 1,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "red_herring_sabrina"
+    },
+    "ev_captain_letter": {
+      "id": "ev_captain_letter",
+      "name": "Charred threatening letter",
+      "kind": "documentary",
+      "description": "A partially burned letter set beneath a decanter on the drawing-room drinks trolley has Captain Drake's handwriting and furious language about Vivienne's threat to expose him.",
+      "initial_slot_id": "slot_drawing_trolley",
+      "fact_ids": ["fact_captain_threat"],
+      "implicates_character_ids": ["captain_marcus_drake"],
+      "exonerates_character_ids": [],
+      "is_red_herring": true,
+      "red_herring_explanation": "The letter is genuine but predates the murder. Sabrina confirms Drake stayed in the drawing room through the critical interval, and the route to the library takes twenty minutes.",
+      "discoverable_via": ["search:drawing_drinks_trolley", "interview:captain_marcus_drake"],
+      "difficulty": 2,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "red_herring_drake"
+    },
+    "ev_port_rag": {
+      "id": "ev_port_rag",
+      "name": "Port-stained kitchen cloth",
+      "kind": "physical",
+      "description": "A red-stained cloth in the kitchen bin initially resembles bloodstained fabric.",
+      "initial_slot_id": "slot_kitchen_bin",
+      "fact_ids": ["fact_wine_rag"],
+      "implicates_character_ids": ["chef_armand_dubois"],
+      "exonerates_character_ids": ["chef_armand_dubois"],
+      "is_red_herring": true,
+      "red_herring_explanation": "The stain is port spilled during dinner service. Chef Dubois can identify it and his kitchen schedule explains the cloth completely.",
+      "discoverable_via": ["search:kitchen_bin", "interview:chef_armand_dubois"],
+      "difficulty": 2,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "red_herring_dubois"
+    },
+    "ev_sabrina_captain_alibi": {
+      "id": "ev_sabrina_captain_alibi",
+      "name": "Sabrina and Drake's corroborated drawing-room interval",
+      "kind": "testimonial",
+      "description": "Sabrina and Captain Drake separately place one another in the drawing room until 21:40. Their accounts also explain Drake's unsent letter and Sabrina's missing earring without placing either at the murder.",
+      "initial_slot_id": null,
+      "fact_ids": ["fact_sabrina_earring", "fact_captain_threat"],
+      "implicates_character_ids": [],
+      "exonerates_character_ids": ["captain_marcus_drake", "sabrina_voss"],
+      "is_red_herring": false,
+      "red_herring_explanation": "",
+      "discoverable_via": ["interview:sabrina_voss", "interview:captain_marcus_drake"],
+      "difficulty": 2,
+      "manipulable": false,
+      "essential": false,
+      "redundancy_group": "innocent_alibis"
+    }
+  },
+  "opening": {
+    "discoverer_id": "dr_celestine_moreau",
+    "discovery_minute": 1320,
+    "body_room_id": "library",
+    "assembly_room_id": "great_hall",
+    "body_condition": "Lady Ashford lies beside the library writing desk with a single fatal blow to the back of her head. The fireplace poker has been returned among the tools; the mantel clock is stopped at 21:42.",
+    "discoverer_observations": ["One focused blunt-force wound is visible.", "The body is still warm; the death was recent.", "The library poker and a stopped mantel clock require preservation, not speculation."],
+    "containment_statement": "The causeway is flooded and no one can leave Ashwick Manor before dawn. Until help arrives, everyone remains in the house and the library scene is not to be disturbed.",
+    "initial_reactions": {
+      "edgar_blackwood": "This is dreadful. We should be very careful not to turn grief into accusation.",
+      "inspector_elena_hayes": "Nobody moves evidence; establish the timeline before anyone decides what they saw.",
+      "captain_marcus_drake": "A murderer under this roof. Then we find the bastard before the tide falls.",
+      "chef_armand_dubois": "My people stay together in the kitchen. They have done nothing wrong.",
+      "sabrina_voss": "Please tell me this is not some grotesque mistake.",
+      "zara_okonkwo": "The financial records must be secured. They may now be evidence."
+    },
+    "post_meeting_room_ids": {
+      "edgar_blackwood": "study",
+      "dr_celestine_moreau": "library",
+      "inspector_elena_hayes": "great_hall",
+      "captain_marcus_drake": "drawing_room",
+      "chef_armand_dubois": "kitchen",
+      "sabrina_voss": "conservatory",
+      "zara_okonkwo": "study"
+    }
+  },
+  "solution": {
+    "culprit_id": "edgar_blackwood",
+    "method_evidence_ids": ["ev_library_poker", "ev_fireplace_trace", "ev_medical_assessment"],
+    "motive_evidence_ids": ["ev_vivienne_memo", "ev_trust_draft", "ev_audit_fragments"],
+    "opportunity_evidence_ids": ["ev_library_clock", "ev_edgar_cuff_fibre", "ev_inspector_arrival", "ev_zara_departure"],
+    "timeline_fact_ids": ["fact_murder_time", "fact_edgar_left_study", "fact_edgar_hall_arrival", "fact_discovery"],
+    "independent_evidence_groups_required": 3
+  }
+}

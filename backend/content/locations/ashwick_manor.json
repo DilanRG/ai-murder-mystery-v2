@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "id": "ashwick_manor",
+  "name": "Ashwick Manor",
+  "subtitle": "A flooded causeway, a dead matriarch, and nowhere to run",
+  "description": "Ashwick Manor is a rain-darkened country estate built around a Jacobean great hall. Its public rooms display generations of wealth while sealed historic service passages and locked cabinets preserve the less flattering history of the family.",
+  "isolation_premise": "A violent storm has submerged the only causeway and brought down the telephone line. The bridge cannot be crossed safely before first light, leaving everyone at Ashwick contained inside the estate.",
+  "assembly_room_id": "great_hall",
+  "rooms": {
+    "great_hall": {
+      "id": "great_hall",
+      "name": "The Great Hall",
+      "short_name": "Hall",
+      "description": "A vaulted hall of black oak, ancestral armour and rain-rattled leaded windows. Every principal room opens from it.",
+      "atmosphere": "The family portraits appear to watch every crossing. A grandfather clock measures the silence with judicial patience.",
+      "searchable_object_ids": ["hall_clock", "hall_coat_stand"],
+      "body_discovery_allowed": false,
+      "tags": ["assembly", "public", "hub"]
+    },
+    "drawing_room": {
+      "id": "drawing_room",
+      "name": "The Drawing Room",
+      "short_name": "Drawing",
+      "description": "Low lamps warm a room of burgundy velvet, lacquered cabinets and a drinks trolley arranged with geometric precision.",
+      "atmosphere": "Perfume and woodsmoke compete beneath the sharper scent of brandy.",
+      "searchable_object_ids": ["drawing_drinks_trolley", "drawing_sofa", "drawing_gramophone"],
+      "body_discovery_allowed": false,
+      "tags": ["social", "public"]
+    },
+    "library": {
+      "id": "library",
+      "name": "The Library",
+      "short_name": "Library",
+      "description": "Two storeys of books surround a reading table, a green-shaded writing desk and a broad stone fireplace.",
+      "atmosphere": "The fire has burned low. One chair faces the room while another has been knocked slightly askew.",
+      "searchable_object_ids": ["library_desk", "library_fireplace", "library_clock", "library_atlas_case"],
+      "body_discovery_allowed": true,
+      "tags": ["private", "murder_opportunity"]
+    },
+    "study": {
+      "id": "study",
+      "name": "The Estate Study",
+      "short_name": "Study",
+      "description": "A severe office containing the estate ledgers, a partner desk and a wall safe hidden behind a hunting print.",
+      "atmosphere": "Everything has a labelled place, except the papers pushed hurriedly beneath the blotter.",
+      "searchable_object_ids": ["study_desk", "study_safe", "study_wastebasket"],
+      "body_discovery_allowed": true,
+      "tags": ["private", "documents", "murder_opportunity"]
+    },
+    "dining_room": {
+      "id": "dining_room",
+      "name": "The Dining Room",
+      "short_name": "Dining",
+      "description": "A long table remains laid after dinner beneath a dim crystal chandelier. Silver and glass throw fractured reflections across the walls.",
+      "atmosphere": "The abandoned place settings make the evening feel interrupted rather than concluded.",
+      "searchable_object_ids": ["dining_sideboard", "dining_table"],
+      "body_discovery_allowed": false,
+      "tags": ["public", "social"]
+    },
+    "kitchen": {
+      "id": "kitchen",
+      "name": "The Kitchen",
+      "short_name": "Kitchen",
+      "description": "Copper pans and iron ranges fill a practical room still hot from dinner service. A pantry door stands beyond the preparation table.",
+      "atmosphere": "Steam clouds the windows while the storm drums steadily on the service-yard roof.",
+      "searchable_object_ids": ["kitchen_prep_table", "kitchen_stove", "kitchen_bin", "kitchen_pantry"],
+      "body_discovery_allowed": false,
+      "tags": ["service", "weapons"]
+    },
+    "gallery": {
+      "id": "gallery",
+      "name": "The Long Gallery",
+      "short_name": "Gallery",
+      "description": "A narrow gallery of portraits and glass display cases runs along the eastern side of the house.",
+      "atmosphere": "Lightning repeatedly turns the painted faces into pale witnesses.",
+      "searchable_object_ids": ["gallery_display_case", "gallery_portrait", "gallery_window"],
+      "body_discovery_allowed": true,
+      "tags": ["public", "art", "murder_opportunity"]
+    },
+    "conservatory": {
+      "id": "conservatory",
+      "name": "The Conservatory",
+      "short_name": "Conservatory",
+      "description": "Palms and winter roses crowd a glass room overlooking the flooded lawn. A tiled fountain burbles beneath the rain.",
+      "atmosphere": "Condensation beads on every pane, blurring the outside world into shadow and water.",
+      "searchable_object_ids": ["conservatory_bench", "conservatory_fountain", "conservatory_door"],
+      "body_discovery_allowed": true,
+      "tags": ["private", "garden", "murder_opportunity"]
+    },
+    "chapel": {
+      "id": "chapel",
+      "name": "The Private Chapel",
+      "short_name": "Chapel",
+      "description": "A small stone chapel adjoins the west wing, furnished with dark pews, a brass lectern and a curtained vestry alcove.",
+      "atmosphere": "Rainwater ticks against stained glass. The unlit candles smell faintly of honey and smoke.",
+      "searchable_object_ids": ["chapel_altar", "chapel_vestry", "chapel_pews"],
+      "body_discovery_allowed": true,
+      "tags": ["private", "quiet", "murder_opportunity"]
+    }
+  },
+  "doors": [
+    {"id": "door_hall_drawing", "room_a_id": "great_hall", "room_b_id": "drawing_room", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false},
+    {"id": "door_hall_library", "room_a_id": "great_hall", "room_b_id": "library", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false},
+    {"id": "door_library_study", "room_a_id": "library", "room_b_id": "study", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false},
+    {"id": "door_hall_dining", "room_a_id": "great_hall", "room_b_id": "dining_room", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false},
+    {"id": "door_dining_kitchen", "room_a_id": "dining_room", "room_b_id": "kitchen", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false},
+    {"id": "door_hall_gallery", "room_a_id": "great_hall", "room_b_id": "gallery", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false},
+    {"id": "door_gallery_conservatory", "room_a_id": "gallery", "room_b_id": "conservatory", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false},
+    {"id": "door_drawing_conservatory", "room_a_id": "drawing_room", "room_b_id": "conservatory", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false},
+    {"id": "door_hall_chapel", "room_a_id": "great_hall", "room_b_id": "chapel", "travel_minutes": 10, "locked_by_default": false, "key_item_id": null, "one_way": false}
+  ],
+  "searchable_objects": {
+    "hall_clock": {"id": "hall_clock", "room_id": "great_hall", "name": "Grandfather clock", "description": "An eight-day clock maintained by the estate staff.", "search_text": "The clock is running accurately. Its service card is tucked inside the case.", "difficulty": 1, "evidence_slot_ids": ["slot_hall_clock"], "requires_item_id": null, "tags": ["timepiece"]},
+    "hall_coat_stand": {"id": "hall_coat_stand", "room_id": "great_hall", "name": "Coat stand", "description": "A crowded stand of damp coats and umbrellas.", "search_text": "The coats can be checked for rain, fibres, missing buttons and concealed objects.", "difficulty": 2, "evidence_slot_ids": ["slot_hall_coats"], "requires_item_id": null, "tags": ["clothing"]},
+    "drawing_drinks_trolley": {"id": "drawing_drinks_trolley", "room_id": "drawing_room", "name": "Drinks trolley", "description": "Decanters, glasses and a silver ice bucket.", "search_text": "The arrangement records who poured what, and which glass was left unfinished.", "difficulty": 1, "evidence_slot_ids": ["slot_drawing_trolley"], "requires_item_id": null, "tags": ["drinks"]},
+    "drawing_sofa": {"id": "drawing_sofa", "room_id": "drawing_room", "name": "Velvet sofa", "description": "A deep burgundy sofa facing the fireplace.", "search_text": "Small personal items can slip between the cushions.", "difficulty": 2, "evidence_slot_ids": ["slot_drawing_sofa"], "requires_item_id": null, "tags": ["furniture"]},
+    "drawing_gramophone": {"id": "drawing_gramophone", "room_id": "drawing_room", "name": "Gramophone", "description": "A cabinet gramophone with a stack of dance records.", "search_text": "The last record played has not been returned to its sleeve.", "difficulty": 1, "evidence_slot_ids": [], "requires_item_id": null, "tags": ["sound", "time"]},
+    "library_desk": {"id": "library_desk", "room_id": "library", "name": "Writing desk", "description": "Lady Ashford's green-leather writing desk.", "search_text": "The drawers contain correspondence, appointment cards and stationery impressed with the Ashwick crest.", "difficulty": 2, "evidence_slot_ids": ["slot_library_desk"], "requires_item_id": null, "tags": ["documents", "victim"]},
+    "library_fireplace": {"id": "library_fireplace", "room_id": "library", "name": "Fireplace and tools", "description": "A stone hearth with poker, tongs, brush and ash pan.", "search_text": "Soot, ash and the placement of the tools may preserve signs of recent handling.", "difficulty": 2, "evidence_slot_ids": ["slot_library_fireplace"], "requires_item_id": null, "tags": ["weapon", "ash"]},
+    "library_clock": {"id": "library_clock", "room_id": "library", "name": "Mantel clock", "description": "A small brass carriage clock on the mantel.", "search_text": "Its glass and mechanism can be examined for impact damage and timing.", "difficulty": 1, "evidence_slot_ids": ["slot_library_clock"], "requires_item_id": null, "tags": ["timepiece"]},
+    "library_atlas_case": {"id": "library_atlas_case", "room_id": "library", "name": "Atlas cabinet", "description": "A low locked cabinet of estate maps and oversized volumes.", "search_text": "The cabinet holds old plans, including service routes and ownership boundaries.", "difficulty": 3, "evidence_slot_ids": ["slot_library_atlas"], "requires_item_id": "estate_key", "tags": ["locked", "maps"]},
+    "study_desk": {"id": "study_desk", "room_id": "study", "name": "Partner desk", "description": "An orderly desk shared by the estate manager and solicitor when business is conducted at Ashwick.", "search_text": "The blotter, correspondence trays and locked drawers contain current estate business.", "difficulty": 2, "evidence_slot_ids": ["slot_study_desk"], "requires_item_id": null, "tags": ["documents"]},
+    "study_safe": {"id": "study_safe", "room_id": "study", "name": "Wall safe", "description": "A combination safe concealed behind a faded hunting print.", "search_text": "The safe contains deeds, trust instruments and sealed personal files.", "difficulty": 3, "evidence_slot_ids": ["slot_study_safe"], "requires_item_id": "safe_combination", "tags": ["locked", "documents"]},
+    "study_wastebasket": {"id": "study_wastebasket", "room_id": "study", "name": "Wastepaper basket", "description": "A wire basket lined with yesterday's financial pages.", "search_text": "Torn or discarded papers can be reconstructed if collected carefully.", "difficulty": 2, "evidence_slot_ids": ["slot_study_waste"], "requires_item_id": null, "tags": ["documents"]},
+    "dining_sideboard": {"id": "dining_sideboard", "room_id": "dining_room", "name": "Silver sideboard", "description": "A mahogany sideboard holding serving silver and after-dinner bottles.", "search_text": "The inventory card makes missing or recently cleaned objects conspicuous.", "difficulty": 2, "evidence_slot_ids": ["slot_dining_sideboard"], "requires_item_id": null, "tags": ["silver", "drinks"]},
+    "dining_table": {"id": "dining_table", "room_id": "dining_room", "name": "Dining table", "description": "Eight guest places and the head of the table remain set.", "search_text": "Glasses, crumbs, napkins and seating positions preserve the end of dinner.", "difficulty": 1, "evidence_slot_ids": ["slot_dining_table"], "requires_item_id": null, "tags": ["social"]},
+    "kitchen_prep_table": {"id": "kitchen_prep_table", "room_id": "kitchen", "name": "Preparation table", "description": "A scrubbed oak table with a magnetic knife rack above it.", "search_text": "The knife ledger and cutting boards reveal what was used during service.", "difficulty": 1, "evidence_slot_ids": ["slot_kitchen_table"], "requires_item_id": null, "tags": ["weapons", "food"]},
+    "kitchen_stove": {"id": "kitchen_stove", "room_id": "kitchen", "name": "Iron range", "description": "A broad range banked down after dinner.", "search_text": "The ash and hot plates could have been used to burn or heat a small item.", "difficulty": 2, "evidence_slot_ids": [], "requires_item_id": null, "tags": ["fire"]},
+    "kitchen_bin": {"id": "kitchen_bin", "room_id": "kitchen", "name": "Kitchen bin", "description": "A lidded bin of dinner scraps and trimmings.", "search_text": "Discarded ingredients and stained cloths can explain marks that appear sinister elsewhere.", "difficulty": 2, "evidence_slot_ids": ["slot_kitchen_bin"], "requires_item_id": null, "tags": ["waste"]},
+    "kitchen_pantry": {"id": "kitchen_pantry", "room_id": "kitchen", "name": "Pantry", "description": "Shelves of preserves, dry goods and household stores.", "search_text": "The pantry inventory includes cleaning agents, medicines and cooking extracts.", "difficulty": 2, "evidence_slot_ids": [], "requires_item_id": null, "tags": ["supplies"]},
+    "gallery_display_case": {"id": "gallery_display_case", "room_id": "gallery", "name": "Bronze display case", "description": "A glass case of small bronzes and military keepsakes.", "search_text": "Dust outlines make any recently moved object visible.", "difficulty": 2, "evidence_slot_ids": ["slot_gallery_case"], "requires_item_id": null, "tags": ["weapons", "art"]},
+    "gallery_portrait": {"id": "gallery_portrait", "room_id": "gallery", "name": "Ashford family portrait", "description": "A monumental portrait in a deep gilt frame.", "search_text": "The frame and wall cavity provide a narrow hiding place.", "difficulty": 3, "evidence_slot_ids": ["slot_gallery_frame"], "requires_item_id": null, "tags": ["hidden"]},
+    "gallery_window": {"id": "gallery_window", "room_id": "gallery", "name": "East window", "description": "A tall casement overlooking the flooded lawn.", "search_text": "The latch, sill and condensation show whether it was opened during the storm.", "difficulty": 1, "evidence_slot_ids": [], "requires_item_id": null, "tags": ["outside"]},
+    "conservatory_bench": {"id": "conservatory_bench", "room_id": "conservatory", "name": "Potting bench", "description": "A bench of tools, twine and labelled seed envelopes.", "search_text": "Mud and cuttings can be compared with traces carried into the house.", "difficulty": 2, "evidence_slot_ids": ["slot_conservatory_bench"], "requires_item_id": null, "tags": ["garden"]},
+    "conservatory_fountain": {"id": "conservatory_fountain", "room_id": "conservatory", "name": "Tiled fountain", "description": "A shallow decorative fountain circulating cold water.", "search_text": "The basin could rinse a hand-sized object but would retain fibres in its grate.", "difficulty": 3, "evidence_slot_ids": ["slot_conservatory_fountain"], "requires_item_id": null, "tags": ["water", "concealment"]},
+    "conservatory_door": {"id": "conservatory_door", "room_id": "conservatory", "name": "Garden door", "description": "A bolted glass door to the terrace.", "search_text": "The bolt, threshold and mud confirm whether anyone used the door after the rain began.", "difficulty": 1, "evidence_slot_ids": [], "requires_item_id": null, "tags": ["outside"]},
+    "chapel_altar": {"id": "chapel_altar", "room_id": "chapel", "name": "Stone altar", "description": "A plain altar with two heavy brass candlesticks.", "search_text": "Wax, dust and polished brass preserve handling marks.", "difficulty": 2, "evidence_slot_ids": ["slot_chapel_altar"], "requires_item_id": null, "tags": ["weapons"]},
+    "chapel_vestry": {"id": "chapel_vestry", "room_id": "chapel", "name": "Vestry cabinet", "description": "A curtained oak cabinet of linens and parish records.", "search_text": "The deep lower shelf is large enough to conceal papers or a small object.", "difficulty": 3, "evidence_slot_ids": ["slot_chapel_vestry"], "requires_item_id": null, "tags": ["hidden", "documents"]},
+    "chapel_pews": {"id": "chapel_pews", "room_id": "chapel", "name": "Pews", "description": "Six rows of dark oak pews with narrow prayer-book racks.", "search_text": "The racks and undersides can hold dropped or deliberately hidden items.", "difficulty": 2, "evidence_slot_ids": ["slot_chapel_pews"], "requires_item_id": null, "tags": ["hidden"]}
+  },
+  "evidence_slots": {
+    "slot_hall_clock": {"id": "slot_hall_clock", "room_id": "great_hall", "object_id": "hall_clock", "description": "inside the clock case", "capacity": 2},
+    "slot_hall_coats": {"id": "slot_hall_coats", "room_id": "great_hall", "object_id": "hall_coat_stand", "description": "inside a coat pocket", "capacity": 2},
+    "slot_drawing_trolley": {"id": "slot_drawing_trolley", "room_id": "drawing_room", "object_id": "drawing_drinks_trolley", "description": "among the glasses and bottles", "capacity": 3},
+    "slot_drawing_sofa": {"id": "slot_drawing_sofa", "room_id": "drawing_room", "object_id": "drawing_sofa", "description": "between the sofa cushions", "capacity": 2},
+    "slot_library_desk": {"id": "slot_library_desk", "room_id": "library", "object_id": "library_desk", "description": "inside the writing-desk drawers", "capacity": 3},
+    "slot_library_fireplace": {"id": "slot_library_fireplace", "room_id": "library", "object_id": "library_fireplace", "description": "among the fireplace tools and ash", "capacity": 3},
+    "slot_library_clock": {"id": "slot_library_clock", "room_id": "library", "object_id": "library_clock", "description": "on and inside the mantel clock", "capacity": 2},
+    "slot_library_atlas": {"id": "slot_library_atlas", "room_id": "library", "object_id": "library_atlas_case", "description": "inside the locked atlas cabinet", "capacity": 2},
+    "slot_study_desk": {"id": "slot_study_desk", "room_id": "study", "object_id": "study_desk", "description": "beneath the desk blotter", "capacity": 3},
+    "slot_study_safe": {"id": "slot_study_safe", "room_id": "study", "object_id": "study_safe", "description": "inside the wall safe", "capacity": 4},
+    "slot_study_waste": {"id": "slot_study_waste", "room_id": "study", "object_id": "study_wastebasket", "description": "among the discarded papers", "capacity": 3},
+    "slot_dining_sideboard": {"id": "slot_dining_sideboard", "room_id": "dining_room", "object_id": "dining_sideboard", "description": "inside the silver sideboard", "capacity": 3},
+    "slot_dining_table": {"id": "slot_dining_table", "room_id": "dining_room", "object_id": "dining_table", "description": "among the abandoned place settings", "capacity": 3},
+    "slot_kitchen_table": {"id": "slot_kitchen_table", "room_id": "kitchen", "object_id": "kitchen_prep_table", "description": "on the preparation table and knife rack", "capacity": 3},
+    "slot_kitchen_bin": {"id": "slot_kitchen_bin", "room_id": "kitchen", "object_id": "kitchen_bin", "description": "inside the kitchen bin", "capacity": 3},
+    "slot_gallery_case": {"id": "slot_gallery_case", "room_id": "gallery", "object_id": "gallery_display_case", "description": "inside the bronze display case", "capacity": 3},
+    "slot_gallery_frame": {"id": "slot_gallery_frame", "room_id": "gallery", "object_id": "gallery_portrait", "description": "behind the portrait frame", "capacity": 2},
+    "slot_conservatory_bench": {"id": "slot_conservatory_bench", "room_id": "conservatory", "object_id": "conservatory_bench", "description": "among the potting tools", "capacity": 3},
+    "slot_conservatory_fountain": {"id": "slot_conservatory_fountain", "room_id": "conservatory", "object_id": "conservatory_fountain", "description": "inside the fountain grate", "capacity": 2},
+    "slot_chapel_altar": {"id": "slot_chapel_altar", "room_id": "chapel", "object_id": "chapel_altar", "description": "beside the brass candlesticks", "capacity": 2},
+    "slot_chapel_vestry": {"id": "slot_chapel_vestry", "room_id": "chapel", "object_id": "chapel_vestry", "description": "on the lower vestry shelf", "capacity": 3},
+    "slot_chapel_pews": {"id": "slot_chapel_pews", "room_id": "chapel", "object_id": "chapel_pews", "description": "under a pew", "capacity": 2}
+  },
+  "potential_weapons": {
+    "library_poker": {"id": "library_poker", "room_id": "library", "object_id": "library_fireplace", "name": "Iron fireplace poker", "description": "A long square-shafted poker heavy enough to cause fatal blunt trauma.", "compatible_methods": ["blunt_force"]},
+    "gallery_bronze": {"id": "gallery_bronze", "room_id": "gallery", "object_id": "gallery_display_case", "name": "Bronze horse statuette", "description": "A dense bronze figure with a weighted stone base.", "compatible_methods": ["blunt_force"]},
+    "kitchen_knife": {"id": "kitchen_knife", "room_id": "kitchen", "object_id": "kitchen_prep_table", "name": "Chef's knife", "description": "A broad professional knife recorded in the kitchen inventory.", "compatible_methods": ["stabbing", "cutting"]},
+    "chapel_candlestick": {"id": "chapel_candlestick", "room_id": "chapel", "object_id": "chapel_altar", "name": "Brass candlestick", "description": "A heavy altar candlestick polished weekly by the housekeeper.", "compatible_methods": ["blunt_force"]}
+  },
+  "items": {
+    "estate_key": {
+      "id": "estate_key",
+      "name": "Estate cabinet key",
+      "description": "A small brass key for the manor's map and document cabinets.",
+      "initial_slot_id": "slot_hall_coats",
+      "portable": true,
+      "access_object_ids": ["library_atlas_case"],
+      "access_door_ids": []
+    },
+    "safe_combination": {
+      "id": "safe_combination",
+      "name": "Safe combination note",
+      "description": "A private mnemonic that provides the estate study safe combination.",
+      "initial_slot_id": "slot_library_desk",
+      "portable": true,
+      "access_object_ids": ["study_safe"],
+      "access_door_ids": []
+    }
+  },
+  "murder_opportunity_rules": [
+    {
+      "id": "blunt_force_private_room",
+      "room_ids": ["library", "study", "gallery", "chapel"],
+      "compatible_methods": ["blunt_force"],
+      "weapon_ids": ["library_poker", "gallery_bronze", "chapel_candlestick"],
+      "access_summary": "The killer and victim must share the room during a schedule gap, and the selected weapon must be accessible there or carried through a valid route.",
+      "witness_risk": "Anyone sharing the room or an explicitly modeled observer on the route invalidates an unseen attack unless the case accounts for that witness."
+    },
+    {
+      "id": "stabbing_service_access",
+      "room_ids": ["kitchen", "study", "conservatory"],
+      "compatible_methods": ["stabbing"],
+      "weapon_ids": ["kitchen_knife"],
+      "access_summary": "The knife must leave the inventoried rack and the killer must have a feasible route from the kitchen to the murder room.",
+      "witness_risk": "Kitchen staff can establish when the knife was last present, creating a testimonial trace."
+    }
+  ],
+  "body_discovery_room_ids": ["library", "study", "gallery", "conservatory", "chapel"],
+  "movement_constraints": [
+    "The flooded causeway prevents anyone leaving the estate before dawn.",
+    "The terrace and garden are unsafe during the storm and are not playable rooms in the MVP.",
+    "NPC and player movement must follow a listed door unless an explicit event changes access."
+  ],
+  "events": [
+    {"id": "storm_intensifies", "name": "Storm intensifies", "trigger": "turn_6", "description": "A squall strikes the east windows and briefly dims the electric lights.", "engine_effect": "atmosphere_only"},
+    {"id": "causeway_update", "name": "Causeway update", "trigger": "turn_18", "description": "The water continues to rise; no vehicle can reach the house before morning.", "engine_effect": "atmosphere_only"}
+  ],
+  "visual_theme": {
+    "background": "#08090d",
+    "surface": "#13151b",
+    "accent": "#b89a62",
+    "danger": "#7e2633",
+    "text": "#eee6d7",
+    "backdrop_asset": "assets/locations/ashwick-manor.webp"
+  }
+}

@@ -17,7 +17,7 @@ The project brief intentionally leaves the following decisions open. These defau
 | Accusation scoring | Culprit is mandatory; method, motive, and timeline anchors contribute supporting score. Full win requires the correct culprit plus at least two supporting components. | Rewards actual deduction while preserving a clear result. Exact UI wording can evolve after playtests. |
 | Portrait pipeline | Versioned portrait/expression paths with polished placeholders first | Avoids blocking the engine on art. Asset generation/import can replace placeholders without schema changes. |
 | Murderer evidence manipulation | May move, conceal, or attempt to destroy only existing evidence explicitly marked manipulable, and only if validator-confirmed redundant solution paths remain | The murderer cannot invent evidence or make the case unsolvable. Planting new evidence is deferred. |
-| CCv3 scope | JSON import/export for common CCv3 fields plus `extensions.murder_mystery`; PNG card embedding is deferred | Preserves practical compatibility without making image metadata tooling a vertical-slice blocker. Imported prompts never outrank global rules. |
+| CCv3 scope | JSON import/export following the [Character Card V3 specification](https://github.com/kwaroran/character-card-spec-v3/blob/main/SPEC_V3.md), plus `extensions.murder_mystery`; PNG/CHARX embedding is deferred | Preserves practical compatibility without making asset-container tooling a vertical-slice blocker. Imported prompts never outrank global rules. |
 
 ## Derived Implementation Rules
 
