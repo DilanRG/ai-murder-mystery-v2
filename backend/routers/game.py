@@ -60,7 +60,10 @@ async def new_game(request: StartGameRequest) -> dict[str, object]:
     """Start Ashwick deterministically; an API key is never required."""
 
     try:
-        game = _service().start(case_id=request.case_id, location_id=request.location_id)
+        game = await _service().start_async(
+            case_id=request.case_id,
+            location_id=request.location_id,
+        )
     except (FileNotFoundError, ValueError) as error:
         raise _not_found_or_bad_request(error) from error
     return {"status": "ok", "game": game.model_dump(mode="json"), "catalog": _service().catalog()}
@@ -116,7 +119,7 @@ async def save_game(request: SaveRequest) -> dict[str, object]:
 @router.post("/saves/v1/{filename}/load")
 async def load_game(filename: str) -> dict[str, object]:
     try:
-        game = _service().load(filename)
+        game = await _service().load_async(filename)
     except (SaveValidationError, ValueError, FileNotFoundError) as error:
         raise _not_found_or_bad_request(error) from error
     return {"schema_version": 1, "status": "loaded", "game": game.model_dump(mode="json")}

@@ -15,6 +15,7 @@ from game.content import (
     load_location,
 )
 from game.models import CaseDefinition, CharacterRole
+from game.public_assets import portrait_url
 
 
 EXPECTED_CAST = {
@@ -128,7 +129,7 @@ def test_exactly_eight_playable_ccv3_cards_load() -> None:
     assert {card.spec for card in cards.values()} == {"chara_card_v3"}
     assert {card.spec_version for card in cards.values()} == {"3.0"}
     assert len({card.data.name for card in cards.values()}) == 8
-    for card in cards.values():
+    for character_id, card in cards.items():
         extension = card.data.extensions.murder_mystery
         assert extension.values
         assert extension.fears
@@ -138,10 +139,22 @@ def test_exactly_eight_playable_ccv3_cards_load() -> None:
         icons = [asset for asset in card.data.assets if asset.type == "icon"]
         assert len(icons) == 1
         assert icons[0].name == "main"
+        assert icons[0].ext == "svg"
+        assert icons[0].uri == portrait_url(character_id)
         assert card.data.character_book is not None
         orders = [entry.insertion_order for entry in card.data.character_book.entries]
         assert orders == sorted(orders)
         assert all(not entry.use_regex for entry in card.data.character_book.entries)
+
+
+def test_character_portrait_assets_are_versioned_safe_svg_files() -> None:
+    project_root = CHARACTER_CARDS_DIR.parents[2]
+    for character_id in EXPECTED_CAST:
+        url = portrait_url(character_id)
+        assert url == f"/assets/characters/{character_id}/portrait-placeholder.svg"
+        asset = project_root / "frontend" / "public" / "assets" / url.removeprefix("/assets/")
+        assert asset.is_file()
+        assert "<svg" in asset.read_text(encoding="utf-8")
 
 
 def test_deterministic_case_fixture_references_resolve() -> None:

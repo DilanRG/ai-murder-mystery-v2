@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from game.actions import (
     AccuseIntent,
@@ -41,7 +41,14 @@ from game.models import (
     WeaponRuntimeState,
     WorldRuntimeState,
 )
+from game.npc_planning import (
+    NpcActionCandidate,
+    NpcActorActionOptions,
+    NpcIntentPlanningRequest,
+    SafeNpcTurnSnapshot,
+)
 from game.validator import validate_case
+from game.public_assets import portrait_url
 from game.views import (
     PlayerGameView,
     PublicCharacterView,
@@ -69,6 +76,14 @@ class _NpcIntent:
     character_id: str
     destination_room_id: str | None
     manipulate_evidence_id: str | None
+
+
+@dataclass(frozen=True)
+class EngineActionPreview:
+    """Result of applying a command to a deep-copied runtime only."""
+
+    result: TurnResultView
+    npc_request: NpcIntentPlanningRequest | None
 
 
 class GameEngine:
@@ -242,7 +257,48 @@ class GameEngine:
 
     player_view = view
 
-    def apply(self, intent: PlayerIntent | dict[str, object]) -> TurnResultView:
+    def apply(
+        self,
+        intent: PlayerIntent | dict[str, object],
+        *,
+        npc_action_ids: Mapping[str, str] | None = None,
+    ) -> TurnResultView:
+        """Apply an intent synchronously, retaining deterministic NPC fallback.
+
+        ``npc_action_ids`` may contain only IDs from a request produced by this
+        engine.  The NPC phase rebuilds and validates the finite candidate set
+        before resolving them; absent or stale IDs fall back deterministically.
+        """
+
+        return self._apply(
+            intent,
+            npc_action_ids=npc_action_ids,
+            defer_npc_phase=False,
+        )
+
+    def preview(self, intent: PlayerIntent | dict[str, object]) -> EngineActionPreview:
+        """Preview against a deep copy and capture the post-player NPC request.
+
+        Provider latency and cancellation therefore happen before the original
+        runtime is touched.  Canonical case/location models are frozen and may
+        be shared; every mutable runtime model is copied recursively.
+        """
+
+        clone = object.__new__(GameEngine)
+        clone.case = self.case
+        clone.location = self.location
+        clone.runtime = self.runtime.model_copy(deep=True)
+        result = clone._apply(intent, npc_action_ids=None, defer_npc_phase=True)
+        request = clone._build_npc_planning_request() if result.accepted and result.committed else None
+        return EngineActionPreview(result=result, npc_request=request)
+
+    def _apply(
+        self,
+        intent: PlayerIntent | dict[str, object],
+        *,
+        npc_action_ids: Mapping[str, str] | None,
+        defer_npc_phase: bool,
+    ) -> TurnResultView:
         command = parse_player_intent(intent) if isinstance(intent, dict) else intent
         if self.runtime.phase == GamePhase.ENDED:
             return self._reject("The case has already ended.")
@@ -251,19 +307,19 @@ class GameEngine:
         if self.runtime.phase != GamePhase.INVESTIGATION:
             return self._reject("The opening meeting must conclude before investigating.")
         if isinstance(command, MoveIntent):
-            return self._move(command)
+            return self._move(command, npc_action_ids, defer_npc_phase)
         if isinstance(command, SearchIntent):
-            return self._search(command)
+            return self._search(command, npc_action_ids, defer_npc_phase)
         if isinstance(command, BeginInterviewIntent):
             return self._begin_interview(command)
         if isinstance(command, InterviewExchangeIntent):
             return self._interview_exchange(command)
         if isinstance(command, EndInterviewIntent):
-            return self._end_interview()
+            return self._end_interview(npc_action_ids, defer_npc_phase)
         if isinstance(command, ExamineEvidenceIntent):
-            return self._examine(command)
+            return self._examine(command, npc_action_ids, defer_npc_phase)
         if isinstance(command, (ExamineSceneIntent, ExamineBodyIntent)):
-            return self._examine_body(command)
+            return self._examine_body(command, npc_action_ids, defer_npc_phase)
         if isinstance(command, ReviewNotebookIntent):
             return self._accept(False, "You review the notes without spending investigation time.")
         if isinstance(command, AddNoteIntent):
@@ -274,7 +330,7 @@ class GameEngine:
         if isinstance(command, MarkContradictionIntent):
             return self._mark_contradiction(command)
         if isinstance(command, AccuseIntent):
-            return self._accuse(command)
+            return self._accuse(command, npc_action_ids, defer_npc_phase)
         return self._reject("Unsupported player intent.")
 
     apply_intent = apply
@@ -295,7 +351,12 @@ class GameEngine:
         self.runtime.player_knowledge.discovered_room_ids.add(self.runtime.player_room_id)
         return self._accept(False, "The meeting breaks. The investigation begins.")
 
-    def _move(self, intent: MoveIntent) -> TurnResultView:
+    def _move(
+        self,
+        intent: MoveIntent,
+        npc_action_ids: Mapping[str, str] | None,
+        defer_npc_phase: bool,
+    ) -> TurnResultView:
         if self.runtime.active_interview:
             return self._reject("End the current interview before moving.")
         door = self._door_between(self.runtime.player_room_id, intent.room_id)
@@ -305,9 +366,18 @@ class GameEngine:
             return self._reject("That route is locked.")
         self.runtime.player_room_id = intent.room_id
         self.runtime.player_knowledge.discovered_room_ids.add(intent.room_id)
-        return self._commit(f"You move to {self.location.rooms[intent.room_id].name}.")
+        return self._commit(
+            f"You move to {self.location.rooms[intent.room_id].name}.",
+            npc_action_ids=npc_action_ids,
+            defer_npc_phase=defer_npc_phase,
+        )
 
-    def _search(self, intent: SearchIntent) -> TurnResultView:
+    def _search(
+        self,
+        intent: SearchIntent,
+        npc_action_ids: Mapping[str, str] | None,
+        defer_npc_phase: bool,
+    ) -> TurnResultView:
         if self.runtime.active_interview:
             return self._reject("End the current interview before searching.")
         obj = self.location.searchable_objects.get(intent.object_id)
@@ -340,7 +410,13 @@ class GameEngine:
         state.fully_searched = state.search_count >= threshold
         found_names = [item.name for item in discoveries] + [item.name for item in found_items]
         suffix = " You find " + ", ".join(found_names) + "." if found_names else " Nothing new turns up."
-        return self._commit(obj.search_text + suffix, discoveries=discoveries, items=found_items)
+        return self._commit(
+            obj.search_text + suffix,
+            discoveries=discoveries,
+            items=found_items,
+            npc_action_ids=npc_action_ids,
+            defer_npc_phase=defer_npc_phase,
+        )
 
     def _begin_interview(self, intent: BeginInterviewIntent) -> TurnResultView:
         if self.runtime.active_interview:
@@ -457,22 +533,44 @@ class GameEngine:
         self.runtime.player_knowledge.contradictions.append(record)
         return self._accept(False, "You mark the contradiction for later review.")
 
-    def _end_interview(self) -> TurnResultView:
+    def _end_interview(
+        self,
+        npc_action_ids: Mapping[str, str] | None,
+        defer_npc_phase: bool,
+    ) -> TurnResultView:
         if self.runtime.active_interview is None:
             return self._reject("There is no interview to end.")
         name = self._name(self.runtime.active_interview.character_id)
         self.runtime.active_interview = None
-        return self._commit(f"You conclude the interview with {name}.")
+        return self._commit(
+            f"You conclude the interview with {name}.",
+            npc_action_ids=npc_action_ids,
+            defer_npc_phase=defer_npc_phase,
+        )
 
-    def _examine(self, intent: ExamineEvidenceIntent) -> TurnResultView:
+    def _examine(
+        self,
+        intent: ExamineEvidenceIntent,
+        npc_action_ids: Mapping[str, str] | None,
+        defer_npc_phase: bool,
+    ) -> TurnResultView:
         if self.runtime.active_interview:
             return self._reject("End the current interview before examining evidence.")
         if intent.evidence_id not in self.runtime.player_knowledge.discovered_evidence_ids:
             return self._reject("You have not discovered that evidence.")
         evidence = self.case.evidence[intent.evidence_id]
-        return self._commit(f"You examine {evidence.name}: {evidence.description}")
+        return self._commit(
+            f"You examine {evidence.name}: {evidence.description}",
+            npc_action_ids=npc_action_ids,
+            defer_npc_phase=defer_npc_phase,
+        )
 
-    def _examine_body(self, intent: ExamineSceneIntent | ExamineBodyIntent) -> TurnResultView:
+    def _examine_body(
+        self,
+        intent: ExamineSceneIntent | ExamineBodyIntent,
+        npc_action_ids: Mapping[str, str] | None,
+        defer_npc_phase: bool,
+    ) -> TurnResultView:
         if self.runtime.active_interview:
             return self._reject("End the current interview before examining the scene.")
         scene_id = "body" if isinstance(intent, ExamineBodyIntent) else intent.scene_id
@@ -485,9 +583,19 @@ class GameEngine:
         narration = "You examine the body and preserve the visible scene." if not discoveries else (
             "You examine the body and preserve the scene: " + ", ".join(item.name for item in discoveries) + "."
         )
-        return self._commit(narration, discoveries=discoveries)
+        return self._commit(
+            narration,
+            discoveries=discoveries,
+            npc_action_ids=npc_action_ids,
+            defer_npc_phase=defer_npc_phase,
+        )
 
-    def _accuse(self, intent: AccuseIntent) -> TurnResultView:
+    def _accuse(
+        self,
+        intent: AccuseIntent,
+        npc_action_ids: Mapping[str, str] | None,
+        defer_npc_phase: bool,
+    ) -> TurnResultView:
         if self.runtime.active_interview:
             return self._reject("End the current interview before making an accusation.")
         if intent.character_id not in self.runtime.characters or not self.runtime.characters[intent.character_id].alive:
@@ -554,7 +662,11 @@ class GameEngine:
         # An accusation is a committed final action too: its result is visible
         # after the same ten-minute clock advance and batched NPC resolution as
         # any other committed investigation action.
-        return self._commit(self.runtime.result.summary)
+        return self._commit(
+            self.runtime.result.summary,
+            npc_action_ids=npc_action_ids,
+            defer_npc_phase=defer_npc_phase,
+        )
 
     def _commit(
         self,
@@ -562,28 +674,76 @@ class GameEngine:
         *,
         discoveries: list[PublicEvidenceView] | None = None,
         items: list[PublicItemView] | None = None,
+        npc_action_ids: Mapping[str, str] | None = None,
+        defer_npc_phase: bool = False,
     ) -> TurnResultView:
         self.runtime.turn += 1
         self.runtime.in_game_minute += self.case.turn_minutes
-        events = self._run_npc_phase()
+        events = [] if defer_npc_phase else self._run_npc_phase(npc_action_ids)
         if self.runtime.turn >= self.case.max_turns and self.runtime.phase != GamePhase.ENDED:
             self.runtime.phase = GamePhase.ENDED
             narration += " The investigation time has expired."
         return self._accept(True, narration, discoveries=discoveries or [], items=items or [], events=events)
 
-    def _run_npc_phase(self) -> list[str]:
-        """Plan from a frozen turn-start snapshot, then resolve in sorted order."""
+    def _build_npc_planning_request(self) -> NpcIntentPlanningRequest:
+        """Build one immutable, bounded request from the NPC turn-start state."""
+
         snapshot = {character_id: state.current_room_id for character_id, state in self.runtime.characters.items()}
-        planned = [self._plan_npc(character_id, snapshot) for character_id in sorted(snapshot)]
+        candidates = self._npc_candidate_sets(snapshot)
+        return NpcIntentPlanningRequest(
+            snapshot=SafeNpcTurnSnapshot(
+                turn_number=self.runtime.turn,
+                phase=self.runtime.phase.value,
+                public_scene_summary=(
+                    f"Investigation time is {self._time_label(self.runtime.in_game_minute)}. "
+                    f"The investigator is in {self.location.rooms[self.runtime.player_room_id].name}."
+                ),
+                public_event_summaries=tuple(
+                    event.narration[:360]
+                    for event in self.runtime.event_log[-24:]
+                    if event.visible_to_player
+                ),
+            ),
+            actor_options=tuple(
+                NpcActorActionOptions(
+                    actor_id=character_id,
+                    candidates=tuple(
+                        NpcActionCandidate(
+                            action_id=action_id,
+                            summary=self._npc_candidate_summary(intent),
+                        )
+                        for action_id, intent in actor_candidates
+                    ),
+                )
+                for character_id, actor_candidates in candidates.items()
+            ),
+        )
+
+    def _run_npc_phase(self, selected_action_ids: Mapping[str, str] | None = None) -> list[str]:
+        """Resolve only engine-generated choices, with deterministic fallback."""
+
+        snapshot = {character_id: state.current_room_id for character_id, state in self.runtime.characters.items()}
+        candidate_sets = self._npc_candidate_sets(snapshot)
         public_events: list[str] = []
-        for intent in planned:
-            character = self.runtime.characters[intent.character_id]
-            if not character.alive:
-                continue
-            if intent.destination_room_id and self._door_between(character.current_room_id, intent.destination_room_id):
+        for character_id, actor_candidates in candidate_sets.items():
+            by_id = dict(actor_candidates)
+            requested_id = selected_action_ids.get(character_id) if selected_action_ids else None
+            intent = by_id.get(requested_id, actor_candidates[0][1])
+            character = self.runtime.characters[character_id]
+            if (
+                intent.destination_room_id
+                and intent.destination_room_id in set(self._unlocked_destinations(character.current_room_id))
+            ):
                 character.current_room_id = intent.destination_room_id
                 character.current_activity = "moving"
-            if intent.manipulate_evidence_id and self._can_manipulate(intent.manipulate_evidence_id):
+            if (
+                intent.manipulate_evidence_id
+                and self._npc_may_manipulate(
+                    character_id,
+                    intent.manipulate_evidence_id,
+                    snapshot,
+                )
+            ):
                 evidence = self.runtime.evidence[intent.manipulate_evidence_id]
                 evidence.condition = (
                     EvidenceCondition.DESTROYED if self.runtime.turn % 2 == 0 else EvidenceCondition.CONCEALED
@@ -594,7 +754,46 @@ class GameEngine:
                 public_events.append(f"{self._name(intent.character_id)} is now in the room.")
         return public_events
 
-    def _plan_npc(self, character_id: str, snapshot: dict[str, str]) -> _NpcIntent:
+    def _npc_candidate_sets(
+        self, snapshot: Mapping[str, str]
+    ) -> dict[str, tuple[tuple[str, _NpcIntent], ...]]:
+        """Return finite choices with the deterministic choice first."""
+
+        candidate_sets: dict[str, tuple[tuple[str, _NpcIntent], ...]] = {}
+        for character_id in sorted(snapshot):
+            if not self.runtime.characters[character_id].alive:
+                continue
+            intents = [self._plan_npc(character_id, snapshot)]
+            intents.append(_NpcIntent(character_id, None, None))
+            intents.extend(
+                _NpcIntent(character_id, destination, None)
+                for destination in sorted(self._unlocked_destinations(snapshot[character_id]))
+            )
+            intents.extend(
+                _NpcIntent(character_id, None, evidence_id)
+                for evidence_id in sorted(self.runtime.evidence)
+                if self._npc_may_manipulate(character_id, evidence_id, snapshot)
+            )
+            unique: list[_NpcIntent] = []
+            seen: set[tuple[str | None, str | None]] = set()
+            for intent in intents:
+                identity = (intent.destination_room_id, intent.manipulate_evidence_id)
+                if identity not in seen:
+                    seen.add(identity)
+                    unique.append(intent)
+            candidate_sets[character_id] = tuple(
+                (f"option_{index:02d}", intent) for index, intent in enumerate(unique)
+            )
+        return candidate_sets
+
+    def _npc_candidate_summary(self, intent: _NpcIntent) -> str:
+        if intent.destination_room_id:
+            return f"Move by an available route to {self.location.rooms[intent.destination_room_id].name}."
+        if intent.manipulate_evidence_id:
+            return "Perform a currently permitted local interaction."
+        return "Remain in place."
+
+    def _plan_npc(self, character_id: str, snapshot: Mapping[str, str]) -> _NpcIntent:
         character = self.runtime.characters[character_id]
         if not character.alive:
             return _NpcIntent(character_id, None, None)
@@ -617,12 +816,53 @@ class GameEngine:
                     and self.location.evidence_slots[evidence.current_slot_id].room_id == snapshot[character_id]
                     and self.runtime.player_room_id != snapshot[character_id]
                 ):
-                    manipulate = evidence_id
                     # Manipulating evidence is this NPC's action for the phase;
-                    # they cannot also leave and affect their former room.
+                    # they cannot also leave and affect their former room.  If
+                    # solvability now forbids it, the exact deterministic
+                    # fallback behaviour is to hold rather than move.
                     destination = None
+                    manipulate = (
+                        evidence_id
+                        if self._npc_may_manipulate(character_id, evidence_id, snapshot)
+                        else None
+                    )
                     break
         return _NpcIntent(character_id, destination, manipulate)
+
+    def _npc_may_manipulate(
+        self,
+        character_id: str,
+        evidence_id: str,
+        snapshot: Mapping[str, str],
+    ) -> bool:
+        """Recheck identity, presence, evidence, and solvability constraints."""
+
+        if (
+            character_id != self.case.murder.murderer_id
+            or self.runtime.turn % 3 != 0
+            or character_id not in snapshot
+            or not self.runtime.characters[character_id].alive
+            or self.runtime.characters[character_id].current_room_id != snapshot[character_id]
+            or self.runtime.player_room_id == snapshot[character_id]
+        ):
+            return False
+        evidence = self.runtime.evidence.get(evidence_id)
+        definition = self.case.evidence.get(evidence_id)
+        if (
+            evidence is None
+            or definition is None
+            or not definition.manipulable
+            or evidence.discovered_by_player
+            or evidence.condition in {EvidenceCondition.COLLECTED, EvidenceCondition.CONCEALED, EvidenceCondition.DESTROYED}
+            or evidence.current_slot_id is None
+        ):
+            return False
+        slot = self.location.evidence_slots.get(evidence.current_slot_id)
+        return bool(
+            slot
+            and slot.room_id == snapshot[character_id]
+            and self._can_manipulate(evidence_id)
+        )
 
     def _can_manipulate(self, evidence_id: str) -> bool:
         """Refuse a defensive action if removal would make a solution unsupported."""
@@ -704,6 +944,7 @@ class GameEngine:
             id=character_id,
             name=self._name(character_id),
             description=overlay.public_relationship_to_victim,
+            portrait_url=portrait_url(character_id),
         )
 
     def _evidence_view(self, evidence_id: str) -> PublicEvidenceView:

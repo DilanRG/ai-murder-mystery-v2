@@ -11,7 +11,8 @@ The current build is a complete playable vertical slice. It needs no API key and
 - A sourced notebook with facts, notes, timeline entries, contradictions, and suspects.
 - Ten-minute deterministic turns with NPC activity resolved from one immutable turn-start snapshot.
 - Versioned local JSON saves, safe resume, timeout, supported accusation, and post-game debrief.
-- Optional OpenRouter dialogue portrayal constrained to claims the engine has already authorized.
+- Optional OpenRouter dialogue portrayal and NPC intent selection, both constrained to choices the engine has already authorized.
+- Distinct, versioned noir portrait placeholders for the full cast, with accessible text fallbacks.
 - Responsive desktop and mobile browser UI.
 
 ## Run locally
@@ -44,9 +45,14 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 
 The suite includes rules tests, transport-level truth-redaction tests, a full black-box API solve, persistence and tamper checks, constrained-AI boundary tests, and adversarial input/state-atomicity cases.
 
-## Optional AI portrayal
+## Optional AI layer
 
-The core game is deterministic. In Settings, an OpenRouter key and model can optionally be supplied to restyle an NPC's already-approved interview claim. Provider output is schema-validated, fact references are allow-listed, timeouts and malformed output fall back locally, and generated prose cannot mutate world state.
+The core game is deterministic. In Settings, an OpenRouter key and model can optionally be supplied for two bounded jobs:
+
+- Restyle an already-approved interview claim in character voice.
+- Select one opaque, engine-authored NPC action option for each living character in a single turn batch.
+
+Provider output is schema-validated, dialogue fact references and action IDs are allow-listed, timeouts and malformed output fall back locally, and generated output cannot mutate world state. The provider receives neither an arbitrary state-patch interface nor authority to invent rooms, evidence, facts, or tools.
 
 The key is stored locally in `backend/user_config.json`. Save games are stored in `backend/saves/`; both paths are ignored by Git.
 
@@ -61,9 +67,11 @@ The key is stored locally in `backend/user_config.json`. Save games are stored i
 - `docs/mvp_decisions.md` — resolved MVP ambiguities and invariants.
 - `docs/prototype_reuse_audit.md` — retained versus replaced prototype components.
 
+Current completion and remaining-work notes live in [docs/active_status.md](docs/active_status.md).
+
 ## Design invariant
 
-The engine decides facts, disclosure, actions, time, evidence, and win conditions. Models may portray authorized dialogue, but model prose is never authoritative game state.
+The engine decides facts, disclosure, valid action candidates, time, evidence, and win conditions. Models may portray authorized dialogue or select among finite authorized intents, but model output is never authoritative game state.
 
 ## License
 

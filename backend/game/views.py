@@ -23,6 +23,7 @@ class PublicCharacterView(StrictModel):
     id: str
     name: str
     description: str = ""
+    portrait_url: str = ""
 
 
 class PublicEvidenceView(StrictModel):

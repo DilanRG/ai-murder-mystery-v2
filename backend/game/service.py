@@ -7,6 +7,7 @@ they never hand the canonical case or runtime models to a client.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,12 @@ from game.content import (
     load_character_card,
     load_location,
 )
+from game.public_assets import portrait_url
 from game.engine import GameEngine
+from game.npc_planning import (
+    ConstrainedNpcIntentPlanningCoordinator,
+    OpenRouterNpcIntentBatchAdapter,
+)
 from game.persistence import SaveValidationError, load_engine, write_save
 from game.portrayal import (
     ConstrainedPortrayalCoordinator,
@@ -41,6 +47,7 @@ class GameService:
         self.save_root = Path(save_root)
         self.llm = llm
         self.engine: GameEngine | None = None
+        self._action_lock = asyncio.Lock()
 
     def is_active(self) -> bool:
         return self.engine is not None and self.engine.runtime.phase.value != "ended"
@@ -58,6 +65,17 @@ class GameService:
         self.engine = GameEngine.create(case, location)
         return self.engine.view()
 
+    async def start_async(
+        self,
+        *,
+        case_id: str = DEFAULT_CASE_ID,
+        location_id: str = DEFAULT_LOCATION_ID,
+    ) -> PlayerGameView:
+        """Replace the session only while no action or load can be in flight."""
+
+        async with self._action_lock:
+            return self.start(case_id=case_id, location_id=location_id)
+
     def state(self) -> PlayerGameView:
         return self._require_engine().view()
 
@@ -65,15 +83,36 @@ class GameService:
         return self._require_engine().apply(payload)
 
     async def action(self, intent: PlayerIntent | dict[str, object]) -> dict[str, object]:
-        """Apply one authoritative command, then optionally render safe dialogue.
+        """Preview and plan safely, then apply one authoritative command.
 
-        The engine always commits the canonical statement first.  Portrayal is
-        an optional presentation pass whose failure cannot alter that result.
+        A committed action is first exercised on a deep-copied runtime.  The
+        optional remote NPC planner sees only that preview's frozen candidate
+        request, while the real runtime remains unchanged.  The same lock also
+        excludes new/load session replacement.  Dialogue portrayal remains an
+        optional post-commit presentation pass.
         """
 
+        async with self._action_lock:
+            return await self._action_locked(intent)
+
+    async def _action_locked(
+        self, intent: PlayerIntent | dict[str, object]
+    ) -> dict[str, object]:
         command = parse_player_intent(intent) if isinstance(intent, dict) else intent
         engine = self._require_engine()
-        result = engine.apply(command)
+        preview = engine.preview(command)
+        npc_action_ids: dict[str, str] | None = None
+        if preview.result.accepted and preview.result.committed and preview.npc_request is not None:
+            coordinator = ConstrainedNpcIntentPlanningCoordinator(
+                OpenRouterNpcIntentBatchAdapter(self.llm) if self.llm is not None else None
+            )
+            plan = await coordinator.plan(preview.npc_request)
+            npc_action_ids = {
+                selection.actor_id: selection.action_id
+                for selection in plan.selections
+            }
+
+        result = engine.apply(command, npc_action_ids=npc_action_ids)
         response = result.model_dump(mode="json")
         if not isinstance(command, InterviewExchangeIntent) or not result.accepted or result.dialogue is None:
             return response
@@ -143,6 +182,12 @@ class GameService:
     def load(self, filename: str) -> PlayerGameView:
         self.engine = load_engine(self.save_root, filename)
         return self.engine.view()
+
+    async def load_async(self, filename: str) -> PlayerGameView:
+        """Restore a session only while no preview/provider/apply is active."""
+
+        async with self._action_lock:
+            return self.load(filename)
 
     def catalog(self) -> dict[str, object]:
         """Return public, fixed content only; case truth is intentionally absent."""
@@ -294,10 +339,7 @@ class GameService:
             "public_biography": extension.public_biography,
             "appearance": extension.appearance,
             "speaking_style": extension.speaking_style,
-            "assets": [
-                {"type": asset.type, "uri": asset.uri, "name": asset.name}
-                for asset in card.data.assets
-            ],
+            "portrait_url": portrait_url(character_id),
         }
 
 

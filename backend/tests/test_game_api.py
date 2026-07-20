@@ -35,6 +35,14 @@ def test_no_key_start_catalog_opening_and_safe_state(tmp_path):
         assert len(payload["locations"][0]["rooms"]) >= 8
         assert len(payload["characters"]) == 8
         assert "role" not in json.dumps(payload).lower()
+        for character in payload["characters"]:
+            assert character["portrait_url"] == (
+                f"/assets/characters/{character['id']}/portrait-placeholder.svg"
+            )
+            assert "assets" not in character
+            portrait = client.get(character["portrait_url"])
+            assert portrait.status_code == 200
+            assert "svg" in portrait.headers["content-type"]
 
         response = client.post("/api/game/new", json={})
         assert response.status_code == 200
@@ -48,6 +56,8 @@ def test_no_key_start_catalog_opening_and_safe_state(tmp_path):
         assert '"murderer"' not in serialized
         assert "private_motive" not in serialized
         assert "cover_story" not in serialized
+        for character in state.json()["present_characters"]:
+            assert character["portrait_url"].startswith("/assets/characters/")
 
 
 def test_action_validation_and_opening_progression(tmp_path):

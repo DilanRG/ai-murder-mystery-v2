@@ -92,8 +92,11 @@ class LLMClient:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._messages_to_api(messages),
-            "max_tokens": max_tokens or self.sampler["max_tokens"],
-            "temperature": temperature or self.sampler["temperature"],
+            "max_tokens": self.sampler["max_tokens"] if max_tokens is None else max_tokens,
+            # Zero is a meaningful value for schema-constrained planning; an
+            # ``or`` fallback would silently replace it with the user's prose
+            # temperature and make action selection needlessly variable.
+            "temperature": self.sampler["temperature"] if temperature is None else temperature,
             "top_p": self.sampler["top_p"],
         }
         if self.sampler.get("top_k"):
