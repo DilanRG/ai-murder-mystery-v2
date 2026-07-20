@@ -15,7 +15,9 @@ from agents.tools import execute_tool
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # Each call owns its event loop. TestClient/AnyIO may close the process-wide
+    # loop, and test order must not determine whether these unit tests pass.
+    return asyncio.run(coro)
 
 
 class TestMoveTool:

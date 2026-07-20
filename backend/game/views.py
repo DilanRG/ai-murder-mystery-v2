@@ -46,6 +46,14 @@ class PublicItemView(StrictModel):
     description: str
 
 
+class PublicSceneActionView(StrictModel):
+    """An authored scene interaction currently available in the player's room."""
+
+    id: str
+    label: str
+    description: str
+
+
 class PublicStatementView(StrictModel):
     id: str = ""
     turn: int = 0
@@ -109,6 +117,7 @@ class PlayerGameView(StrictModel):
     discovered_evidence: list[PublicEvidenceView] = Field(default_factory=list)
     known_facts: list[PublicFactView] = Field(default_factory=list)
     inventory: list[PublicItemView] = Field(default_factory=list)
+    available_scenes: list[PublicSceneActionView] = Field(default_factory=list)
     statements: list[PublicStatementView] = Field(default_factory=list)
     timeline: list[PublicTimelineEntryView] = Field(default_factory=list)
     contradictions: list[PublicContradictionView] = Field(default_factory=list)

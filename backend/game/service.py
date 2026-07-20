@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from game.actions import InterviewExchangeIntent, PlayerIntent, parse_player_intent
 from game.content import (
     CHARACTER_CARDS_DIR,
     list_content_ids,
@@ -19,6 +20,13 @@ from game.content import (
 )
 from game.engine import GameEngine
 from game.persistence import SaveValidationError, load_engine, write_save
+from game.portrayal import (
+    ConstrainedPortrayalCoordinator,
+    OpenRouterPortrayalAdapter,
+    PermittedFact,
+    PortrayalRequest,
+    PublicDialogueLine,
+)
 from game.views import PlayerGameView, TurnResultView
 
 
@@ -56,7 +64,75 @@ class GameService:
     def apply(self, payload: dict[str, object]) -> TurnResultView:
         return self._require_engine().apply(payload)
 
+    async def action(self, intent: PlayerIntent | dict[str, object]) -> dict[str, object]:
+        """Apply one authoritative command, then optionally render safe dialogue.
+
+        The engine always commits the canonical statement first.  Portrayal is
+        an optional presentation pass whose failure cannot alter that result.
+        """
+
+        command = parse_player_intent(intent) if isinstance(intent, dict) else intent
+        engine = self._require_engine()
+        result = engine.apply(command)
+        response = result.model_dump(mode="json")
+        if not isinstance(command, InterviewExchangeIntent) or not result.accepted or result.dialogue is None:
+            return response
+
+        statement = next(
+            (
+                item
+                for item in engine.runtime.player_knowledge.statements
+                if item.id == result.dialogue.id
+            ),
+            None,
+        )
+        if statement is None:
+            return response
+
+        # This entire presentation pass is deliberately post-commit and
+        # best-effort.  Missing card data or an adapter/configuration error
+        # must never make a successful, already-recorded engine turn fail.
+        try:
+            character_id = statement.speaker_id
+            card = load_character_card(character_id)
+            known_fact_ids = engine.runtime.player_knowledge.known_fact_ids
+            permitted_facts = tuple(
+                PermittedFact(id=fact_id, statement=engine.case.facts[fact_id].statement)
+                for fact_id in statement.referenced_fact_ids
+                if fact_id in known_fact_ids and fact_id in engine.case.facts
+            )
+            transcript = tuple(
+                PublicDialogueLine(
+                    speaker_name=self._display_name(previous.speaker_id),
+                    utterance=previous.claim,
+                )
+                for previous in engine.runtime.player_knowledge.statements[:-1][-16:]
+            )
+            request = PortrayalRequest(
+                character_id=character_id,
+                character_name=result.dialogue.speaker_name,
+                speaking_style=card.data.extensions.murder_mystery.speaking_style,
+                emotional_state=self._public_emotional_state(
+                    engine.runtime.characters[character_id].emotional_state
+                ),
+                player_question=command.message,
+                canonical_claim=statement.claim,
+                permitted_facts=permitted_facts,
+                prior_public_dialogue=transcript,
+            )
+            coordinator = ConstrainedPortrayalCoordinator(
+                OpenRouterPortrayalAdapter(self.llm) if self.llm is not None else None
+            )
+            response["portrayal"] = (
+                await coordinator.portray(request)
+            ).model_dump(mode="json")
+        except Exception:
+            return response
+        return response
+
     def save(self, filename: str) -> str:
+        if not filename.lower().endswith(".json"):
+            filename = f"{filename}.json"
         return write_save(self._require_engine(), self.save_root, filename).name
 
     def list_saves(self) -> list[str]:
@@ -138,6 +214,25 @@ class GameService:
     @staticmethod
     def _display_name(character_id: str) -> str:
         return " ".join(part.capitalize() for part in character_id.split("_"))
+
+    @staticmethod
+    def _public_emotional_state(runtime_state: str) -> str:
+        """Map internal wording to a small, public-safe presentation vocabulary."""
+
+        state = runtime_state.lower()
+        if "angry" in state or "grief" in state:
+            return "distressed"
+        if "frightened" in state or "anxious" in state:
+            return "uneasy"
+        if "defensive" in state:
+            return "guarded"
+        if "focused" in state:
+            return "focused"
+        if "alert" in state:
+            return "alert"
+        if "controlled" in state or "composed" in state:
+            return "composed"
+        return "guarded"
 
     @staticmethod
     def _location_summary(location: Any) -> dict[str, object]:

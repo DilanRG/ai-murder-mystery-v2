@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+from pydantic import ValidationError
+
 from game.actions import (
     AccuseIntent,
     AddNoteIntent,
@@ -16,6 +19,7 @@ from game.actions import (
     MarkContradictionIntent,
     MoveIntent,
     SearchIntent,
+    parse_player_intent,
 )
 from game.content import load_case, load_location
 from game.engine import GameEngine
@@ -78,6 +82,7 @@ def test_body_examination_is_a_valid_typed_discovery_route() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
     engine.apply(MoveIntent(room_id="library"))
+    assert [scene.id for scene in engine.view().available_scenes] == ["body"]
     result = engine.apply(ExamineBodyIntent())
     assert result.accepted and result.committed
     assert {item.id for item in result.discoveries} == {
@@ -105,6 +110,50 @@ def test_interview_has_three_free_exchanges_and_end_commits_once() -> None:
     assert engine.runtime.in_game_minute == start[1] + 10
 
 
+def test_interview_records_authored_fact_references_and_npc_memory() -> None:
+    engine = make_engine()
+    engine.apply(AdvanceOpeningIntent())
+    engine.apply(BeginInterviewIntent(character_id="inspector_elena_hayes"))
+    alibi = engine.apply(InterviewExchangeIntent(message="Where were you?"))
+    observation = engine.apply(InterviewExchangeIntent(message="What did you see?"))
+
+    assert alibi.dialogue is not None and observation.dialogue is not None
+    recorded = {statement.id: statement for statement in engine.runtime.player_knowledge.statements}
+    assert recorded[alibi.dialogue.id].referenced_fact_ids == []
+    assert recorded[observation.dialogue.id].referenced_fact_ids == list(
+        engine.case.overlays["inspector_elena_hayes"].observations[0].fact_ids
+    )
+    memory = engine.runtime.characters["inspector_elena_hayes"].conversation_memory
+    assert [entry.text for entry in memory] == [
+        recorded[alibi.dialogue.id].claim,
+        recorded[observation.dialogue.id].claim,
+    ]
+    assert memory[-1].listener_ids == ["player"]
+    assert memory[-1].referenced_fact_ids == recorded[observation.dialogue.id].referenced_fact_ids
+
+
+def test_direct_intent_parsing_rejects_blank_interview_before_engine_mutates() -> None:
+    engine = make_engine()
+    engine.apply(AdvanceOpeningIntent())
+    engine.apply(BeginInterviewIntent(character_id="inspector_elena_hayes"))
+    before = (
+        engine.runtime.turn,
+        engine.runtime.in_game_minute,
+        engine.runtime.active_interview.exchanges_used,
+        list(engine.runtime.player_knowledge.statements),
+    )
+
+    with pytest.raises(ValidationError):
+        parse_player_intent({"kind": "interview_exchange", "message": "   "})
+
+    assert (
+        engine.runtime.turn,
+        engine.runtime.in_game_minute,
+        engine.runtime.active_interview.exchanges_used,
+        engine.runtime.player_knowledge.statements,
+    ) == before
+
+
 def test_notebook_intents_are_free_and_validate_public_references() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
@@ -123,6 +172,14 @@ def test_notebook_intents_are_free_and_validate_public_references() -> None:
         )
     )
     assert timeline.accepted and not timeline.committed
+    learned_fact_id = next(fact.id for fact in timeline.game.known_facts)
+    fact_timeline = engine.apply(
+        AddTimelineEntryIntent(
+            text="A learned fact belongs on the working chronology.",
+            source_ids=[learned_fact_id],
+        )
+    )
+    assert fact_timeline.accepted and not fact_timeline.committed
     contradiction = engine.apply(
         MarkContradictionIntent(
             left_statement_id=first.dialogue.id,
@@ -145,6 +202,7 @@ def test_notebook_intents_are_free_and_validate_public_references() -> None:
     assert notebook.statements[0].id == first.dialogue.id
     assert notebook.statements[0].turn == 0
     assert notebook.timeline[0].source_ids == [first.dialogue.id]
+    assert notebook.timeline[1].source_ids == [learned_fact_id]
     assert notebook.contradictions[0].left_statement_id == first.dialogue.id
 
 

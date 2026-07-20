@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, ValidationError
 
-from game.actions import parse_player_intent
+from game.actions import InterviewExchangeIntent, parse_player_intent
 from game.persistence import SaveValidationError
 from game.service import DEFAULT_CASE_ID, DEFAULT_LOCATION_ID
 
@@ -81,12 +81,22 @@ async def action(payload: dict[str, Any]) -> dict[str, object]:
     try:
         intent = parse_player_intent(payload)
     except ValidationError as error:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=error.errors()) from error
+        # Pydantic's validation context can contain the original ValueError,
+        # which Starlette's JSON response encoder cannot serialize. Inputs are
+        # excluded as well so a rejected megabyte-scale payload is not echoed
+        # back to the client.
+        detail = error.errors(include_url=False, include_context=False, include_input=False)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail) from error
+    if isinstance(intent, InterviewExchangeIntent) and not (1 <= len(intent.message.strip()) <= 1_200):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Interview questions must contain 1 to 1200 non-whitespace characters.",
+        )
     try:
-        result = _service().apply(intent.model_dump(mode="python"))
+        result = await _service().action(intent)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return result.model_dump(mode="json")
+    return result
 
 
 @router.get("/saves/v1")

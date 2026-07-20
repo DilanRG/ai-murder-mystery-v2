@@ -6,7 +6,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -79,6 +79,16 @@ if STATIC_DIR.exists():
 app.include_router(game_router.router)
 app.include_router(ws_router.router)
 app.include_router(settings_router.router)
+
+
+@app.get("/og.png", include_in_schema=False)
+async def social_preview():
+    """Serve the generated social preview beside the single-page app."""
+
+    image = STATIC_DIR / "og.png"
+    if image.exists():
+        return FileResponse(image, media_type="image/png")
+    raise HTTPException(status_code=404, detail="Social preview is not built.")
 
 
 @app.get("/{full_path:path}")

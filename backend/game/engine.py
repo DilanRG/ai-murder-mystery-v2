@@ -26,6 +26,7 @@ from game.actions import (
 from game.models import (
     CaseDefinition,
     CharacterRuntimeState,
+    ConversationMemoryEntry,
     ContradictionRecord,
     DoorRuntimeState,
     EvidenceCondition,
@@ -51,6 +52,7 @@ from game.views import (
     PublicOpeningView,
     PublicResultView,
     PublicRoomView,
+    PublicSceneActionView,
     PublicStatementView,
     PublicTimelineEntryView,
     TurnResultView,
@@ -198,6 +200,18 @@ class GameEngine:
             discovered_evidence=evidence,
             known_facts=known_facts,
             inventory=inventory,
+            available_scenes=(
+                [
+                    PublicSceneActionView(
+                        id="body",
+                        label="Examine the body",
+                        description="The preserved body scene remains available for examination.",
+                    )
+                ]
+                if self.runtime.phase == GamePhase.INVESTIGATION
+                and room.id == self.case.opening.body_room_id
+                else []
+            ),
             statements=[self._statement_view(statement) for statement in self.runtime.player_knowledge.statements],
             timeline=[
                 PublicTimelineEntryView(
@@ -353,8 +367,17 @@ class GameEngine:
             return self._reject("The interview is no longer possible in this room.")
         overlay = self.case.overlays[session.character_id]
         index = session.exchanges_used
-        choices = [overlay.alibi_claim, *(item.summary for item in overlay.observations), *(lie.claim for lie in overlay.lies)]
-        text = choices[index % len(choices)] if choices else "I have nothing useful to add."
+        # Only authored observations carry fact references.  Alibis and lies
+        # are still recordable character claims, but must not accidentally
+        # bless hidden truth with a canonical fact ID.
+        choices = [
+            (overlay.alibi_claim, []),
+            *[(item.summary, list(item.fact_ids)) for item in overlay.observations],
+            *[(lie.claim, []) for lie in overlay.lies],
+        ]
+        text, referenced_fact_ids = (
+            choices[index % len(choices)] if choices else ("I have nothing useful to add.", [])
+        )
         statement = StatementRecord(
             id=f"statement_{self.runtime.turn}_{session.character_id}_{index}",
             turn=self.runtime.turn,
@@ -363,9 +386,20 @@ class GameEngine:
             audience_ids=[PLAYER_ID],
             topic=(intent.message.strip()[:80] or "interview"),
             claim=text,
+            referenced_fact_ids=referenced_fact_ids,
             source="deterministic_fallback",
         )
         self.runtime.player_knowledge.statements.append(statement)
+        character.conversation_memory.append(
+            ConversationMemoryEntry(
+                turn=statement.turn,
+                speaker_id=session.character_id,
+                listener_ids=[PLAYER_ID],
+                topic=statement.topic,
+                text=statement.claim,
+                referenced_fact_ids=list(statement.referenced_fact_ids),
+            )
+        )
         session.statement_ids.append(statement.id)
         session.exchanges_used += 1
         discoveries: list[PublicEvidenceView] = []
@@ -392,7 +426,9 @@ class GameEngine:
     def _add_timeline_entry(self, intent: AddTimelineEntryIntent) -> TurnResultView:
         valid_sources = self._notebook_source_ids()
         if any(source_id not in valid_sources for source_id in intent.source_ids):
-            return self._reject("Timeline entries may cite only discovered evidence or recorded statements.")
+            return self._reject(
+                "Timeline entries may cite only learned facts, discovered evidence, or recorded statements."
+            )
         if intent.minute is not None and intent.minute > self.runtime.in_game_minute:
             return self._reject("A timeline entry cannot be dated later than the current investigation time.")
         entry = PlayerTimelineEntry(
@@ -695,9 +731,11 @@ class GameEngine:
         )
 
     def _notebook_source_ids(self) -> set[str]:
-        return set(self.runtime.player_knowledge.discovered_evidence_ids) | {
-            statement.id for statement in self.runtime.player_knowledge.statements
-        }
+        return (
+            set(self.runtime.player_knowledge.discovered_evidence_ids)
+            | set(self.runtime.player_knowledge.known_fact_ids)
+            | {statement.id for statement in self.runtime.player_knowledge.statements}
+        )
 
     def _known_facts_linked_to(
         self,

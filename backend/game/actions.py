@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 
-from pydantic import AliasChoices, Field, TypeAdapter
+from pydantic import AliasChoices, Field, TypeAdapter, field_validator
 
 from game.models import StrictModel
 
@@ -36,7 +36,15 @@ class BeginInterviewIntent(PlayerIntentBase):
 
 class InterviewExchangeIntent(PlayerIntentBase):
     kind: Literal["interview_exchange"] = "interview_exchange"
-    message: str = ""
+    message: str
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        stripped = value.strip()
+        if not 1 <= len(stripped) <= 1_200:
+            raise ValueError("interview message must contain 1 to 1200 non-whitespace characters")
+        return stripped
 
 
 class EndInterviewIntent(PlayerIntentBase):

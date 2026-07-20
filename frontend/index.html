@@ -1,343 +1,55 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Murder at Midnight — AI Mystery</title>
-  <meta name="description" content="An AI-powered murder mystery where 8 intelligent suspects live and breathe around you." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500;600&family=Space+Mono:ital@0;1&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css" />
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>The Ashwick Trust — A Murder Mystery</title>
+  <meta name="description" content="A local-first, turn-based murder mystery at Ashwick Manor.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="The Ashwick Trust — A Murder Mystery">
+  <meta property="og:description" content="Enter stormbound Ashwick Manor. Search the rooms, test seven stories, and build an accusation before the night runs out.">
+  <meta property="og:image" content="/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="The Ashwick Trust — A Murder Mystery">
+  <meta name="twitter:description" content="A cinematic, turn-based murder mystery where evidence—not AI narration—decides the truth.">
+  <meta name="twitter:image" content="/og.png">
+  <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-
-  <!-- ═══ PARTICLE CANVAS (ambient atmosphere) ═══ -->
-  <canvas id="particles-canvas"></canvas>
-
-  <!-- ═══ SCREEN: TITLE ═══ -->
-  <section id="screen-title" class="screen active">
-    <div class="title-bg-overlay"></div>
-    <div class="title-content">
-      <div class="title-emblem">
-        <svg viewBox="0 0 80 80" fill="none">
-          <circle cx="40" cy="40" r="38" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 3" />
-          <circle cx="40" cy="40" r="28" stroke="var(--accent-dim)" stroke-width="0.5" />
-          <path d="M40 12 L44 30 L40 26 L36 30 Z" fill="var(--accent)" />
-          <path d="M40 68 L44 50 L40 54 L36 50 Z" fill="var(--accent)" />
-          <circle cx="40" cy="40" r="4" fill="var(--accent)" />
-        </svg>
+  <div id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  <main id="app">
+    <section id="screen-title" class="screen active" aria-labelledby="title-heading">
+      <div class="title-card">
+        <p class="eyebrow">Ashwick Manor · Stormbound</p>
+        <h1 id="title-heading">The<br><em>Ashwick Trust</em></h1>
+        <p class="lead">A murder has stopped the house. Eight people remain. Every action moves the night forward.</p>
+        <div class="title-actions"><button id="new-game" class="primary">Begin investigation</button><button id="resume-game" class="secondary">Resume saved session</button></div>
+        <p id="connection" class="status">Checking local case file…</p>
+        <button id="title-settings" class="text-button">Settings · optional AI portrayal</button>
       </div>
-      <div class="title-eyebrow">A.I. MYSTERY · VOLUME TWO</div>
-      <h1 class="title-heading">Murder<br/><span class="title-red">at Midnight</span></h1>
-      <p class="title-sub">Eight suspects. One killer. An AI that remembers everything.</p>
-      <div class="title-actions">
-        <button id="btn-new-game" class="btn-primary">Begin Investigation</button>
-        <button id="btn-settings" class="btn-ghost">Configure Settings</button>
+    </section>
+
+    <section id="screen-setup" class="screen" aria-labelledby="setup-title">
+      <div class="setup-card">
+        <button class="text-button back" data-screen="title">← Return</button>
+        <p class="eyebrow">Case file</p><h2 id="setup-title">Prepare for Ashwick</h2>
+        <p>Designed for deterministic play. An AI provider may enrich portrayals later, but is never required to solve this case.</p>
+        <dl id="case-summary" class="case-summary"></dl>
+        <div class="setup-actions"><button id="start-case" class="primary">Open the case</button><button id="setup-settings" class="secondary">Optional AI settings</button></div>
       </div>
-      <div id="api-key-warning" class="api-warning hidden">
-        ⚠ No API key configured — open Settings first
+    </section>
+
+    <section id="screen-game" class="screen" aria-label="Investigation">
+      <header class="topbar"><div><p class="eyebrow">Case</p><strong id="case-title">Ashwick</strong></div><div class="status-row"><span id="room-label">—</span><span id="turn-label">Turn 0</span><time id="time-label">—</time></div><div class="top-actions"><button id="save-button" class="secondary small">Save / load</button><button id="game-settings" class="secondary small" aria-label="Settings">Settings</button></div></header>
+      <div class="game-grid">
+        <aside class="left-rail"><section><h2>Manor map</h2><p id="map-note" class="muted">Only connected, unlocked rooms can be entered.</p><nav id="room-map" class="room-map" aria-label="Rooms"></nav></section><section><h2>In this room</h2><div id="present-characters" class="stack"></div></section></aside>
+        <section class="scene-column"><div id="opening-panel" class="opening-panel"></div><article class="scene"><p id="scene-kicker" class="eyebrow">Current location</p><h2 id="scene-name">—</h2><p id="scene-description"></p><div id="scene-actions" class="action-grid"></div></article><section aria-label="Investigation record"><h2>Case record</h2><ol id="narration" class="narration"></ol></section></section>
+        <aside class="right-rail"><div class="tabs" role="tablist" aria-label="Case file"><button class="tab active" data-tab="evidence" role="tab">Evidence</button><button class="tab" data-tab="facts" role="tab">Facts</button><button class="tab" data-tab="suspects" role="tab">Suspects</button><button class="tab" data-tab="notebook" role="tab">Notebook</button></div><div id="notebook-panel" class="notebook-panel"></div><button id="accuse-button" class="danger">Make accusation</button></aside>
       </div>
-      <div class="title-footer">
-        <span id="backend-status" class="status-dot disconnected">●</span>
-        <span id="backend-status-label">Connecting...</span>
-      </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ═══ SCREEN: SETUP ═══ -->
-  <section id="screen-setup" class="screen">
-    <div class="setup-container">
-      <header class="setup-header">
-        <button class="btn-back" id="btn-setup-back">← Back</button>
-        <h2 class="setup-title">Case Configuration</h2>
-      </header>
-
-      <div class="setup-grid">
-        <!-- Left: Detective Profile -->
-        <div class="setup-card" id="setup-detective">
-          <h3 class="setup-card-title">Your Identity</h3>
-          <label class="field-label" for="input-player-name">Detective Name</label>
-          <input id="input-player-name" class="field-input" type="text" placeholder="e.g. Detective Marlowe" maxlength="40" value="Detective" />
-          <label class="field-label" for="input-player-desc">Brief Description <span class="optional">(optional)</span></label>
-          <textarea id="input-player-desc" class="field-textarea" placeholder="How do you carry yourself?" maxlength="200" rows="3"></textarea>
-        </div>
-
-        <!-- Right: Game Settings -->
-        <div class="setup-card" id="setup-options">
-          <h3 class="setup-card-title">Case Parameters</h3>
-
-          <label class="field-label">Difficulty</label>
-          <div class="radio-group" id="difficulty-group">
-            <label class="radio-card">
-              <input type="radio" name="difficulty" value="easy" />
-              <span class="radio-label">Easy</span>
-              <span class="radio-desc">More clues, looser tongues</span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="difficulty" value="normal" checked />
-              <span class="radio-label">Normal</span>
-              <span class="radio-desc">Balanced investigation</span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="difficulty" value="hard" />
-              <span class="radio-label">Hard</span>
-              <span class="radio-desc">Everyone's hiding something</span>
-            </label>
-          </div>
-
-          <label class="field-label">Timer Mode</label>
-          <div class="radio-group" id="timer-group">
-            <label class="radio-card">
-              <input type="radio" name="timer_mode" value="none" />
-              <span class="radio-label">None</span>
-              <span class="radio-desc">No time pressure</span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="timer_mode" value="event" checked />
-              <span class="radio-label">Event-Driven</span>
-              <span class="radio-desc">Climax triggers endgame</span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="timer_mode" value="realtime" />
-              <span class="radio-label">Countdown</span>
-              <span class="radio-desc">Solve before time runs out</span>
-            </label>
-          </div>
-
-          <div id="timer-minutes-row" class="timer-minutes-row hidden">
-            <label class="field-label">Time Limit</label>
-            <div class="slider-row">
-              <input id="slider-timer" type="range" min="15" max="60" step="5" value="30" class="slider" />
-              <span id="slider-timer-label" class="slider-value">30 min</span>
-            </div>
-          </div>
-
-          <label class="field-label">NPC Autonomy</label>
-          <div class="radio-group" id="autonomy-group">
-            <label class="radio-card">
-              <input type="radio" name="autonomy" value="low" />
-              <span class="radio-label">Low</span>
-              <span class="radio-desc">NPCs mostly wait for you</span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="autonomy" value="high" checked />
-              <span class="radio-label">High</span>
-              <span class="radio-desc">The world lives without you</span>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div class="setup-footer">
-        <button id="btn-start-game" class="btn-primary btn-large">▶ Start Investigation</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ SCREEN: LOADING ═══ -->
-  <section id="screen-loading" class="screen">
-    <div class="loading-content">
-      <div class="loading-spinner">
-        <svg viewBox="0 0 60 60" class="spinner-svg">
-          <circle cx="30" cy="30" r="26" stroke="var(--accent)" stroke-width="1" stroke-dasharray="163" stroke-dashoffset="163" class="spinner-ring" />
-          <circle cx="30" cy="30" r="18" stroke="var(--accent-dim)" stroke-width="0.5" stroke-dasharray="4 3" class="spinner-orbit" />
-        </svg>
-      </div>
-      <div class="loading-title">Weaving the Mystery</div>
-      <div id="loading-status" class="loading-status">Consulting the shadows...</div>
-      <div class="loading-steps">
-        <div class="loading-step" id="lstep-cast">✦ Selecting the cast</div>
-        <div class="loading-step" id="lstep-scenario">✦ Constructing the scenario</div>
-        <div class="loading-step" id="lstep-world">✦ Building the world</div>
-        <div class="loading-step" id="lstep-agents">✦ Briefing the suspects</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ SCREEN: GAME ═══ -->
-  <section id="screen-game" class="screen">
-    <div class="game-layout">
-
-      <!-- LEFT: Map & Characters -->
-      <aside class="panel panel-left">
-        <div class="panel-section">
-          <h3 class="panel-heading">Locations</h3>
-          <div id="map-container" class="map-container">
-            <svg id="map-svg" class="map-svg"></svg>
-          </div>
-          <div id="current-location-name" class="current-location-name">—</div>
-          <div id="current-location-desc" class="current-location-desc"></div>
-        </div>
-        <div class="panel-section">
-          <h3 class="panel-heading">Persons of Interest</h3>
-          <div id="character-list" class="character-list"></div>
-        </div>
-      </aside>
-
-      <!-- CENTER: Dialogue & Events -->
-      <main class="panel panel-center">
-        <div class="center-top-bar">
-          <div class="game-title-bar">
-            <span id="game-scenario-title" class="scenario-title"></span>
-            <div class="game-top-right">
-              <span id="game-timer" class="game-timer hidden">⏱ 00:00</span>
-              <button id="btn-accuse" class="btn-danger btn-sm">Make Accusation</button>
-              <button id="btn-game-settings" class="btn-ghost btn-sm">⚙</button>
-            </div>
-          </div>
-        </div>
-
-        <div id="chat-feed" class="chat-feed">
-          <div class="chat-empty-state">
-            <span>Select a person to question, or investigate your location</span>
-          </div>
-        </div>
-
-        <div class="chat-input-area">
-          <div id="chat-npc-label" class="chat-npc-label">
-            <span id="chat-npc-name">Select a suspect to question</span>
-            <button id="btn-clear-npc" class="btn-ghost btn-xs hidden">✕</button>
-          </div>
-          <div class="chat-input-row">
-            <textarea id="chat-input" class="chat-textarea" placeholder="What do you say..." rows="2" disabled></textarea>
-            <div class="chat-input-buttons">
-              <button id="btn-send" class="btn-primary btn-sm" disabled>Send</button>
-              <button id="btn-investigate" class="btn-secondary btn-sm">🔍 Search Area</button>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      <!-- RIGHT: Clue Journal -->
-      <aside class="panel panel-right">
-        <div class="panel-section">
-          <h3 class="panel-heading">Clue Journal <span id="clue-count" class="badge">0</span></h3>
-          <div id="clue-list" class="clue-list">
-            <div class="empty-state">No clues found yet.</div>
-          </div>
-        </div>
-        <div class="panel-section">
-          <h3 class="panel-heading">Event Log</h3>
-          <div id="event-log" class="event-log"></div>
-        </div>
-      </aside>
-
-    </div>
-  </section>
-
-  <!-- ═══ SCREEN: RESULTS ═══ -->
-  <section id="screen-results" class="screen">
-    <div class="results-container">
-      <div id="results-verdict" class="results-verdict">
-        <div id="verdict-icon" class="verdict-icon"></div>
-        <h2 id="verdict-heading" class="verdict-heading"></h2>
-        <p id="verdict-sub" class="verdict-sub"></p>
-        <p id="verdict-narrative" class="verdict-narrative hidden"></p>
-      </div>
-      <div class="results-tabs">
-        <button class="tab-btn active" data-tab="murder">The Murder</button>
-        <button class="tab-btn" data-tab="suspects">Suspects</button>
-        <button class="tab-btn" data-tab="evidence">Evidence</button>
-        <button class="tab-btn" data-tab="timeline">Timeline</button>
-      </div>
-      <div class="results-body">
-        <div id="tab-murder" class="tab-panel active"></div>
-        <div id="tab-suspects" class="tab-panel hidden"></div>
-        <div id="tab-evidence" class="tab-panel hidden"></div>
-        <div id="tab-timeline" class="tab-panel hidden"></div>
-      </div>
-      <div class="results-footer">
-        <button id="btn-play-again" class="btn-primary">Start a New Case</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ MODAL: SETTINGS ═══ -->
-  <div id="modal-settings" class="modal-overlay hidden">
-    <div class="modal-panel">
-      <div class="modal-header">
-        <h3 class="modal-title">Settings</h3>
-        <button id="btn-close-settings" class="btn-close">✕</button>
-      </div>
-      <div class="modal-body">
-
-        <div class="settings-section">
-          <h4 class="settings-section-title">LLM Provider</h4>
-          <label class="field-label">API Key (OpenRouter)</label>
-          <div class="input-with-action">
-            <input id="settings-api-key" type="password" class="field-input" placeholder="sk-or-v1-..." autocomplete="off" />
-            <button id="btn-test-connection" class="btn-secondary btn-sm">Test</button>
-          </div>
-          <div id="connection-status" class="connection-status"></div>
-
-          <label class="field-label" style="margin-top:1.2rem">Model</label>
-          <div class="input-with-action">
-            <input id="settings-model-search" type="text" class="field-input" placeholder="Search models (e.g. deepseek, mistral)..." />
-            <button id="btn-model-search" class="btn-secondary btn-sm">🔍</button>
-          </div>
-          <div id="model-results" class="model-results hidden"></div>
-          <div id="selected-model-display" class="selected-model-display"></div>
-        </div>
-
-        <div class="settings-section">
-          <h4 class="settings-section-title">Sampling Parameters</h4>
-          <div class="sampler-grid">
-            <div class="sampler-row">
-              <label class="field-label">Temperature</label>
-              <div class="slider-row">
-                <input id="s-temperature" type="range" min="0" max="2" step="0.05" value="0.8" class="slider" />
-                <span id="s-temperature-val" class="slider-value">0.80</span>
-              </div>
-              <p class="setting-hint">Higher = more creative / unpredictable responses</p>
-            </div>
-            <div class="sampler-row">
-              <label class="field-label">Top P</label>
-              <div class="slider-row">
-                <input id="s-top-p" type="range" min="0" max="1" step="0.05" value="0.95" class="slider" />
-                <span id="s-top-p-val" class="slider-value">0.95</span>
-              </div>
-            </div>
-            <div class="sampler-row">
-              <label class="field-label">Max Tokens (per response)</label>
-              <div class="slider-row">
-                <input id="s-max-tokens" type="range" min="128" max="2048" step="64" value="1024" class="slider" />
-                <span id="s-max-tokens-val" class="slider-value">1024</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-      </div>
-      <div class="modal-footer">
-        <button id="btn-save-settings" class="btn-primary">Save Settings</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ MODAL: ACCUSATION ═══ -->
-  <div id="modal-accuse" class="modal-overlay hidden">
-    <div class="modal-panel modal-panel-sm">
-      <div class="modal-header">
-        <h3 class="modal-title">Make Your Accusation</h3>
-        <button id="btn-close-accuse" class="btn-close">✕</button>
-      </div>
-      <div class="modal-body">
-        <p class="accuse-intro">Choose wisely. You only get one accusation.</p>
-        <div id="accuse-suspect-list" class="accuse-suspect-list"></div>
-        <div id="selected-accusee" class="selected-accusee hidden">
-          <span id="accusee-name"></span>
-          <button class="btn-ghost btn-xs" id="btn-clear-accusee">Change</button>
-        </div>
-        <label class="field-label" style="margin-top:1rem">Your Reasoning</label>
-        <textarea id="accuse-reasoning" class="field-textarea" rows="3" placeholder="Why do you believe they are the killer?"></textarea>
-      </div>
-      <div class="modal-footer">
-        <button id="btn-confirm-accuse" class="btn-danger" disabled>Accuse Them</button>
-      </div>
-    </div>
-  </div>
-
+    <section id="screen-result" class="screen" aria-labelledby="result-title"><div class="result-card"><p class="eyebrow">The final report</p><h2 id="result-title">Case concluded</h2><p id="result-summary"></p><div id="debrief-content" class="debrief"></div><div class="title-actions"><button id="debrief-button" class="secondary">Reveal debrief</button><button id="again-button" class="primary">New investigation</button></div></div></section>
+  </main>
+  <div id="modal-root"></div>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>
