@@ -1,5 +1,10 @@
 # 🔪 AI Murder Mystery
 
+> **Redesign in progress:** The repository's controlling specification is now
+> [the turn-based MVP project brief](docs/project_brief.md). The downloadable
+> v2.0 prototype described below is preserved as a baseline while the validated,
+> turn-based vertical slice is built in small checkpoints.
+
 A murder mystery game where the suspects are powered by AI. They move around, talk to each other, lie, and try to cover their tracks — all in real time. Your job is to figure out who did it before time runs out.
 
 ---

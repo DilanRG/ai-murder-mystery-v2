@@ -1,5 +1,9 @@
 # AI Murder Mystery v2 — Roadmap
 
+> **Historical prototype roadmap:** The completed milestones below apply to the
+> real-time v2.0 prototype. The current turn-based redesign is governed by
+> [project_brief.md](project_brief.md).
+
 > **Purpose:** High-level milestone tracker for the project manager.
 > Update this document as milestones are completed.
 > 
