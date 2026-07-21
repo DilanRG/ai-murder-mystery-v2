@@ -95,6 +95,7 @@ def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
         observer=observer,
     )
     assert client.sampler["top_k"] is None
+    assert client.task_max_tokens["case_generation"] == 32_768
 
     async def fake_post(_payload) -> LLMResponse:
         return LLMResponse(

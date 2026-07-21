@@ -1,6 +1,6 @@
 # DeepSeek V4 Phase 1 Evaluation Report
 
-**Status:** Incomplete — direct-DeepSeek experiment revision 5 awaiting preflight
+**Status:** Incomplete — revision 5 transport-limit fix awaiting preflight
 **Experiment date:** 2026-07-21 to 2026-07-22
 **Product:** AI Murder Mystery Game
 **Frozen input manifest:** [`backend/experiments/deepseek_v4_manifest.json`](../backend/experiments/deepseek_v4_manifest.json)
@@ -11,9 +11,9 @@ This is a live evidence report, not a Phase 1 or MVP completion claim. The exper
 
 Three revision-1 requests to `deepseek/deepseek-v4-flash` were rejected before generation. One revision-2 routing diagnostic completed through WandB and is invalidated because it did not use the required DeepSeek upstream. Two revision-3 forced-DeepSeek requests were rejected before generation because the OpenRouter account guardrail/data policy excluded the endpoint. Revision 4 then verified both direct models and complete token accounting.
 
-The revision-4 generation diagnostic retained P1/Flash as rejected after three structurally different failures. P1/Pro used all 16,384 completion tokens for reasoning on all three attempts, returned `finish_reason=length`, and emitted no final JSON. P2/Pro repeated the same shape once; the next repair call was interrupted to prevent known-invalid repeated spend. Revision 5 raises the shared Pro/Flash case-generation allowance to 32,768 so the comparison remains symmetric and high reasoning has room to emit the required document.
+The revision-4 generation diagnostic retained P1/Flash as rejected after three structurally different failures. P1/Pro used all 16,384 completion tokens for reasoning on all three attempts, returned `finish_reason=length`, and emitted no final JSON. P2/Pro repeated the same shape. Revision 5 raised the shared Pro/Flash allowance to 32,768, but its first Flash request exposed a second implementation seam: the production story adapter still supplied 16,384. That matrix was stopped after one settled response. The measured transport now enforces every frozen per-role limit after adapter input, so manifest and wire payload cannot silently diverge.
 
-Confirmed cumulative external spend is USD 0.08494433. The ledger retains USD 0.49912080 across six unresolved reservations: five earlier gateway uncertainties plus the interrupted revision-4 P2/Pro repair. This conservative reservation is not confirmed provider spend and still leaves USD 7.41593487 before the soft stop.
+Confirmed cumulative external spend is USD 0.10399367. The ledger retains USD 1.01128580 across seven unresolved reservations: five earlier gateway uncertainties plus one interrupted revision-4 Pro repair and one interrupted revision-5 Flash repair. This conservative reservation is not confirmed provider spend and still leaves USD 6.88472053 before the soft stop.
 
 The owner supplied a separate direct DeepSeek development key. Revision 5 must re-prove both exact models, direct transport identity, complete token accounting, and zero gateway fee before the revised matrix begins.
 
@@ -43,7 +43,7 @@ The owner supplied a separate direct DeepSeek development key. Revision 5 must r
 
 | Evidence area | Pro | Flash |
 |---|---:|---:|
-| Confirmed direct DeepSeek preflight | Revision 4 passed; revision 5 pending | Revision 4 passed; revision 5 pending |
+| Confirmed direct DeepSeek preflight | Revision 4 passed; post-fix revision 5 pending | Revision 4 passed; post-fix revision 5 pending |
 | Paired generation cells attempted | Revision-4 diagnostic: P1 rejected; P2 interrupted | Revision-4 diagnostic: P1 rejected |
 | Admitted cases | 0 | 0 |
 | Crossed intended-play cells | 0 / 2 | 0 / 2 |
@@ -56,7 +56,7 @@ Generation quality, NPC quality, latency, cache behaviour, cost per case/turn/in
 
 ```text
 python -m pytest backend\tests -q -p no:cacheprovider
-372 passed, 20 warnings
+373 passed, 20 warnings
 
 npm.cmd test -- --test-reporter=spec
 16 passed
@@ -69,7 +69,7 @@ Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
 ## Remaining work
 
-1. Commit revision 5 and rerun both tiny direct DeepSeek preflights.
+1. Commit the revision-5 transport-limit fix and rerun both tiny direct DeepSeek preflights.
 2. Attempt all six frozen paired generation cells, retaining all rejections.
 3. Select first admitted Pro/Flash cases and run crossed cells A–D with independent blind player agents.
 4. Freeze Phase A transcripts and reports, then inspect post-game audits and determine whether Phase A passes.

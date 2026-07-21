@@ -117,6 +117,7 @@ class LLMClient:
         reasoning_effort: str | None = None,
         request_observer: RequestObserver | None = None,
         transport: str = "openrouter",
+        task_max_tokens: Mapping[str, int] | None = None,
         **sampler_kwargs: Any,
     ) -> None:
         self.api_key = api_key
@@ -128,6 +129,16 @@ class LLMClient:
         if transport == "deepseek_direct" and provider_routing is not None:
             raise ValueError("direct DeepSeek requests cannot carry OpenRouter routing")
         self.transport = transport
+        self.task_max_tokens: dict[str, int] = {}
+        if task_max_tokens is not None:
+            if not isinstance(task_max_tokens, Mapping):
+                raise ValueError("task_max_tokens must be a mapping")
+            for role, limit in task_max_tokens.items():
+                if not isinstance(role, str) or not role:
+                    raise ValueError("task_max_tokens roles must be non-empty strings")
+                if isinstance(limit, bool) or not isinstance(limit, int) or not 0 < limit <= 1_000_000:
+                    raise ValueError("task_max_tokens values must be positive integers")
+                self.task_max_tokens[role] = limit
         self.provider_routing = self._copy_optional_mapping(
             provider_routing, field_name="provider_routing"
         )
@@ -200,7 +211,10 @@ class LLMClient:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._messages_to_api(messages),
-            "max_tokens": self.sampler["max_tokens"] if max_tokens is None else max_tokens,
+            "max_tokens": self.task_max_tokens.get(
+                task_role,
+                self.sampler["max_tokens"] if max_tokens is None else max_tokens,
+            ),
         }
         # Direct DeepSeek thinking mode documents these samplers as ignored, so
         # omit them rather than imply that they affect the measured comparison.
@@ -240,7 +254,9 @@ class LLMClient:
             "messages": self._messages_to_api(messages),
             "tools": tools,
             "tool_choice": "auto",
-            "max_tokens": max_tokens or self.sampler["max_tokens"],
+            "max_tokens": self.task_max_tokens.get(
+                task_role, max_tokens or self.sampler["max_tokens"]
+            ),
             "temperature": self.sampler["temperature"],
             "top_p": self.sampler["top_p"],
         }

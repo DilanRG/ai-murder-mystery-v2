@@ -29,6 +29,12 @@ EXPECTED_MANIFEST_REVISION = 5
 EXPECTED_GIT_CHECKPOINT = "bf955f301f1707a1e400bf189080bfd2433d6d36"
 EXPECTED_GATEWAY = "deepseek_direct"
 EXPECTED_ROUTING = None
+EXPECTED_ROLE_MAX_TOKENS = {
+    "case_generation": 32_768,
+    "private_npc_action": 80,
+    "private_interview_selection": 80,
+    "portrayal": 220,
+}
 
 
 class ExperimentSafetyError(RuntimeError):
@@ -89,10 +95,10 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     if dict(settings.get("sampler_defaults", {})) != {"top_p": 0.95, "top_k": None}:
         raise ExperimentSafetyError("Identical sampler defaults are required.")
     expected_roles = {
-        "case_generation": (32_768, 0.55),
-        "private_npc_action": (80, 0.0),
-        "private_interview_selection": (80, 0.0),
-        "portrayal": (220, 0.2),
+        "case_generation": (EXPECTED_ROLE_MAX_TOKENS["case_generation"], 0.55),
+        "private_npc_action": (EXPECTED_ROLE_MAX_TOKENS["private_npc_action"], 0.0),
+        "private_interview_selection": (EXPECTED_ROLE_MAX_TOKENS["private_interview_selection"], 0.0),
+        "portrayal": (EXPECTED_ROLE_MAX_TOKENS["portrayal"], 0.2),
     }
     roles = settings.get("roles")
     if not isinstance(roles, Mapping):

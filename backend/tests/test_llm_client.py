@@ -165,6 +165,31 @@ def test_direct_thinking_mode_rejects_tool_calls_before_transport() -> None:
     assert caught.value.retryable is False
 
 
+def test_measured_task_limit_overrides_a_lower_production_adapter_limit() -> None:
+    captured: dict[str, object] = {}
+    client = LLMClient(
+        api_key="test",
+        model="deepseek-v4-flash",
+        transport="deepseek_direct",
+        reasoning_effort="high",
+        task_max_tokens={"case_generation": 32_768},
+    )
+
+    async def fake_post(payload: dict[str, object]) -> LLMResponse:
+        captured.update(payload)
+        return LLMResponse(content="{}")
+
+    client._post = fake_post  # type: ignore[method-assign]
+    asyncio.run(
+        client.generate(
+            [LLMMessage(role="user", content="json")],
+            max_tokens=16_384,
+            task_role="case_generation",
+        )
+    )
+    assert captured["max_tokens"] == 32_768
+
+
 def test_direct_response_does_not_synthesize_missing_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

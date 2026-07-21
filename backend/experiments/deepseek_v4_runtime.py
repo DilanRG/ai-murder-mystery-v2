@@ -22,6 +22,7 @@ from llm.experiment import (
 
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
+    EXPECTED_ROLE_MAX_TOKENS,
     PRIVATE_ARTIFACT_ROOT,
     ExperimentSafetyError,
     model_resolution_matches,
@@ -341,6 +342,7 @@ def build_measured_client(
         top_k=None,
         max_tokens=1024,
         request_observer=fail_closed_observer,
+        task_max_tokens=EXPECTED_ROLE_MAX_TOKENS,
     )
     return client
 
