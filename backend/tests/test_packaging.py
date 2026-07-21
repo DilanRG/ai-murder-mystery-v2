@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import platform
 import sys
 from pathlib import Path
@@ -90,6 +91,9 @@ def test_release_and_local_build_use_reproducible_node_install() -> None:
     build_lock = (REPO_ROOT / "backend" / "requirements-build.lock").read_text(
         encoding="utf-8"
     )
+    frontend_package = json.loads(
+        (REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8")
+    )
     assert "run: npm ci" in workflow
     assert "run: npm test" in workflow
     assert "run: npm test" in verification_workflow
@@ -115,6 +119,7 @@ def test_release_and_local_build_use_reproducible_node_install() -> None:
     assert "actions/upload-artifact@v7" in workflow
     assert "actions/download-artifact@v8" in workflow
     assert "softprops/action-gh-release@v3" in workflow
+    assert frontend_package["scripts"]["test"] == "node --test"
 
 
 def test_packaged_launcher_supports_headless_smoke_mode_and_validates_ports() -> None:
