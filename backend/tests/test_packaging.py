@@ -80,6 +80,9 @@ def test_release_and_local_build_use_reproducible_node_install() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
         encoding="utf-8"
     )
+    verification_workflow = (
+        REPO_ROOT / ".github" / "workflows" / "verify-packages.yml"
+    ).read_text(encoding="utf-8")
     build_script = (REPO_ROOT / "build" / "build.py").read_text(encoding="utf-8")
     runtime_lock = (REPO_ROOT / "backend" / "requirements.txt").read_text(
         encoding="utf-8"
@@ -100,6 +103,16 @@ def test_release_and_local_build_use_reproducible_node_install() -> None:
     assert ">=" not in runtime_lock
     assert "tag_name: ${{ env.RELEASE_TAG }}" in workflow
     assert "target_commitish: ${{ github.sha }}" in workflow
+    for current_action in (
+        "actions/checkout@v7",
+        "actions/setup-python@v7",
+        "actions/setup-node@v7",
+    ):
+        assert current_action in workflow
+        assert current_action in verification_workflow
+    assert "actions/upload-artifact@v7" in workflow
+    assert "actions/download-artifact@v8" in workflow
+    assert "softprops/action-gh-release@v3" in workflow
 
 
 def test_packaged_launcher_supports_headless_smoke_mode_and_validates_ports() -> None:
