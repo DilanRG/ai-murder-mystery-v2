@@ -62,6 +62,11 @@ from game.private_npc_agents import (
     PrivateNpcFact,
     PrivateNpcRuntimeState,
 )
+from game.private_interview import (
+    InterviewResponseKind,
+    PrivateInterviewResponseCandidate,
+    PrivateInterviewResponseRequest,
+)
 from game.validator import validate_case
 from game.public_assets import portrait_url
 from game.recipes import CaseRecipeSelection
@@ -89,6 +94,14 @@ from game.views import (
 
 
 PLAYER_ID = "player"
+_GENERATED_MURDERER_ALIBI = (
+    "I was occupied elsewhere during the relevant period and had no part in the death."
+)
+_GENERATED_MURDERER_LIES = (
+    "I have no involvement in the death.",
+    "Nothing I have withheld would explain what happened.",
+    "You are looking in the wrong direction.",
+)
 
 
 @dataclass(frozen=True)
@@ -119,6 +132,7 @@ class EngineActionPreview:
     result: TurnResultView
     npc_request: NpcIntentPlanningRequest | None
     private_npc_requests: tuple[PrivateNpcAgentRequest, ...] | None
+    private_interview_request: PrivateInterviewResponseRequest | None
 
 
 class GameEngine:
@@ -358,6 +372,8 @@ class GameEngine:
         intent: PlayerIntent | dict[str, object],
         *,
         npc_action_ids: Mapping[str, str] | None = None,
+        interview_response_id: str | None = None,
+        interview_rules_version: int | None = None,
     ) -> TurnResultView:
         """Apply an intent synchronously, retaining deterministic NPC fallback.
 
@@ -367,9 +383,32 @@ class GameEngine:
         """
 
         command = parse_player_intent(intent) if isinstance(intent, dict) else intent
+        if interview_rules_version not in {None, 1, 2}:
+            raise ValueError("interview_rules_version must be 1 or 2")
+        if not isinstance(command, InterviewExchangeIntent):
+            if interview_response_id is not None:
+                raise ValueError(
+                    "interview_response_id is valid only for interview exchanges"
+                )
+            if interview_rules_version is not None:
+                raise ValueError(
+                    "interview_rules_version is valid only for interview exchanges"
+                )
+            resolved_interview_rules_version = None
+        else:
+            resolved_interview_rules_version = interview_rules_version or 2
+            if (
+                resolved_interview_rules_version == 1
+                and interview_response_id is not None
+            ):
+                raise ValueError(
+                    "legacy interview rules cannot contain a response ID"
+                )
         result = self._apply(
             command,
             npc_action_ids=npc_action_ids,
+            interview_response_id=interview_response_id,
+            interview_rules_version=resolved_interview_rules_version,
             defer_npc_phase=False,
         )
         if (
@@ -383,6 +422,8 @@ class GameEngine:
                     npc_action_ids=(
                         dict(npc_action_ids) if npc_action_ids is not None else None
                     ),
+                    interview_response_id=interview_response_id,
+                    interview_rules_version=resolved_interview_rules_version,
                 )
             )
         return result
@@ -395,6 +436,7 @@ class GameEngine:
         be shared; every mutable runtime model is copied recursively.
         """
 
+        command = parse_player_intent(intent) if isinstance(intent, dict) else intent
         clone = object.__new__(GameEngine)
         clone.case = self.case
         clone.location = self.location
@@ -406,7 +448,22 @@ class GameEngine:
             else None
         )
         clone.runtime = self.runtime.model_copy(deep=True)
-        result = clone._apply(intent, npc_action_ids=None, defer_npc_phase=True)
+        private_interview_request = (
+            clone._build_private_interview_request(command)
+            if isinstance(command, InterviewExchangeIntent)
+            else None
+        )
+        result = clone._apply(
+            command,
+            npc_action_ids=None,
+            interview_response_id=None,
+            interview_rules_version=(
+                2 if isinstance(command, InterviewExchangeIntent) else None
+            ),
+            defer_npc_phase=True,
+        )
+        if not result.accepted:
+            private_interview_request = None
         request = clone._build_npc_planning_request() if result.accepted and result.committed else None
         private_requests = (
             clone._build_private_npc_requests(request)
@@ -417,6 +474,7 @@ class GameEngine:
             result=result,
             npc_request=request,
             private_npc_requests=private_requests,
+            private_interview_request=private_interview_request,
         )
 
     def _apply(
@@ -424,6 +482,8 @@ class GameEngine:
         intent: PlayerIntent | dict[str, object],
         *,
         npc_action_ids: Mapping[str, str] | None,
+        interview_response_id: str | None,
+        interview_rules_version: int | None,
         defer_npc_phase: bool,
     ) -> TurnResultView:
         command = parse_player_intent(intent) if isinstance(intent, dict) else intent
@@ -440,7 +500,12 @@ class GameEngine:
         if isinstance(command, BeginInterviewIntent):
             return self._begin_interview(command)
         if isinstance(command, InterviewExchangeIntent):
-            return self._interview_exchange(command)
+            assert interview_rules_version is not None
+            return self._interview_exchange(
+                command,
+                interview_response_id,
+                interview_rules_version,
+            )
         if isinstance(command, EndInterviewIntent):
             return self._end_interview(npc_action_ids, defer_npc_phase)
         if isinstance(command, ExamineEvidenceIntent):
@@ -569,7 +634,177 @@ class GameEngine:
         self.runtime.active_interview = InterviewSession(character_id=intent.character_id, started_turn=self.runtime.turn)
         return self._accept(False, f"You begin speaking with {self._name(intent.character_id)}.")
 
-    def _interview_exchange(self, intent: InterviewExchangeIntent) -> TurnResultView:
+    def _build_private_interview_request(
+        self,
+        intent: InterviewExchangeIntent,
+    ) -> PrivateInterviewResponseRequest | None:
+        """Build one target-only selector request without mutating the runtime."""
+
+        session = self.runtime.active_interview
+        if (
+            session is None
+            or session.exchanges_used >= session.max_exchanges
+            or len(self.runtime.player_knowledge.statements) >= MAX_NOTEBOOK_RECORDS
+        ):
+            return None
+        character = self.runtime.characters.get(session.character_id)
+        if (
+            character is None
+            or not character.alive
+            or character.current_room_id != self.runtime.player_room_id
+        ):
+            return None
+        candidates = self._interview_response_candidates(
+            session.character_id,
+            player_question=intent.message,
+            exchange_index=session.exchanges_used,
+            started_turn=session.started_turn,
+        )
+        fallback = self._deterministic_interview_fallback(
+            candidates,
+            session.exchanges_used,
+        )
+        public_request = self._build_npc_planning_request()
+        private_context = next(
+            request
+            for request in self._build_private_npc_requests(public_request)
+            if request.actor_id == session.character_id
+        )
+        facts = list(private_context.private_briefing.private_facts)
+        while True:
+            try:
+                return PrivateInterviewResponseRequest(
+                    actor_id=session.character_id,
+                    player_question=intent.message,
+                    private_briefing=PrivateNpcBriefing(
+                        character_summary=(
+                            private_context.private_briefing.character_summary
+                        ),
+                        private_facts=tuple(facts),
+                    ),
+                    runtime_state=private_context.runtime_state,
+                    fallback_response_id=fallback.response_id,
+                    candidates=candidates,
+                )
+            except ValueError:
+                if not facts:
+                    raise
+                # Facts are already priority ordered, so discard from the end
+                # until the interview-specific candidate set fits its budget.
+                facts.pop()
+
+    def _interview_response_candidates(
+        self,
+        character_id: str,
+        *,
+        player_question: str,
+        exchange_index: int,
+        started_turn: int,
+    ) -> tuple[PrivateInterviewResponseCandidate, ...]:
+        """Return finite target-owned responses; never synthesize case truth."""
+
+        overlay = self.case.overlays[character_id]
+        known_fact_ids = self.runtime.characters[character_id].known_fact_ids
+        hidden_fact_ids = set(overlay.hides_fact_ids)
+        candidates: list[PrivateInterviewResponseCandidate] = []
+
+        def add(
+            kind: InterviewResponseKind,
+            claim: str,
+            fact_ids: tuple[str, ...] = (),
+        ) -> None:
+            bounded_claim = claim[:1_200]
+            if not bounded_claim:
+                return
+            material = "\x1f".join(
+                (
+                    character_id,
+                    str(started_turn),
+                    str(exchange_index),
+                    player_question,
+                    kind.value,
+                    bounded_claim,
+                    ",".join(fact_ids),
+                )
+            ).encode("utf-8")
+            candidates.append(
+                PrivateInterviewResponseCandidate(
+                    response_id=(
+                        f"reply_{hashlib.sha256(material).hexdigest()[:24]}"
+                    ),
+                    kind=kind,
+                    canonical_claim=bounded_claim,
+                    referenced_fact_ids=fact_ids,
+                )
+            )
+
+        add(
+            InterviewResponseKind.EVASIVE,
+            "I am not prepared to say more about that yet.",
+        )
+        for observation in sorted(overlay.observations, key=lambda item: item.id):
+            observation_facts = set(observation.fact_ids)
+            if (
+                observation_facts
+                and observation_facts <= known_fact_ids
+                and not observation_facts & hidden_fact_ids
+            ):
+                add(
+                    InterviewResponseKind.TRUTHFUL_OBSERVATION,
+                    observation.summary,
+                    observation.fact_ids,
+                )
+        untrusted_murderer_claims = (
+            self.case.id.startswith("generated_")
+            and character_id == self.case.murder.murderer_id
+        )
+        if untrusted_murderer_claims:
+            # Generated prose cannot prove its own disclosure manifest. Keep
+            # the murderer deceptive without ever exposing provider-authored
+            # alibi/lie text at the player-facing selector boundary.
+            add(InterviewResponseKind.ALIBI, _GENERATED_MURDERER_ALIBI)
+            for index, _lie in enumerate(
+                sorted(overlay.lies, key=lambda item: item.id)
+            ):
+                add(
+                    InterviewResponseKind.AUTHORIZED_LIE,
+                    _GENERATED_MURDERER_LIES[
+                        index % len(_GENERATED_MURDERER_LIES)
+                    ],
+                )
+        elif not set(overlay.alibi_disclosed_fact_ids) & hidden_fact_ids:
+            add(InterviewResponseKind.ALIBI, overlay.alibi_claim)
+        if not untrusted_murderer_claims:
+            for lie in sorted(overlay.lies, key=lambda item: item.id):
+                if not set(lie.disclosed_fact_ids) & hidden_fact_ids:
+                    add(InterviewResponseKind.AUTHORIZED_LIE, lie.claim)
+        return tuple(candidates[:8])
+
+    @staticmethod
+    def _deterministic_interview_fallback(
+        candidates: tuple[PrivateInterviewResponseCandidate, ...],
+        exchange_index: int,
+    ) -> PrivateInterviewResponseCandidate:
+        """Choose useful authored material when the private selector is unavailable."""
+
+        useful = tuple(
+            candidate
+            for kind in (
+                InterviewResponseKind.ALIBI,
+                InterviewResponseKind.TRUTHFUL_OBSERVATION,
+                InterviewResponseKind.AUTHORIZED_LIE,
+            )
+            for candidate in candidates
+            if candidate.kind == kind
+        )
+        return useful[exchange_index % len(useful)] if useful else candidates[0]
+
+    def _interview_exchange(
+        self,
+        intent: InterviewExchangeIntent,
+        interview_response_id: str | None,
+        interview_rules_version: int,
+    ) -> TurnResultView:
         session = self.runtime.active_interview
         if session is None:
             return self._reject("Begin an interview before asking a question.")
@@ -583,17 +818,45 @@ class GameEngine:
         if len(self.runtime.player_knowledge.statements) >= MAX_NOTEBOOK_RECORDS:
             return self._reject("The interview record limit has been reached.")
         index = session.exchanges_used
-        # Only authored observations carry fact references.  Alibis and lies
-        # are still recordable character claims, but must not accidentally
-        # bless hidden truth with a canonical fact ID.
-        choices = [
-            (overlay.alibi_claim, []),
-            *[(item.summary, list(item.fact_ids)) for item in overlay.observations],
-            *[(lie.claim, []) for lie in overlay.lies],
-        ]
-        text, referenced_fact_ids = (
-            choices[index % len(choices)] if choices else ("I have nothing useful to add.", [])
-        )
+        if interview_rules_version == 1:
+            # Exact pre-private-agent behavior for schema-v2 save replay. It
+            # intentionally does not grant referenced facts to the player.
+            legacy_choices = [
+                (overlay.alibi_claim, list()),
+                *[
+                    (observation.summary, list(observation.fact_ids))
+                    for observation in overlay.observations
+                ],
+                *[(lie.claim, list()) for lie in overlay.lies],
+            ]
+            text, referenced_fact_ids = (
+                legacy_choices[index % len(legacy_choices)]
+                if legacy_choices
+                else ("I have nothing useful to add.", [])
+            )
+            statement_source = "deterministic_fallback"
+        else:
+            candidates = self._interview_response_candidates(
+                session.character_id,
+                player_question=intent.message,
+                exchange_index=session.exchanges_used,
+                started_turn=session.started_turn,
+            )
+            if interview_response_id is None:
+                selected = self._deterministic_interview_fallback(candidates, index)
+                statement_source = "deterministic_fallback"
+            else:
+                selected = next(
+                    (
+                        candidate
+                        for candidate in candidates
+                        if candidate.response_id == interview_response_id
+                    ),
+                    candidates[0],
+                )
+                statement_source = f"private_agent_{selected.kind.value}"
+            text = selected.canonical_claim
+            referenced_fact_ids = list(selected.referenced_fact_ids)
         statement = StatementRecord(
             id=f"statement_{self.runtime.turn}_{session.character_id}_{index}",
             turn=self.runtime.turn,
@@ -603,9 +866,16 @@ class GameEngine:
             topic=(intent.message.strip()[:80] or "interview"),
             claim=text,
             referenced_fact_ids=referenced_fact_ids,
-            source="deterministic_fallback",
+            source=statement_source,
         )
         self.runtime.player_knowledge.statements.append(statement)
+        if (
+            interview_rules_version == 2
+            and selected.kind == InterviewResponseKind.TRUTHFUL_OBSERVATION
+        ):
+            self.runtime.player_knowledge.known_fact_ids.update(
+                selected.referenced_fact_ids
+            )
         character.conversation_memory.append(
             ConversationMemoryEntry(
                 turn=statement.turn,

@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from game.actions import AccuseIntent, AdvanceOpeningIntent, MoveIntent, SearchIntent
+from game.actions import (
+    AccuseIntent,
+    AdvanceOpeningIntent,
+    BeginInterviewIntent,
+    InterviewExchangeIntent,
+    MoveIntent,
+    SearchIntent,
+)
 from game.content import load_case, load_location
 from game.engine import GameEngine
 from game.persistence import (
@@ -43,7 +50,7 @@ def test_save_round_trip_restores_runtime_without_embedded_truth(tmp_path: Path)
         "story_presentation",
         "runtime",
     }
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["case_recipe"] is None
     # Runtime may legitimately contain opaque fact IDs, but never a copied
     # authored solution object or an authored murder-truth field.
@@ -65,7 +72,70 @@ def test_snapshot_and_restore_accept_a_valid_in_memory_round_trip() -> None:
     assert restored.action_history == engine.action_history
 
 
-def test_v2_action_history_rejects_forged_evidence_progression() -> None:
+def test_pre_interview_agent_v2_save_replays_and_resaves_with_legacy_semantics() -> None:
+    case = load_case("ashwick_sample").model_copy(
+        update={"initial_player_room_id": "study"}
+    )
+    engine = GameEngine(case, load_location("ashwick_manor"))
+    engine.apply(AdvanceOpeningIntent())
+    actor_id = engine.case.murder.murderer_id
+    assert engine.runtime.characters[actor_id].current_room_id == (
+        engine.runtime.player_room_id
+    )
+    assert engine.apply(BeginInterviewIntent(character_id=actor_id)).accepted
+    assert engine.apply(
+        InterviewExchangeIntent(message="Where were you?"),
+        interview_rules_version=1,
+    ).accepted
+    assert engine.apply(
+        InterviewExchangeIntent(message="What did you see?"),
+        interview_rules_version=1,
+    ).accepted
+    disclosed_ids = set(
+        engine.runtime.player_knowledge.statements[-1].referenced_fact_ids
+    )
+    assert disclosed_ids & set(engine.case.overlays[actor_id].hides_fact_ids)
+
+    current = snapshot_engine(engine).model_dump(mode="json")
+    assert current["schema_version"] == 3
+    assert [
+        entry["interview_rules_version"]
+        for entry in current["action_history"]
+        if entry["intent"]["kind"] == "interview_exchange"
+    ] == [1, 1]
+    malformed_v3 = json.loads(json.dumps(current))
+    next(
+        entry
+        for entry in malformed_v3["action_history"]
+        if entry["intent"]["kind"] == "interview_exchange"
+    ).pop("interview_rules_version")
+    with pytest.raises(SaveValidationError, match="supported schema"):
+        restore_engine(malformed_v3, engine.case, engine.location)
+    old_v2 = json.loads(json.dumps(current))
+    old_v2["schema_version"] = 2
+    for entry in old_v2["action_history"]:
+        entry.pop("interview_rules_version", None)
+
+    restored = restore_engine(old_v2, engine.case, engine.location)
+
+    assert restored.runtime == engine.runtime
+    assert [
+        entry.interview_rules_version
+        for entry in restored.action_history
+        if entry.intent["kind"] == "interview_exchange"
+    ] == [1, 1]
+    assert restored.apply(
+        InterviewExchangeIntent(message="Why should I believe you?")
+    ).accepted
+    assert restored.action_history[-1].interview_rules_version == 2
+    resaved = snapshot_engine(restored)
+    assert resaved.schema_version == 3
+    assert restore_engine(resaved, engine.case, engine.location).runtime == (
+        restored.runtime
+    )
+
+
+def test_v3_action_history_rejects_forged_evidence_progression() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
     payload = snapshot_engine(engine).model_dump(mode="json")
@@ -91,7 +161,7 @@ def test_v2_action_history_rejects_forged_evidence_progression() -> None:
         restore_engine(payload, engine.case, engine.location)
 
 
-def test_v2_rejects_removed_or_invalid_history_but_v1_legacy_still_loads() -> None:
+def test_v3_rejects_removed_or_invalid_history_but_v1_legacy_still_loads() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
     engine.apply(MoveIntent(room_id="library"))
@@ -115,7 +185,7 @@ def test_v2_rejects_removed_or_invalid_history_but_v1_legacy_still_loads() -> No
     assert restored.action_history is None
 
 
-def test_v2_rejects_unbounded_or_oversized_npc_history_selections() -> None:
+def test_v3_rejects_unbounded_or_oversized_npc_history_selections() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
     payload = snapshot_engine(engine).model_dump(mode="json")

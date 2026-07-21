@@ -35,6 +35,7 @@ from game.recipes import (
 )
 from game.portrayal import (
     ConstrainedPortrayalCoordinator,
+    DeterministicPortrayalFallback,
     OpenRouterPortrayalAdapter,
     PermittedFact,
     PortrayalRequest,
@@ -43,6 +44,10 @@ from game.portrayal import (
 from game.private_npc_agents import (
     OpenRouterPrivateNpcAgentAdapter,
     PrivateNpcAgentCoordinator,
+)
+from game.private_interview import (
+    OpenRouterPrivateInterviewSelectionAdapter,
+    PrivateInterviewSelectionCoordinator,
 )
 from game.views import PlayerGameView, TurnResultView
 
@@ -219,7 +224,21 @@ class GameService:
         engine = self._require_engine()
         preview = engine.preview(command)
         npc_action_ids: dict[str, str] | None = None
+        interview_response_id: str | None = None
         if (
+            isinstance(command, InterviewExchangeIntent)
+            and preview.result.accepted
+            and self._generation_metadata is not None
+            and preview.private_interview_request is not None
+        ):
+            coordinator = PrivateInterviewSelectionCoordinator(
+                OpenRouterPrivateInterviewSelectionAdapter(self.llm)
+                if self.llm is not None
+                else None
+            )
+            plan = await coordinator.select(preview.private_interview_request)
+            interview_response_id = plan.selection.response_id
+        elif (
             preview.result.accepted
             and preview.result.committed
             and self._generation_metadata is not None
@@ -245,7 +264,11 @@ class GameService:
                 for selection in plan.selections
             }
 
-        result = engine.apply(command, npc_action_ids=npc_action_ids)
+        result = engine.apply(
+            command,
+            npc_action_ids=npc_action_ids,
+            interview_response_id=interview_response_id,
+        )
         response = result.model_dump(mode="json")
         if not isinstance(command, InterviewExchangeIntent) or not result.accepted or result.dialogue is None:
             return response
@@ -298,6 +321,14 @@ class GameService:
             response["portrayal"] = (
                 await coordinator.portray(request)
             ).model_dump(mode="json")
+        except asyncio.CancelledError:
+            # The authoritative exchange is already committed.  Returning its
+            # deterministic portrayal keeps cancellation from turning a
+            # successful action into an apparently retryable failure.
+            response["portrayal"] = DeterministicPortrayalFallback().portray(
+                request
+            ).model_dump(mode="json")
+            return response
         except Exception:
             return response
         return response

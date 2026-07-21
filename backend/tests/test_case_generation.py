@@ -147,6 +147,73 @@ def test_generated_document_cannot_reference_a_character_outside_selected_cast()
         )
 
 
+@pytest.mark.parametrize("claim_kind", ("alibi", "authorized_lie"))
+def test_generated_interview_claims_cannot_disclose_a_hidden_fact(
+    claim_kind: str,
+) -> None:
+    source = load_case("ashwick_sample")
+    document = _dummy_document()
+    murderer_id = document["case"]["murder"]["murderer_id"]  # type: ignore[index]
+    overlay = document["case"]["overlays"][murderer_id]  # type: ignore[index]
+    hidden_fact_id = overlay["hides_fact_ids"][0]
+    if claim_kind == "alibi":
+        overlay["alibi_disclosed_fact_ids"] = [hidden_fact_id]
+    else:
+        overlay["lies"][0]["disclosed_fact_ids"] = [hidden_fact_id]
+
+    with pytest.raises(GeneratedScenarioError, match="hidden_fact_disclosure"):
+        compile_generated_scenario(
+            document,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=1,
+        )
+
+
+@pytest.mark.parametrize("claim_kind", ("alibi", "authorized_lie"))
+def test_generated_interview_claims_must_declare_disclosure_metadata(
+    claim_kind: str,
+) -> None:
+    source = load_case("ashwick_sample")
+    document = _dummy_document()
+    murderer_id = document["case"]["murder"]["murderer_id"]  # type: ignore[index]
+    overlay = document["case"]["overlays"][murderer_id]  # type: ignore[index]
+    if claim_kind == "alibi":
+        del overlay["alibi_disclosed_fact_ids"]
+    else:
+        del overlay["lies"][0]["disclosed_fact_ids"]
+
+    with pytest.raises(GeneratedScenarioError, match="Field required"):
+        compile_generated_scenario(
+            document,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=1,
+        )
+
+
+@pytest.mark.parametrize("claim_kind", ("alibi", "authorized_lie"))
+def test_generated_murderer_interview_claims_cannot_be_a_direct_confession(
+    claim_kind: str,
+) -> None:
+    source = load_case("ashwick_sample")
+    document = _dummy_document()
+    murderer_id = document["case"]["murder"]["murderer_id"]  # type: ignore[index]
+    overlay = document["case"]["overlays"][murderer_id]  # type: ignore[index]
+    if claim_kind == "alibi":
+        overlay["alibi_claim"] = "I murdered Lady Ashford in the library."
+    else:
+        overlay["lies"][0]["claim"] = "I killed Lady Ashford myself."
+
+    with pytest.raises(GeneratedScenarioError, match="murderer_confession_candidate"):
+        compile_generated_scenario(
+            document,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=1,
+        )
+
+
 def test_generation_context_contains_selected_cards_and_location_but_no_card_prompts() -> None:
     source = load_case("ashwick_sample")
     location = load_location("ashwick_manor")

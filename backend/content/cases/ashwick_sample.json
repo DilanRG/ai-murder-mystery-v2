@@ -239,6 +239,7 @@
         {"id": "obs_vivienne_murder", "minute": 1302, "room_id": "library", "summary": "Edgar arrives for the confrontation and kills Vivienne with the fireplace poker.", "fact_ids": ["fact_murderer_identity", "fact_murder_method", "fact_weapon", "fact_murder_time"], "certainty": 1.0}
       ],
       "alibi_claim": "Not applicable; Lady Ashford is the victim.",
+      "alibi_disclosed_fact_ids": [],
       "alibi_type": "true",
       "supporting_evidence_ids": ["ev_vivienne_memo"],
       "goals": ["Preserve the truth of the exposure through the documents she left behind."],
@@ -269,13 +270,14 @@
         {"id": "obs_edgar_hayes", "minute": 1312, "room_id": "great_hall", "summary": "Edgar notices Inspector Hayes in the hall after arriving from the library.", "fact_ids": ["fact_edgar_hall_arrival"], "certainty": 1.0}
       ],
       "alibi_claim": "I remained in the study reviewing estate papers from 21:30 until the alarm.",
+      "alibi_disclosed_fact_ids": [],
       "alibi_type": "false",
       "supporting_evidence_ids": [],
       "goals": ["Keep the trust documents from being connected to him.", "Make the murder look like an estate scandal with several plausible suspects.", "Discourage Zara from sharing her audit."],
       "hides_fact_ids": ["fact_murderer_identity", "fact_financial_exposure", "fact_vivienne_intent", "fact_murder_method", "fact_weapon", "fact_murder_time", "fact_edgar_left_study", "fact_edgar_library_presence", "fact_edgar_hall_arrival"],
       "lies": [
-        {"id": "lie_edgar_study", "topic": "alibi", "claim": "I was in the study continuously from 21:30 until the alarm.", "contradicts_fact_ids": ["fact_edgar_left_study", "fact_edgar_hall_arrival"], "reason": "He needs to erase his ten-minute trip to the library and return to the great hall."},
-        {"id": "lie_edgar_trust", "topic": "trust", "claim": "Any irregularity in the Ashwick trust was Lady Ashford's own discretionary decision.", "contradicts_fact_ids": ["fact_financial_exposure", "fact_vivienne_intent"], "reason": "He wants financial suspicion to settle on the victim rather than his certifications."}
+        {"id": "lie_edgar_study", "topic": "alibi", "claim": "I was in the study continuously from 21:30 until the alarm.", "contradicts_fact_ids": ["fact_edgar_left_study", "fact_edgar_hall_arrival"], "disclosed_fact_ids": [], "reason": "He needs to erase his ten-minute trip to the library and return to the great hall."},
+        {"id": "lie_edgar_trust", "topic": "trust", "claim": "Any irregularity in the Ashwick trust was Lady Ashford's own discretionary decision.", "contradicts_fact_ids": ["fact_financial_exposure", "fact_vivienne_intent"], "disclosed_fact_ids": [], "reason": "He wants financial suspicion to settle on the victim rather than his certifications."}
       ],
       "relationships": [
         {"target_character_id": "lady_vivienne_ashford", "public_summary": "Professional adviser and client.", "private_summary": "Vivienne had become an existential threat to him.", "affinity": -95},
@@ -299,6 +301,7 @@
         {"id": "obs_moreau_body", "minute": 1320, "room_id": "library", "summary": "Moreau finds a single occipital wound, the warm body, and no signs of a prolonged struggle; her preliminary estimate places the blow at about 21:42, within a few minutes.", "fact_ids": ["fact_discovery", "fact_murder_method", "fact_murder_time"], "certainty": 0.9}
       ],
       "alibi_claim": "I was in the great hall until I left at 21:50 to look for Lady Ashford, then I found her in the library at 22:00.",
+      "alibi_disclosed_fact_ids": [],
       "alibi_type": "true",
       "supporting_evidence_ids": ["ev_medical_assessment"],
       "goals": ["Protect the scene.", "Give the player medically defensible conclusions rather than dramatic certainty."],
@@ -324,6 +327,7 @@
         {"id": "obs_hayes_edgar", "minute": 1312, "room_id": "great_hall", "summary": "Hayes sees Edgar arrive from the library side at 21:52, not from the study, and notes the soot at one cuff before he smooths it away.", "fact_ids": ["fact_edgar_hall_arrival"], "certainty": 1.0}
       ],
       "alibi_claim": "I remained in the great hall throughout the relevant period.",
+      "alibi_disclosed_fact_ids": [],
       "alibi_type": "true",
       "supporting_evidence_ids": ["ev_inspector_arrival"],
       "goals": ["Build the timeline from observations.", "Avoid contaminating the player with an unsupported accusation."],
@@ -351,12 +355,13 @@
         {"id": "obs_drake_sabrina", "minute": 1290, "room_id": "drawing_room", "summary": "Drake sees Sabrina in the drawing room until 21:40 and learns that her old earring is missing.", "fact_ids": ["fact_sabrina_earring"], "certainty": 0.9}
       ],
       "alibi_claim": "I was in the drawing room after dinner; Sabrina was with me until 21:40, then I stayed there alone.",
+      "alibi_disclosed_fact_ids": [],
       "alibi_type": "incomplete",
       "supporting_evidence_ids": ["ev_sabrina_captain_alibi"],
       "goals": ["Keep his naval disgrace out of the inquiry.", "Protect Sabrina from being blamed for an old private quarrel."],
       "hides_fact_ids": ["fact_captain_threat"],
       "lies": [
-        {"id": "lie_drake_letter", "topic": "letter", "claim": "I never threatened Lady Ashford.", "contradicts_fact_ids": ["fact_captain_threat"], "reason": "He fears the letter will be read as proof of murderous intent."}
+        {"id": "lie_drake_letter", "topic": "letter", "claim": "I never threatened Lady Ashford.", "contradicts_fact_ids": ["fact_captain_threat"], "disclosed_fact_ids": [], "reason": "He fears the letter will be read as proof of murderous intent."}
       ],
       "relationships": [
         {"target_character_id": "lady_vivienne_ashford", "public_summary": "Old friend with frequent quarrels.", "private_summary": "She knew enough about his naval failure to wound him.", "affinity": -30},
@@ -380,12 +385,13 @@
         {"id": "obs_dubois_rag", "minute": 1295, "room_id": "kitchen", "summary": "Dubois knows the red-stained cloth in the kitchen bin is soaked with port from dinner service, not blood.", "fact_ids": ["fact_wine_rag"], "certainty": 1.0}
       ],
       "alibi_claim": "I was in the kitchen managing cleanup from dinner until the alarm.",
+      "alibi_disclosed_fact_ids": [],
       "alibi_type": "true",
       "supporting_evidence_ids": ["ev_port_rag"],
       "goals": ["Protect his staff.", "Tell the truth once the player distinguishes the port cloth from evidence of violence."],
       "hides_fact_ids": ["fact_wine_rag"],
       "lies": [
-        {"id": "lie_dubois_rag", "topic": "kitchen cloth", "claim": "I do not know how that stained cloth reached the bin.", "contradicts_fact_ids": ["fact_wine_rag"], "reason": "He worries an investigation will burden the kitchen staff."}
+        {"id": "lie_dubois_rag", "topic": "kitchen cloth", "claim": "I do not know how that stained cloth reached the bin.", "contradicts_fact_ids": ["fact_wine_rag"], "disclosed_fact_ids": [], "reason": "He worries an investigation will burden the kitchen staff."}
       ],
       "relationships": [
         {"target_character_id": "lady_vivienne_ashford", "public_summary": "Employer and employee.", "private_summary": "He resented the estate's treatment of staff but did not seek revenge on Vivienne.", "affinity": -15}
@@ -410,12 +416,13 @@
         {"id": "obs_sabrina_drake", "minute": 1290, "room_id": "drawing_room", "summary": "Sabrina is with Drake in the drawing room until 21:40; she knows his anger was about an old threat, not the murder.", "fact_ids": ["fact_captain_threat"], "certainty": 0.8}
       ],
       "alibi_claim": "I was with Captain Drake in the drawing room until 21:40, then alone in the conservatory before the alarm.",
+      "alibi_disclosed_fact_ids": [],
       "alibi_type": "incomplete",
       "supporting_evidence_ids": ["ev_sabrina_captain_alibi"],
       "goals": ["Keep the blackmail episode private.", "Explain the earring if it is found before it becomes a false solution."],
       "hides_fact_ids": ["fact_sabrina_earring"],
       "lies": [
-        {"id": "lie_sabrina_earring", "topic": "earring", "claim": "I have not been in the library tonight.", "contradicts_fact_ids": ["fact_sabrina_earring"], "reason": "She fears the old blackmail conversation will ruin her."}
+        {"id": "lie_sabrina_earring", "topic": "earring", "claim": "I have not been in the library tonight.", "contradicts_fact_ids": ["fact_sabrina_earring"], "disclosed_fact_ids": [], "reason": "She fears the old blackmail conversation will ruin her."}
       ],
       "relationships": [
         {"target_character_id": "lady_vivienne_ashford", "public_summary": "An uncomfortable social acquaintance.", "private_summary": "Vivienne held compromising material over her, but Sabrina had asked for mercy rather than threatened violence.", "affinity": -55},
@@ -439,12 +446,13 @@
         {"id": "obs_zara_edgar", "minute": 1292, "room_id": "study", "summary": "Zara sees Edgar leave the study at 21:32 without any papers. The library is ten minutes away by the listed door.", "fact_ids": ["fact_edgar_left_study"], "certainty": 1.0}
       ],
       "alibi_claim": "I was reviewing the trust in the study until 21:40, then answered the alarm and reached the great hall at 22:20.",
+      "alibi_disclosed_fact_ids": [],
       "alibi_type": "true",
       "supporting_evidence_ids": ["ev_zara_departure", "ev_audit_fragments"],
       "goals": ["Secure the trust record.", "Test whether the player can use financial evidence without prematurely exposing her wider inquiry."],
       "hides_fact_ids": ["fact_financial_exposure", "fact_edgar_left_study"],
       "lies": [
-        {"id": "lie_zara_scope", "topic": "audit", "claim": "My interest in Ashwick is routine compliance work.", "contradicts_fact_ids": ["fact_financial_exposure"], "reason": "She cannot disclose the full external investigation before the evidence is secure."}
+        {"id": "lie_zara_scope", "topic": "audit", "claim": "My interest in Ashwick is routine compliance work.", "contradicts_fact_ids": ["fact_financial_exposure"], "disclosed_fact_ids": [], "reason": "She cannot disclose the full external investigation before the evidence is secure."}
       ],
       "relationships": [
         {"target_character_id": "lady_vivienne_ashford", "public_summary": "Professional contact.", "private_summary": "Vivienne had become a prospective source against Edgar.", "affinity": 35},

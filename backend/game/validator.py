@@ -8,11 +8,28 @@ one editing pass.
 
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Iterable
 
 from game.models import CaseDefinition, CharacterRole, LocationPackage
+
+
+_DIRECT_MURDER_CONFESSION = re.compile(
+    r"\b(?:"
+    r"(?:i|we)\s+(?:killed|murdered|poisoned|stabbed|shot|strangled)\b|"
+    r"(?:i\s+am|i'm|we\s+are|we're)\s+(?:the\s+)?(?:killer|murderer)\b|"
+    r"it\s+was\s+(?:me|us)\s+who\s+(?:killed|murdered|poisoned|stabbed|shot|strangled)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def claim_contains_direct_murder_confession(claim: str) -> bool:
+    """Detect explicit first-person murder admissions in interview-safe claims."""
+
+    return _DIRECT_MURDER_CONFESSION.search(claim) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,6 +331,29 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
             report.add("unknown_room", f"{path}.starting_room_id", "starting room must exist")
         if not overlay.private_motive.strip():
             report.add("missing_plausible_motive", f"{path}.private_motive", "every suspect needs a plausible private motive")
+        hidden_fact_ids = set(overlay.hides_fact_ids)
+        for fact_id in overlay.alibi_disclosed_fact_ids:
+            if fact_id not in facts:
+                report.add(
+                    "unknown_fact",
+                    f"{path}.alibi_disclosed_fact_ids",
+                    f"unknown fact {fact_id!r}",
+                )
+            elif fact_id in hidden_fact_ids:
+                report.add(
+                    "hidden_fact_disclosure",
+                    f"{path}.alibi_disclosed_fact_ids",
+                    f"alibi candidate discloses hidden fact {fact_id!r}",
+                )
+        if (
+            character_id == case.murder.murderer_id
+            and claim_contains_direct_murder_confession(overlay.alibi_claim)
+        ):
+            report.add(
+                "murderer_confession_candidate",
+                f"{path}.alibi_claim",
+                "murderer alibi must not directly confess to the murder",
+            )
         if overlay.role != CharacterRole.VICTIM and not overlay.secrets:
             report.add("missing_suspect_secret", f"{path}.secrets", "every living suspect needs at least one private secret")
         ordered = sorted(overlay.schedule, key=lambda entry: entry.start_minute)
@@ -354,6 +394,28 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
             for fact_id in lie.contradicts_fact_ids:
                 if fact_id not in facts:
                     report.add("unknown_fact", f"{path}.lies.{lie.id}", f"unknown fact {fact_id!r}")
+            for fact_id in lie.disclosed_fact_ids:
+                if fact_id not in facts:
+                    report.add(
+                        "unknown_fact",
+                        f"{path}.lies.{lie.id}.disclosed_fact_ids",
+                        f"unknown fact {fact_id!r}",
+                    )
+                elif fact_id in hidden_fact_ids:
+                    report.add(
+                        "hidden_fact_disclosure",
+                        f"{path}.lies.{lie.id}.disclosed_fact_ids",
+                        f"authorized lie discloses hidden fact {fact_id!r}",
+                    )
+            if (
+                character_id == case.murder.murderer_id
+                and claim_contains_direct_murder_confession(lie.claim)
+            ):
+                report.add(
+                    "murderer_confession_candidate",
+                    f"{path}.lies.{lie.id}.claim",
+                    "murderer authorized lie must not directly confess to the murder",
+                )
         for relationship in overlay.relationships:
             if relationship.target_character_id not in cast or relationship.target_character_id == character_id:
                 report.add("invalid_relationship", f"{path}.relationships", "relationship target must be another cast member")

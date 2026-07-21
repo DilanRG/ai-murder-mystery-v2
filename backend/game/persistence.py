@@ -38,7 +38,8 @@ from game.story_director import StoryPresentationPatch, validate_story_presentat
 from game.validator import validate_case
 
 
-SAVE_SCHEMA_VERSION = 2
+SAVE_SCHEMA_VERSION = 3
+PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION = 2
 LEGACY_SAVE_SCHEMA_VERSION = 1
 RUNTIME_SCHEMA_VERSION = 1
 MAX_ACTION_HISTORY = 1_024
@@ -52,7 +53,7 @@ class SaveValidationError(ValueError):
 class SaveEnvelope(StrictModel):
     """Portable runtime plus either authored IDs or fingerprinted generated truth."""
 
-    schema_version: Literal[1, 2] = SAVE_SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3] = SAVE_SCHEMA_VERSION
     case_id: str
     location_id: str
     case_recipe: CaseRecipeSelection | None = None
@@ -71,9 +72,22 @@ class SaveEnvelope(StrictModel):
     runtime: WorldRuntimeState
 
     @model_validator(mode="after")
-    def require_v2_history(self) -> "SaveEnvelope":
-        if self.schema_version == SAVE_SCHEMA_VERSION and self.action_history is None:
-            raise ValueError("save schema v2 requires action history")
+    def require_replay_metadata(self) -> "SaveEnvelope":
+        if (
+            self.schema_version
+            in {PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION, SAVE_SCHEMA_VERSION}
+            and self.action_history is None
+        ):
+            raise ValueError("replay-verified saves require action history")
+        if self.schema_version == SAVE_SCHEMA_VERSION and self.action_history is not None:
+            if any(
+                entry.intent.get("kind") == "interview_exchange"
+                and entry.interview_rules_version is None
+                for entry in self.action_history
+            ):
+                raise ValueError(
+                    "save schema v3 requires rules metadata for every interview"
+                )
         if (self.generated_case is None) != (self.generated_case_fingerprint is None):
             raise ValueError("generated case and fingerprint must appear together")
         if self.generated_case is not None:
@@ -366,6 +380,7 @@ def validate_save_envelope(
         raise SaveValidationError("save document does not match the supported schema") from error
     if envelope.schema_version not in {
         LEGACY_SAVE_SCHEMA_VERSION,
+        PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION,
         SAVE_SCHEMA_VERSION,
     }:
         _fail("unsupported save schema version")
@@ -419,7 +434,10 @@ def validate_save_envelope(
         except ValueError as error:
             raise SaveValidationError("saved story presentation is not valid") from error
     validate_runtime_state(envelope.runtime, case, location)
-    if envelope.schema_version == SAVE_SCHEMA_VERSION:
+    if envelope.schema_version in {
+        PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION,
+        SAVE_SCHEMA_VERSION,
+    }:
         assert envelope.action_history is not None
         from game.engine import GameEngine
 
@@ -430,10 +448,21 @@ def validate_save_envelope(
             story_presentation=envelope.story_presentation,
         )
         for entry in envelope.action_history:
+            interview_rules_version = entry.interview_rules_version
+            if (
+                envelope.schema_version == PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION
+                and entry.intent.get("kind") == "interview_exchange"
+                and interview_rules_version is None
+            ):
+                interview_rules_version = (
+                    2 if entry.interview_response_id is not None else 1
+                )
             try:
                 result = replay.apply(
                     entry.intent,
                     npc_action_ids=entry.npc_action_ids,
+                    interview_response_id=entry.interview_response_id,
+                    interview_rules_version=interview_rules_version,
                 )
             except (TypeError, ValueError, ValidationError) as error:
                 raise SaveValidationError(
@@ -501,7 +530,24 @@ def restore_engine(
     )
     engine.runtime = envelope.runtime.model_copy(deep=True)
     engine.action_history = (
-        [entry.model_copy(deep=True) for entry in envelope.action_history]
+        [
+            entry.model_copy(
+                deep=True,
+                update=(
+                    {
+                        "interview_rules_version": (
+                            2 if entry.interview_response_id is not None else 1
+                        )
+                    }
+                    if envelope.schema_version
+                    == PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION
+                    and entry.intent.get("kind") == "interview_exchange"
+                    and entry.interview_rules_version is None
+                    else {}
+                ),
+            )
+            for entry in envelope.action_history
+        ]
         if envelope.action_history is not None
         else None
     )

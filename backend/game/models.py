@@ -404,6 +404,7 @@ class LieDefinition(FrozenModel):
     topic: str
     claim: str
     contradicts_fact_ids: tuple[str, ...]
+    disclosed_fact_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
     reason: str
 
 
@@ -417,6 +418,10 @@ class CharacterCaseOverlay(FrozenModel):
     schedule: tuple[ScheduleEntry, ...]
     observations: tuple[CharacterObservation, ...]
     alibi_claim: str
+    alibi_disclosed_fact_ids: tuple[str, ...] = Field(
+        default_factory=tuple,
+        max_length=16,
+    )
     alibi_type: AlibiType
     supporting_evidence_ids: tuple[str, ...]
     goals: tuple[str, ...]
@@ -677,6 +682,24 @@ class ActionHistoryEntry(StrictModel):
         default=None,
         max_length=8,
     )
+    interview_response_id: BoundedIdentifier | None = None
+    interview_rules_version: Literal[1, 2] | None = None
+
+    @model_validator(mode="after")
+    def interview_selection_belongs_only_to_an_exchange(
+        self,
+    ) -> "ActionHistoryEntry":
+        is_exchange = self.intent.get("kind") == "interview_exchange"
+        if not is_exchange and (
+            self.interview_response_id is not None
+            or self.interview_rules_version is not None
+        ):
+            raise ValueError(
+                "interview replay metadata is valid only for interview exchanges"
+            )
+        if self.interview_rules_version == 1 and self.interview_response_id is not None:
+            raise ValueError("legacy interview history cannot contain a response ID")
+        return self
 
 
 class WorldRuntimeState(StrictModel):
