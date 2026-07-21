@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -142,6 +143,19 @@ class DeepSeekRequestObserver:
             raise ExperimentSafetyError("DeepSeek BYOK endpoint verification failed.")
 
         upstream_cost = response.cost_details.get("upstream_inference_cost")
+        upstream_prompt_cost = response.cost_details.get(
+            "upstream_inference_prompt_cost"
+        )
+        upstream_completion_cost = response.cost_details.get(
+            "upstream_inference_completions_cost"
+        )
+        if upstream_cost is None and (
+            upstream_prompt_cost is not None and upstream_completion_cost is not None
+        ):
+            try:
+                upstream_cost = float(upstream_prompt_cost) + float(upstream_completion_cost)
+            except (TypeError, ValueError):
+                upstream_cost = None
         if upstream_cost is None:
             upstream_cost = stats.get("upstream_inference_cost")
         openrouter_fee = response.cost
@@ -184,6 +198,12 @@ class DeepSeekRequestObserver:
             "finish_reason": response.finish_reason,
             "native_finish_reason": response.native_finish_reason,
             "upstream_inference_cost_usd": float(settlement.upstream_cost_usd),
+            "upstream_prompt_cost_usd": self._safe_optional_cost(
+                upstream_prompt_cost
+            ),
+            "upstream_completion_cost_usd": self._safe_optional_cost(
+                upstream_completion_cost
+            ),
             "openrouter_fee_usd": float(settlement.openrouter_fee_usd),
             "total_external_cost_usd": float(settlement.total_cost_usd),
             "result": "success",
@@ -200,6 +220,7 @@ class DeepSeekRequestObserver:
             "schema_version": 1,
             "experiment_revision": self.context.experiment_revision,
             "git_sha": self.context.git_sha,
+            "started_at": str(data.get("started_at", "")),
             "run_id": self.context.run_id,
             "phase": self.context.phase,
             "pair_id": self.context.pair_id,
@@ -213,6 +234,16 @@ class DeepSeekRequestObserver:
             "reserved_usd": float(reservation.reserved_usd),
         }
 
+    @staticmethod
+    def _safe_optional_cost(value: object) -> float | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) and parsed >= 0 else None
+
     def _append_record(self, record: dict[str, Any]) -> None:
         self.metrics_path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
@@ -222,6 +253,50 @@ class DeepSeekRequestObserver:
                 handle.flush()
             self.last_record = dict(record)
             self.records.append(dict(record))
+
+
+class SequentialMeasuredClient:
+    """Serialize measured calls and latch closed after an uncertain request.
+
+    Production NPC planning launches seven isolated coroutines together. The
+    frozen experiment declares concurrency one, so this adapter queues them.
+    If any transport/accounting request fails, later queued calls are refused
+    locally; this prevents seven simultaneous uncertain reservations while the
+    engine can still apply its deterministic per-actor fallbacks.
+    """
+
+    def __init__(self, client: LLMClient) -> None:
+        self._client = client
+        self._lock = asyncio.Lock()
+        self.abort_code: str | None = None
+
+    @property
+    def model(self) -> str:
+        return self._client.model
+
+    @property
+    def aborted(self) -> bool:
+        return self.abort_code is not None
+
+    async def generate(self, *args: Any, **kwargs: Any) -> LLMResponse:
+        async with self._lock:
+            if self.abort_code is not None:
+                raise LLMProviderError(
+                    "The measured provider session has stopped.",
+                    code="experiment_session_stopped",
+                    retryable=False,
+                )
+            try:
+                return await self._client.generate(*args, **kwargs)
+            except asyncio.CancelledError:
+                self.abort_code = "provider_cancelled"
+                raise
+            except LLMProviderError as error:
+                self.abort_code = error.code
+                raise
+            except Exception:
+                self.abort_code = "experiment_runtime_error"
+                raise
 
 
 def build_measured_client(

@@ -9,6 +9,7 @@ all succeed.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import hashlib
 import json
 from dataclasses import dataclass
@@ -416,6 +417,7 @@ async def generate_validated_scenario(
     seed: int,
     difficulty: str = "normal",
     max_attempts: int = 3,
+    attempt_observer: Callable[[dict[str, object]], None] | None = None,
 ) -> ValidatedGeneratedScenario:
     """Generate, repair, and admit canonical truth; never use an authored fallback."""
 
@@ -434,8 +436,9 @@ async def generate_validated_scenario(
     )
     feedback = ""
     last_error: BaseException | None = None
-    for _attempt in range(max_attempts):
+    for attempt_index in range(1, max_attempts + 1):
         user_payload: dict[str, object] = {"generation_context": context}
+        repair_feedback_used = bool(feedback)
         if feedback:
             user_payload["repair_feedback"] = (
                 "The previous attempt was rejected. Repair every listed issue without changing "
@@ -460,25 +463,73 @@ async def generate_validated_scenario(
             raw = json.loads(response.content)
             if not isinstance(raw, dict):
                 raise GeneratedScenarioError("generated document must be a JSON object")
-            return compile_generated_scenario(
+            compiled = compile_generated_scenario(
                 raw,
                 character_ids=character_ids,
                 location=location,
                 seed=seed,
             )
+            if attempt_observer is not None:
+                attempt_observer(
+                    {
+                        "attempt": attempt_index,
+                        "result": "admitted",
+                        "failure_category": None,
+                        "failure_code": None,
+                        "repair_feedback_used": repair_feedback_used,
+                    }
+                )
+            return compiled
         except asyncio.CancelledError:
             raise
         except (json.JSONDecodeError, GeneratedScenarioError, ValidationError) as error:
             last_error = error
             feedback = str(error)[:MAX_GENERATION_FEEDBACK_CHARS]
+            if isinstance(error, json.JSONDecodeError):
+                category, code = "malformed_json", "invalid_json"
+            elif isinstance(error, ValidationError):
+                category, code = "schema_validation", "invalid_schema"
+            else:
+                category, code = "validator_rejection", error.code
+            if attempt_observer is not None:
+                attempt_observer(
+                    {
+                        "attempt": attempt_index,
+                        "result": "rejected",
+                        "failure_category": category,
+                        "failure_code": code,
+                        "repair_feedback_used": repair_feedback_used,
+                        "safe_detail": feedback,
+                    }
+                )
         except LLMProviderError as error:
             last_error = error
             feedback = error.code
+            if attempt_observer is not None:
+                attempt_observer(
+                    {
+                        "attempt": attempt_index,
+                        "result": "provider_error",
+                        "failure_category": "provider",
+                        "failure_code": error.code,
+                        "repair_feedback_used": repair_feedback_used,
+                    }
+                )
             if not error.retryable:
                 break
         except Exception as error:
             last_error = error
             feedback = f"provider request failed with {type(error).__name__}"
+            if attempt_observer is not None:
+                attempt_observer(
+                    {
+                        "attempt": attempt_index,
+                        "result": "provider_error",
+                        "failure_category": "unexpected_provider_error",
+                        "failure_code": type(error).__name__,
+                        "repair_feedback_used": repair_feedback_used,
+                    }
+                )
     failure_code = (
         last_error.code
         if isinstance(last_error, (GeneratedScenarioError, LLMProviderError))

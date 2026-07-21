@@ -48,6 +48,54 @@ def _atomic_json(path: Path, document: object) -> None:
     os.replace(temporary, path)
 
 
+def _append_jsonl(path: Path, records: Sequence[Mapping[str, Any]]) -> None:
+    if not records:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        for record in records:
+            handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _persist_candidate_attempts(
+    *,
+    path: Path,
+    manifest: Mapping[str, Any],
+    git_sha: str,
+    pair_id: str,
+    model_key: str,
+    service: GameService,
+    observer: DeepSeekRequestObserver,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for index, diagnostic in enumerate(service.generation_attempt_diagnostics()):
+        request_record = observer.records[index] if index < len(observer.records) else {}
+        records.append(
+            {
+                "schema_version": 1,
+                "experiment_revision": 1,
+                "git_sha": git_sha,
+                "pair_id": pair_id,
+                "model_key": model_key,
+                "model": EXPECTED_MODELS[model_key],
+                "prompt_revision": manifest["prompt_revision"],
+                "schema_revision": manifest["schema_revision"],
+                "attempt": diagnostic["attempt"],
+                "admission_result": diagnostic["result"],
+                "failure_category": diagnostic.get("failure_category"),
+                "failure_code": diagnostic.get("failure_code"),
+                "repair_feedback_used": diagnostic["repair_feedback_used"],
+                "safe_detail": diagnostic.get("safe_detail"),
+                "request_id": request_record.get("request_id"),
+                "generation_id": request_record.get("generation_id"),
+            }
+        )
+    _append_jsonl(path, records)
+    return records
+
+
 def _default_service_builder(save_root: Path, scenario_llm: Any) -> GameService:
     return GameService(save_root, scenario_llm=scenario_llm)
 
@@ -159,6 +207,15 @@ async def run_generation_matrix(
                     difficulty="normal",
                 )
             except GeneratedScenarioError as error:
+                attempt_records = _persist_candidate_attempts(
+                    path=artifact_root / "generation_attempts.jsonl",
+                    manifest=manifest,
+                    git_sha=git_sha,
+                    pair_id=pair_id,
+                    model_key=str(model_key),
+                    service=service,
+                    observer=observer,
+                )
                 if error.code != "invalid_generated_case":
                     raise ExperimentSafetyError(
                         f"Provider execution stopped during {run_id}: {error.code}."
@@ -166,12 +223,21 @@ async def run_generation_matrix(
                 outcome.update(
                     {
                         "admitted": False,
-                        "attempts": len(observer.records),
+                        "attempts": len(attempt_records),
                         "failure_code": error.code,
                         "measured_external_cost_usd": _money_total(observer.records),
                     }
                 )
             else:
+                attempt_records = _persist_candidate_attempts(
+                    path=artifact_root / "generation_attempts.jsonl",
+                    manifest=manifest,
+                    git_sha=git_sha,
+                    pair_id=pair_id,
+                    model_key=str(model_key),
+                    service=service,
+                    observer=observer,
+                )
                 if service.engine is None:
                     raise ExperimentSafetyError("Generated service returned without canonical truth.")
                 fingerprint = case_content_fingerprint(service.engine.case)
@@ -183,7 +249,7 @@ async def run_generation_matrix(
                 outcome.update(
                     {
                         "admitted": True,
-                        "attempts": len(observer.records),
+                        "attempts": len(attempt_records),
                         "case_id": service.engine.case.id,
                         "case_fingerprint": fingerprint,
                         "canonical_artifact": str(canonical_path.relative_to(artifact_root)),

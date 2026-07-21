@@ -106,9 +106,35 @@ class PrivateInterviewSelectionSource(str, Enum):
     FALLBACK = "fallback"
 
 
+class PrivateInterviewFailureReason(str, Enum):
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PROVIDER_ERROR = "provider_error"
+    TIMEOUT = "timeout"
+    MALFORMED_RESPONSE = "malformed_response"
+    INVALID_RESPONSE_ID = "invalid_response_id"
+
+
+class _MalformedProviderResponse(ValueError):
+    pass
+
+
+class _InvalidProviderSelection(ValueError):
+    pass
+
+
 class PrivateInterviewSelectionPlan(StrictModel):
     selection: PrivateInterviewSelection
     source: PrivateInterviewSelectionSource
+    failure_reason: PrivateInterviewFailureReason | None = None
+
+    @model_validator(mode="after")
+    def failure_requires_fallback(self) -> "PrivateInterviewSelectionPlan":
+        if (
+            self.failure_reason is not None
+            and self.source != PrivateInterviewSelectionSource.FALLBACK
+        ):
+            raise ValueError("only a fallback interview selection may have a failure reason")
+        return self
 
 
 @runtime_checkable
@@ -147,27 +173,42 @@ class PrivateInterviewSelectionCoordinator:
             return PrivateInterviewSelectionPlan(
                 selection=fallback,
                 source=PrivateInterviewSelectionSource.FALLBACK,
+                failure_reason=PrivateInterviewFailureReason.PROVIDER_UNAVAILABLE,
             )
         try:
             raw_output = await asyncio.wait_for(
                 self._provider.select_response(request),
                 timeout=self._timeout_seconds,
             )
-            selection = self._parse_selection(raw_output)
+            try:
+                selection = self._parse_selection(raw_output)
+            except Exception as error:
+                raise _MalformedProviderResponse from error
             if selection.response_id not in {
                 candidate.response_id for candidate in request.candidates
             }:
-                raise ValueError("provider selected an unknown response_id")
+                raise _InvalidProviderSelection(
+                    "provider selected an unknown response_id"
+                )
         except asyncio.CancelledError:
             raise
+        except TimeoutError:
+            failure_reason = PrivateInterviewFailureReason.TIMEOUT
+        except _MalformedProviderResponse:
+            failure_reason = PrivateInterviewFailureReason.MALFORMED_RESPONSE
+        except _InvalidProviderSelection:
+            failure_reason = PrivateInterviewFailureReason.INVALID_RESPONSE_ID
         except Exception:
+            failure_reason = PrivateInterviewFailureReason.PROVIDER_ERROR
+        else:
             return PrivateInterviewSelectionPlan(
-                selection=fallback,
-                source=PrivateInterviewSelectionSource.FALLBACK,
+                selection=selection,
+                source=PrivateInterviewSelectionSource.PROVIDER,
             )
         return PrivateInterviewSelectionPlan(
-            selection=selection,
-            source=PrivateInterviewSelectionSource.PROVIDER,
+            selection=fallback,
+            source=PrivateInterviewSelectionSource.FALLBACK,
+            failure_reason=failure_reason,
         )
 
     @staticmethod

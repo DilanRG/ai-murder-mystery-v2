@@ -231,6 +231,7 @@ def test_observer_settles_after_response_and_cancellation() -> None:
     assert "secret-key" not in repr(events)
     assert "payload" not in events[0][1]
     assert events[0][1]["task_role"] == "unspecified"
+    assert events[0][1]["started_at"].endswith("+00:00")
     assert events[0][1]["prompt_tokens_upper_bound"] > 0
 
     async def cancelled_post(_: dict[str, object]) -> LLMResponse:

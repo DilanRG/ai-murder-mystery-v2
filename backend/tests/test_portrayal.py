@@ -10,6 +10,7 @@ from game.portrayal import (
     ConstrainedPortrayalCoordinator,
     OpenRouterPortrayalAdapter,
     PermittedFact,
+    PortrayalFailureReason,
     PortrayalRequest,
     PortrayalSource,
 )
@@ -70,15 +71,15 @@ def test_valid_provider_portrayal_keeps_authoritative_claim_separate() -> None:
 
 def test_hallucinated_fact_reference_falls_back_without_leaking_truth() -> None:
     request = _request()
-    result = asyncio.run(
-        ConstrainedPortrayalCoordinator(
-            _StaticProvider(
-                {"utterance": "The secret ledger proves it.", "referenced_fact_ids": ["secret_ledger"]}
-            )
-        ).portray(request)
+    coordinator = ConstrainedPortrayalCoordinator(
+        _StaticProvider(
+            {"utterance": "The secret ledger proves it.", "referenced_fact_ids": ["secret_ledger"]}
+        )
     )
+    result = asyncio.run(coordinator.portray(request))
 
     assert result.source is PortrayalSource.FALLBACK
+    assert coordinator.last_failure_reason is PortrayalFailureReason.INVALID_FACT_REFERENCE
     assert result.surface_utterance == request.canonical_claim
     assert result.referenced_fact_ids == ()
 
@@ -111,10 +112,16 @@ def test_provider_failure_timeout_and_no_provider_use_deterministic_fallback() -
         ConstrainedPortrayalCoordinator(),
     )
 
-    for coordinator in coordinators:
+    expected = (
+        PortrayalFailureReason.PROVIDER_ERROR,
+        PortrayalFailureReason.TIMEOUT,
+        PortrayalFailureReason.PROVIDER_UNAVAILABLE,
+    )
+    for coordinator, failure_reason in zip(coordinators, expected, strict=True):
         result = asyncio.run(coordinator.portray(request))
         assert result.source is PortrayalSource.FALLBACK
         assert result.surface_utterance == request.canonical_claim
+        assert coordinator.last_failure_reason is failure_reason
 
 
 def test_request_rejects_secret_or_world_fields() -> None:

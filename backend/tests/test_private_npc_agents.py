@@ -13,6 +13,7 @@ from game.private_npc_agents import (
     MAX_PRIVATE_NPC_AGENTS,
     OpenRouterPrivateNpcAgentAdapter,
     PrivateNpcAgentCoordinator,
+    PrivateNpcAgentFailureReason,
     PrivateNpcAgentRequest,
     PrivateNpcAgentSource,
     PrivateNpcBriefing,
@@ -74,6 +75,20 @@ def test_malformed_response_falls_back_for_only_that_actor() -> None:
     assert plan.sources["good"] is PrivateNpcAgentSource.PROVIDER
     assert plan.selections["bad"].action_id == "bad-first"
     assert plan.sources["bad"] is PrivateNpcAgentSource.FALLBACK
+    assert plan.failure_reasons == {
+        "bad": PrivateNpcAgentFailureReason.MALFORMED_RESPONSE
+    }
+
+
+def test_unknown_action_id_is_classified_separately_from_malformed_json() -> None:
+    class Provider:
+        async def plan_action(self, request):
+            return {"action_id": "not-offered"}
+
+    plan = asyncio.run(
+        PrivateNpcAgentCoordinator(Provider()).plan_all((_request("a"),))
+    )
+    assert plan.failure_reasons["a"] is PrivateNpcAgentFailureReason.INVALID_ACTION_ID
 
 
 @pytest.mark.parametrize("urgency", (-1, 1_000_000))
@@ -101,6 +116,7 @@ def test_timeout_falls_back_but_cancellation_propagates() -> None:
 
     plan = asyncio.run(PrivateNpcAgentCoordinator(SlowProvider(), timeout_seconds=0.001).plan_all((_request("a"),)))
     assert plan.sources["a"] is PrivateNpcAgentSource.FALLBACK
+    assert plan.failure_reasons["a"] is PrivateNpcAgentFailureReason.TIMEOUT
 
     async def cancelled() -> None:
         task = asyncio.create_task(PrivateNpcAgentCoordinator(SlowProvider()).plan_all((_request("a"),)))

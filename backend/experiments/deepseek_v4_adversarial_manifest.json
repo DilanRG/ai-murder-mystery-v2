@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "entry_gate": "phase_a_passed_and_budget_available",
+  "surface": {
+    "player_state_and_actions": true,
+    "validated_save_load": true,
+    "new_game": false,
+    "demo": false,
+    "settings": false,
+    "models": false,
+    "card_editor": false,
+    "premature_debrief": false,
+    "openapi": false
+  },
+  "sessions": [
+    {
+      "session_id": "ADV-PRO",
+      "npc_model_key": "pro",
+      "case_selection_rule": "first_admitted_case_not_used_by_this_agent_preferred"
+    },
+    {
+      "session_id": "ADV-FLASH",
+      "npc_model_key": "flash",
+      "case_selection_rule": "first_admitted_case_not_used_by_this_agent_preferred"
+    }
+  ],
+  "attack_groups": [
+    "schema_blank_null_negative_zero_huge_duplicate_stale_nonexistent",
+    "movement_remote_inaccessible_and_nonexistent_targets",
+    "interview_victim_absent_invalid_long_unicode_control_and_injection_text",
+    "repeat_double_concurrent_and_out_of_order_actions",
+    "unsupported_free_form_actions",
+    "accusation_duplicate_undiscovered_nonexistent_and_unsupported_evidence",
+    "accusation_missing_invalid_or_contradictory_dimensions",
+    "post_timeout_and_post_conclusion_actions",
+    "save_near_activity_repeated_load_refresh_reconnect_and_stale_save",
+    "malformed_provider_timeout_retry_exhaustion_and_cost_bounds",
+    "hidden_state_leakage_through_public_surfaces_errors_and_premature_debrief",
+    "turn_action_evidence_claim_knowledge_duplication_and_replay_divergence",
+    "ordinary_valid_action_after_adversarial_rejections"
+  ],
+  "required_invariants": [
+    "rejected_request_does_not_mutate_or_advance_time",
+    "no_hidden_state_leak",
+    "no_duplicate_commit",
+    "save_remains_valid_and_replayable",
+    "unsupported_evidence_never_supports_verdict",
+    "provider_retries_and_cost_remain_bounded",
+    "session_remains_recoverable",
+    "ordinary_valid_action_still_succeeds"
+  ]
+}

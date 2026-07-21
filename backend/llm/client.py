@@ -11,6 +11,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -251,6 +252,7 @@ class LLMClient:
         )
         event_base = {
             "request_id": request_id,
+            "started_at": datetime.now(UTC).isoformat(),
             "model": self.model,
             "task_role": task_role,
             "max_tokens": int(payload.get("max_tokens", 0)),

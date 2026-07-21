@@ -137,6 +137,15 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
     request_records = (tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(request_records) == 2
     assert all(json.loads(record)["task_role"] == "case_generation" for record in request_records)
+    attempts = [
+        json.loads(record)
+        for record in (tmp_path / "generation_attempts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(attempts) == 2
+    assert all(record["admission_result"] == "admitted" for record in attempts)
+    assert all(record["request_id"] and record["generation_id"] for record in attempts)
 
 
 def test_generation_matrix_counts_three_rejected_candidates_without_outer_retry(
@@ -171,6 +180,15 @@ def test_generation_matrix_counts_three_rejected_candidates_without_outer_retry(
     assert all(outcome["attempts"] == 3 for outcome in outcomes)
     assert all(outcome["failure_code"] == "invalid_generated_case" for outcome in outcomes)
     assert len((tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()) == 6
+    attempts = [
+        json.loads(record)
+        for record in (tmp_path / "generation_attempts.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(attempts) == 6
+    assert all(record["failure_category"] == "malformed_json" for record in attempts)
+    assert [record["repair_feedback_used"] for record in attempts[:3]] == [False, True, True]
 
 
 def test_generation_matrix_refuses_unverified_revision_before_building_client(

@@ -22,6 +22,7 @@ from game.models import CaseDefinition
 from game.persistence import restore_engine, snapshot_engine
 from game.service import GameService
 from game.private_interview import (
+    PrivateInterviewFailureReason,
     PrivateInterviewResponseCandidate,
     PrivateInterviewResponseRequest,
     PrivateInterviewSelection,
@@ -128,6 +129,18 @@ def test_interview_selector_uses_the_engine_chosen_useful_fallback() -> None:
 
     assert plan.selection.response_id == "alibi"
     assert plan.source is PrivateInterviewSelectionSource.FALLBACK
+    assert plan.failure_reason is PrivateInterviewFailureReason.MALFORMED_RESPONSE
+
+
+def test_interview_unknown_response_id_has_distinct_failure_reason() -> None:
+    plan = asyncio.run(
+        PrivateInterviewSelectionCoordinator(
+            _Provider({"response_id": "not-an-authored-choice"})
+        ).select(_request())
+    )
+
+    assert plan.source is PrivateInterviewSelectionSource.FALLBACK
+    assert plan.failure_reason is PrivateInterviewFailureReason.INVALID_RESPONSE_ID
 
 
 def test_interview_request_rejects_a_forged_fallback_id() -> None:

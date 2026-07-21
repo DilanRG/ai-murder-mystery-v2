@@ -84,6 +84,8 @@ class GameService:
         self._portrayal_llm = portrayal_llm
         self.engine: GameEngine | None = None
         self._generation_metadata: dict[str, object] | None = None
+        self._generation_attempt_diagnostics: list[dict[str, object]] = []
+        self._runtime_diagnostics: list[dict[str, object]] = []
         self._action_lock = asyncio.Lock()
 
     def is_active(self) -> bool:
@@ -138,6 +140,8 @@ class GameService:
         )
         self.engine = candidate
         self._generation_metadata = None
+        self._generation_attempt_diagnostics = []
+        self._runtime_diagnostics = []
         return self.engine.view()
 
     def start_recipe(
@@ -163,6 +167,8 @@ class GameService:
         )
         self.engine = candidate
         self._generation_metadata = None
+        self._generation_attempt_diagnostics = []
+        self._runtime_diagnostics = []
         return self.engine.view()
 
     async def start_async(
@@ -200,6 +206,8 @@ class GameService:
             )
             self.engine = candidate
             self._generation_metadata = None
+            self._generation_attempt_diagnostics = []
+            self._runtime_diagnostics = []
             return self.engine.view()
 
     async def start_generated_async(
@@ -219,12 +227,14 @@ class GameService:
                 character_ids=character_ids,
             )
             location = load_location(location_id)
+            self._generation_attempt_diagnostics = []
             generated = await generate_validated_scenario(
                 provider,
                 character_ids=selected_character_ids,
                 location=location,
                 seed=seed,
                 difficulty=difficulty,
+                attempt_observer=self._generation_attempt_diagnostics.append,
             )
             candidate = GameEngine.create(
                 generated.case,
@@ -240,6 +250,7 @@ class GameService:
                 "story_source": "openrouter",
                 "story_status": "ready",
             }
+            self._runtime_diagnostics = []
             return candidate.view()
 
     def state(self) -> PlayerGameView:
@@ -284,6 +295,19 @@ class GameService:
             )
             plan = await coordinator.select(preview.private_interview_request)
             interview_response_id = plan.selection.response_id
+            self._runtime_diagnostics.append(
+                {
+                    "turn_before": engine.runtime.turn,
+                    "task_role": "private_interview_selection",
+                    "actor_id": preview.private_interview_request.actor_id,
+                    "source": plan.source.value,
+                    "failure_reason": (
+                        plan.failure_reason.value
+                        if plan.failure_reason is not None
+                        else None
+                    ),
+                }
+            )
         elif (
             preview.result.accepted
             and preview.result.committed
@@ -305,6 +329,20 @@ class GameService:
                 actor_id: source.value
                 for actor_id, source in plan.sources.items()
             }
+            self._runtime_diagnostics.extend(
+                {
+                    "turn_before": engine.runtime.turn,
+                    "task_role": "private_npc_action",
+                    "actor_id": actor_id,
+                    "source": plan.sources[actor_id].value,
+                    "failure_reason": (
+                        plan.failure_reasons[actor_id].value
+                        if actor_id in plan.failure_reasons
+                        else None
+                    ),
+                }
+                for actor_id in plan.selections
+            )
         elif preview.result.accepted and preview.result.committed and preview.npc_request is not None:
             npc_provider = self._npc_provider()
             coordinator = ConstrainedNpcIntentPlanningCoordinator(
@@ -380,9 +418,21 @@ class GameService:
                 if portrayal_provider is not None
                 else None
             )
-            response["portrayal"] = (
-                await coordinator.portray(request)
-            ).model_dump(mode="json")
+            portrayal = await coordinator.portray(request)
+            response["portrayal"] = portrayal.model_dump(mode="json")
+            self._runtime_diagnostics.append(
+                {
+                    "turn_before": engine.runtime.turn,
+                    "task_role": "portrayal",
+                    "actor_id": character_id,
+                    "source": portrayal.source.value,
+                    "failure_reason": (
+                        coordinator.last_failure_reason.value
+                        if coordinator.last_failure_reason is not None
+                        else None
+                    ),
+                }
+            )
         except asyncio.CancelledError:
             # The authoritative exchange is already committed.  Returning its
             # deterministic portrayal keeps cancellation from turning a
@@ -419,6 +469,8 @@ class GameService:
             if self.engine.case.id.startswith("generated_")
             else None
         )
+        self._generation_attempt_diagnostics = []
+        self._runtime_diagnostics = []
         return self.engine.view()
 
     async def load_async(self, filename: str) -> PlayerGameView:
@@ -492,6 +544,16 @@ class GameService:
         if self.engine is None or self._generation_metadata is None:
             return None
         return dict(self._generation_metadata)
+
+    def runtime_diagnostics(self) -> list[dict[str, object]]:
+        """Return sanitized provider-selection outcomes for experiment accounting."""
+
+        return [dict(record) for record in self._runtime_diagnostics]
+
+    def generation_attempt_diagnostics(self) -> list[dict[str, object]]:
+        """Return candidate-level admission outcomes without prompts or truth."""
+
+        return [dict(record) for record in self._generation_attempt_diagnostics]
 
     def recipe_metadata(self) -> dict[str, object] | None:
         """Return reproducibility metadata without exposing the selected spine."""

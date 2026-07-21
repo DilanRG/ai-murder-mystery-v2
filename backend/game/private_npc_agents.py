@@ -87,16 +87,42 @@ class PrivateNpcAgentSource(str, Enum):
     FALLBACK = "fallback"
 
 
+class PrivateNpcAgentFailureReason(str, Enum):
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PROVIDER_ERROR = "provider_error"
+    TIMEOUT = "timeout"
+    MALFORMED_RESPONSE = "malformed_response"
+    INVALID_ACTION_ID = "invalid_action_id"
+
+
+class _MalformedProviderResponse(ValueError):
+    pass
+
+
+class _InvalidProviderSelection(ValueError):
+    pass
+
+
 class PrivateNpcAgentPlan(StrictModel):
     """Selections and provenance indexed by their request actor IDs."""
 
     selections: dict[str, PrivateNpcAgentSelection]
     sources: dict[str, PrivateNpcAgentSource]
+    failure_reasons: dict[str, PrivateNpcAgentFailureReason] = Field(
+        default_factory=dict
+    )
 
     @model_validator(mode="after")
     def selections_and_sources_cover_the_same_actors(self) -> "PrivateNpcAgentPlan":
         if set(self.selections) != set(self.sources):
             raise ValueError("selections and sources must cover the same actors")
+        if not set(self.failure_reasons) <= set(self.selections):
+            raise ValueError("failure reasons may name only selected actors")
+        if any(
+            self.sources[actor_id] != PrivateNpcAgentSource.FALLBACK
+            for actor_id in self.failure_reasons
+        ):
+            raise ValueError("only fallback selections may have failure reasons")
         return self
 
 
@@ -128,29 +154,57 @@ class PrivateNpcAgentCoordinator:
         # cancels the outstanding per-actor provider tasks.
         results = await asyncio.gather(*(self._plan_one(request) for request in requests))
         return PrivateNpcAgentPlan(
-            selections={actor_id: selection for actor_id, selection, _ in results},
-            sources={actor_id: source for actor_id, _, source in results},
+            selections={actor_id: selection for actor_id, selection, _, _ in results},
+            sources={actor_id: source for actor_id, _, source, _ in results},
+            failure_reasons={
+                actor_id: reason
+                for actor_id, _, _, reason in results
+                if reason is not None
+            },
         )
 
     async def _plan_one(
         self, request: PrivateNpcAgentRequest
-    ) -> tuple[str, PrivateNpcAgentSelection, PrivateNpcAgentSource]:
+    ) -> tuple[
+        str,
+        PrivateNpcAgentSelection,
+        PrivateNpcAgentSource,
+        PrivateNpcAgentFailureReason | None,
+    ]:
         fallback = PrivateNpcAgentSelection(action_id=request.actor_options.candidates[0].action_id)
         if self._provider is None:
-            return request.actor_id, fallback, PrivateNpcAgentSource.FALLBACK
+            return (
+                request.actor_id,
+                fallback,
+                PrivateNpcAgentSource.FALLBACK,
+                PrivateNpcAgentFailureReason.PROVIDER_UNAVAILABLE,
+            )
         try:
             raw_output = await asyncio.wait_for(
                 self._provider.plan_action(request), timeout=self._timeout_seconds
             )
-            selection = self._parse_selection(raw_output)
+            try:
+                selection = self._parse_selection(raw_output)
+            except Exception as error:
+                raise _MalformedProviderResponse from error
             allowed = {candidate.action_id for candidate in request.actor_options.candidates}
             if selection.action_id not in allowed:
-                raise ValueError("provider selected an action outside the candidate set")
+                raise _InvalidProviderSelection(
+                    "provider selected an action outside the candidate set"
+                )
         except asyncio.CancelledError:
             raise
+        except TimeoutError:
+            reason = PrivateNpcAgentFailureReason.TIMEOUT
+        except _MalformedProviderResponse:
+            reason = PrivateNpcAgentFailureReason.MALFORMED_RESPONSE
+        except _InvalidProviderSelection:
+            reason = PrivateNpcAgentFailureReason.INVALID_ACTION_ID
         except Exception:
-            return request.actor_id, fallback, PrivateNpcAgentSource.FALLBACK
-        return request.actor_id, selection, PrivateNpcAgentSource.PROVIDER
+            reason = PrivateNpcAgentFailureReason.PROVIDER_ERROR
+        else:
+            return request.actor_id, selection, PrivateNpcAgentSource.PROVIDER, None
+        return request.actor_id, fallback, PrivateNpcAgentSource.FALLBACK, reason
 
     @staticmethod
     def _parse_selection(raw_output: str | dict[str, Any]) -> PrivateNpcAgentSelection:

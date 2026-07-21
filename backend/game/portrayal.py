@@ -87,6 +87,22 @@ class PortrayalSource(str, Enum):
     FALLBACK = "fallback"
 
 
+class PortrayalFailureReason(str, Enum):
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    PROVIDER_ERROR = "provider_error"
+    TIMEOUT = "timeout"
+    MALFORMED_RESPONSE = "malformed_response"
+    INVALID_FACT_REFERENCE = "invalid_fact_reference"
+
+
+class _MalformedProviderResponse(ValueError):
+    pass
+
+
+class _InvalidFactReference(ValueError):
+    pass
+
+
 class PortrayalResult(StrictModel):
     """Presentation data with a separate canonical engine claim.
 
@@ -137,25 +153,44 @@ class ConstrainedPortrayalCoordinator:
         self._provider = provider
         self._timeout_seconds = timeout_seconds
         self._fallback = fallback or DeterministicPortrayalFallback()
+        self.last_failure_reason: PortrayalFailureReason | None = None
 
     async def portray(self, request: PortrayalRequest) -> PortrayalResult:
         """Render a claim, never letting remote output affect world truth."""
         if self._provider is None:
+            self.last_failure_reason = PortrayalFailureReason.PROVIDER_UNAVAILABLE
             return self._fallback.portray(request)
 
         try:
             raw_output = await asyncio.wait_for(
                 self._provider.portray(request), timeout=self._timeout_seconds
             )
-            provider_output = self._parse_provider_output(raw_output)
-            self._validate_references(provider_output, request)
+            try:
+                provider_output = self._parse_provider_output(raw_output)
+            except Exception as error:
+                raise _MalformedProviderResponse from error
+            try:
+                self._validate_references(provider_output, request)
+            except Exception as error:
+                raise _InvalidFactReference from error
         except asyncio.CancelledError:
             # A cancellation should not be swallowed: callers use it to end a
             # request scope.  Every other provider/validation failure is safe.
             raise
+        except TimeoutError:
+            self.last_failure_reason = PortrayalFailureReason.TIMEOUT
+            return self._fallback.portray(request)
+        except _MalformedProviderResponse:
+            self.last_failure_reason = PortrayalFailureReason.MALFORMED_RESPONSE
+            return self._fallback.portray(request)
+        except _InvalidFactReference:
+            self.last_failure_reason = PortrayalFailureReason.INVALID_FACT_REFERENCE
+            return self._fallback.portray(request)
         except Exception:
+            self.last_failure_reason = PortrayalFailureReason.PROVIDER_ERROR
             return self._fallback.portray(request)
 
+        self.last_failure_reason = None
         return PortrayalResult(
             canonical_claim=request.canonical_claim,
             surface_utterance=provider_output.utterance,

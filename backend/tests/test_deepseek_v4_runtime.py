@@ -11,6 +11,7 @@ from experiments.deepseek_v4_runner import ExperimentSafetyError
 from experiments.deepseek_v4_runtime import (
     DeepSeekRequestObserver,
     RunContext,
+    SequentialMeasuredClient,
     build_measured_client,
 )
 from llm.client import LLMMessage, LLMProviderError, LLMResponse
@@ -20,6 +21,7 @@ from llm.experiment import DeepSeekExperimentLedger, PRO_MODEL_SLUG
 def _event_base() -> dict[str, object]:
     return {
         "request_id": "transport-request",
+        "started_at": "2026-07-21T00:00:00+00:00",
         "model": PRO_MODEL_SLUG,
         "task_role": "byok_preflight",
         "max_tokens": 8,
@@ -76,6 +78,7 @@ def test_verified_response_is_settled_and_sanitized(tmp_path: Path) -> None:
     asyncio.run(run())
     assert observer.last_record is not None
     assert observer.last_record["result"] == "success"
+    assert observer.last_record["started_at"] == "2026-07-21T00:00:00+00:00"
     assert observer.last_record["is_byok"] is True
     assert "content" not in observer.last_record
     assert observer.ledger.snapshot()["settled_usd"] > 0
@@ -143,3 +146,46 @@ def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
 
     asyncio.run(run())
     assert observer.records[-1]["result"] == "byok_verification_failed"
+
+
+def test_sequential_measured_client_serializes_and_latches_provider_failure() -> None:
+    class Inner:
+        model = PRO_MODEL_SLUG
+
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+            self.calls = 0
+
+        async def generate(self, value: int) -> LLMResponse:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.calls += 1
+            await asyncio.sleep(0)
+            self.active -= 1
+            if value == 2:
+                raise LLMProviderError(
+                    "provider failed",
+                    code="provider_unavailable",
+                    retryable=True,
+                )
+            return LLMResponse(content=str(value), model=self.model)
+
+    inner = Inner()
+    client = SequentialMeasuredClient(inner)  # type: ignore[arg-type]
+
+    async def run() -> list[object]:
+        return await asyncio.gather(
+            client.generate(1),
+            client.generate(2),
+            client.generate(3),
+            return_exceptions=True,
+        )
+
+    results = asyncio.run(run())
+    assert inner.max_active == 1
+    assert inner.calls == 2
+    assert isinstance(results[0], LLMResponse)
+    assert isinstance(results[1], LLMProviderError)
+    assert isinstance(results[2], LLMProviderError)
+    assert client.abort_code == "provider_unavailable"

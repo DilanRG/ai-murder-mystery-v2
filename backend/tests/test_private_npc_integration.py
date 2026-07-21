@@ -165,5 +165,10 @@ def test_generated_case_and_runtime_can_use_distinct_role_clients(
         assert scenario_provider.calls == 1
         assert len(npc_provider.requests) == 7
         assert len({request["actor_id"] for request in npc_provider.requests}) == 7
+        diagnostics = service.runtime_diagnostics()
+        assert len(diagnostics) == 7
+        assert all(item["task_role"] == "private_npc_action" for item in diagnostics)
+        assert all(item["source"] == "provider" for item in diagnostics)
+        assert all(item["failure_reason"] is None for item in diagnostics)
 
     asyncio.run(scenario())
