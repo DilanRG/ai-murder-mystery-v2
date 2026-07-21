@@ -120,7 +120,12 @@ def test_adapter_keeps_each_request_private_and_uses_json_mode() -> None:
 
     client = Client()
     asyncio.run(OpenRouterPrivateNpcAgentAdapter(client).plan_action(_request("a")))
-    assert client.kwargs == {"max_tokens": 80, "temperature": 0.0, "json_mode": True}
+    assert client.kwargs == {
+        "max_tokens": 80,
+        "temperature": 0.0,
+        "json_mode": True,
+        "task_role": "private_npc_action",
+    }
     sent = "\n".join(message.content for message in client.messages)
     assert "actor_options" in sent and "private_facts" in sent
     assert "state_patch" not in sent

@@ -142,7 +142,12 @@ def test_openrouter_adapter_uses_only_safe_generated_messages() -> None:
     raw = asyncio.run(OpenRouterPortrayalAdapter(client).portray(_request()))
 
     assert '"utterance"' in raw
-    assert client.kwargs == {"max_tokens": 220, "temperature": 0.2, "json_mode": True}
+    assert client.kwargs == {
+        "max_tokens": 220,
+        "temperature": 0.2,
+        "json_mode": True,
+        "task_role": "portrayal",
+    }
     sent_text = "\n".join(message.content for message in client.messages)
     assert "character-card" not in sent_text
     assert "murderer_id" not in sent_text

@@ -1,0 +1,75 @@
+{
+  "experiment_id": "deepseek-v4-phase1",
+  "manifest_revision": 1,
+  "frozen_at": "2026-07-21",
+  "git_checkpoint": "84729b17dc6e308547b78a35f1b044ee8ad633b7",
+  "location_package_id": "ashwick_manor",
+  "prompt_revision": "procedural-case-generation-v1",
+  "schema_revision": "procedural-case-schema-v1",
+  "models": {
+    "pro": "deepseek/deepseek-v4-pro",
+    "flash": "deepseek/deepseek-v4-flash"
+  },
+  "provider_routing": {
+    "only": ["deepseek"],
+    "allow_fallbacks": false,
+    "require_parameters": true
+  },
+  "runtime_settings": {
+    "reasoning_effort": "high",
+    "sampler_defaults": {
+      "top_p": 0.95,
+      "top_k": 40
+    },
+    "roles": {
+      "case_generation": {"max_tokens": 16384, "temperature": 0.55, "json_mode": true},
+      "private_npc_action": {"max_tokens": 80, "temperature": 0.0, "json_mode": true},
+      "private_interview_selection": {"max_tokens": 80, "temperature": 0.0, "json_mode": true},
+      "portrayal": {"max_tokens": 220, "temperature": 0.2, "json_mode": true}
+    },
+    "generation_attempt_limit": 3,
+    "concurrency": 1,
+    "retry_policy_revision": "bounded-generation-retry-v1"
+  },
+  "budget": {
+    "currency": "USD",
+    "total_external_api_usd": 10.0,
+    "soft_stop_usd": 8.5,
+    "hard_operational_stop_usd": 9.5,
+    "reserved_uncertainty_usd": 0.5,
+    "never_intentionally_spend_reserved_margin": true
+  },
+  "generation_pairs": [
+    {
+      "pair_id": "P1",
+      "seed": 2026072101,
+      "model_order": ["flash", "pro"],
+      "cast_ids": ["captain_marcus_drake", "celia_marlowe", "countess_beatrice_harrow", "dr_celestine_moreau", "edgar_blackwood", "inspector_elena_hayes", "lady_helena_wren", "zara_okonkwo"]
+    },
+    {
+      "pair_id": "P2",
+      "seed": 2026072102,
+      "model_order": ["pro", "flash"],
+      "cast_ids": ["chef_armand_dubois", "chef_kenji_watanabe", "chef_luca_bianchi", "commander_elias_ward", "dr_amara_sen", "inspector_maeve_quinn", "major_hugo_st_clair", "thomas_vale"]
+    },
+    {
+      "pair_id": "P3",
+      "seed": 2026072103,
+      "model_order": ["flash", "pro"],
+      "cast_ids": ["dr_imogen_frost", "gabriel_cross", "ines_costa", "inspector_nadia_singh", "lady_vivienne_ashford", "leila_haddad", "naomi_price", "sabrina_voss"]
+    }
+  ],
+  "reserve_pair": {
+    "pair_id": "R1",
+    "seed": 2026072104,
+    "model_order": ["pro", "flash"],
+    "cast_ids": ["captain_marcus_drake", "chef_kenji_watanabe", "commander_elias_ward", "dr_imogen_frost", "gabriel_cross", "inspector_elena_hayes", "leila_haddad", "naomi_price"],
+    "activation_rule": "Use only as a balanced replacement for a failed original pair; retain original failures in the report and stay below the hard operational stop."
+  },
+  "comparison_rules": {
+    "same_prompt_schema_location_seed_cast_and_settings_within_pair": true,
+    "no_fallback_model": true,
+    "no_post_hoc_input_selection": true,
+    "count_rejected_or_malformed_candidates_as_failures": true
+  }
+}

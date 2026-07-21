@@ -39,9 +39,13 @@
 
 The first procedural case has passed the technical acceptance criteria preserved in Appendix A of the design roadmap. That is implementation evidence, not a declaration that the product milestone or MVP is finished. Under the superseding roadmap, **Phase 1 remains active** until the blind-playtesting gate is met.
 
+## Controlled DeepSeek V4 evaluation in progress
+
+The general real-provider hold is lifted only for a paired, budget-capped comparison of `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash` through the configured DeepSeek BYOK endpoint. Provider-only routing, fallback prohibition, BYOK verification, atomic cost accounting, and a frozen experiment manifest must pass locally before substantive traffic. The run stops at the human blind-playtest gate and cannot declare Phase 1 or the MVP complete.
+
 ## Remaining Phase 1 acceptance work and limitations
 
-1. Real-provider playtesting remains on hold; the procedural acceptance run uses a local dummy provider and spends no OpenRouter credits.
+1. Real-provider playtesting outside the controlled DeepSeek V4 experiment remains on hold. The earlier procedural acceptance run used a local dummy provider and spent no OpenRouter credits.
 2. The expanded gate still requires three procedural cases with different seeds and materially different casts or locations to pass automated validation.
 3. Two blind sub-agent playthroughs on different cases must use only the actual player interface and reach fair, evidence-supported accusations without hidden-state access.
 4. At least one human blind playthrough is required before the MVP may be described as trustworthy.

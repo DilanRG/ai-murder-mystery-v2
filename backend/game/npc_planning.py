@@ -250,5 +250,6 @@ class OpenRouterNpcIntentBatchAdapter:
             max_tokens=320,
             temperature=0.0,
             json_mode=True,
+            task_role="npc_batch_planning",
         )
         return response.content

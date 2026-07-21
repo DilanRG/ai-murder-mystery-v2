@@ -78,6 +78,31 @@ class _ScenarioThenAgentsProvider:
         )
 
 
+class _ScenarioOnlyProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, messages, **kwargs):
+        self.calls += 1
+        assert "canonical scenario architect" in messages[0].content
+        return SimpleNamespace(content=json.dumps(make_dummy_generated_document()))
+
+
+class _NpcOnlyProvider:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    async def generate(self, messages, **kwargs):
+        assert "canonical scenario architect" not in messages[0].content
+        request = json.loads(messages[-1].content)
+        self.requests.append(request)
+        return SimpleNamespace(
+            content=json.dumps(
+                {"action_id": request["actor_options"]["candidates"][0]["action_id"]}
+            )
+        )
+
+
 def test_generated_committed_turn_runs_seven_isolated_agent_calls(
     tmp_path: Path,
 ) -> None:
@@ -111,5 +136,34 @@ def test_generated_committed_turn_runs_seven_isolated_agent_calls(
         history = service.engine.action_history
         assert history is not None
         assert len(history[-1].npc_action_ids) == 7
+
+    asyncio.run(scenario())
+
+
+def test_generated_case_and_runtime_can_use_distinct_role_clients(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        source = load_case("ashwick_sample")
+        scenario_provider = _ScenarioOnlyProvider()
+        npc_provider = _NpcOnlyProvider()
+        service = GameService(
+            tmp_path,
+            scenario_llm=scenario_provider,
+            npc_llm=npc_provider,
+        )
+
+        await service.start_generated_async(
+            seed=84,
+            character_ids=source.character_ids,
+        )
+        await service.action(AdvanceOpeningIntent())
+        destination = service.state().player_room.exits[0]
+        result = await service.action(MoveIntent(room_id=destination))
+
+        assert result["accepted"] and result["committed"]
+        assert scenario_provider.calls == 1
+        assert len(npc_provider.requests) == 7
+        assert len({request["actor_id"] for request in npc_provider.requests}) == 7
 
     asyncio.run(scenario())

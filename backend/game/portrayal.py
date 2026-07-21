@@ -233,5 +233,6 @@ class OpenRouterPortrayalAdapter:
             max_tokens=220,
             temperature=0.2,
             json_mode=True,
+            task_role="portrayal",
         )
         return response.content

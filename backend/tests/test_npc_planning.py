@@ -153,7 +153,12 @@ def test_openrouter_adapter_sends_only_the_safe_request_and_requests_json() -> N
     raw = asyncio.run(OpenRouterNpcIntentBatchAdapter(client).plan_intents(_request()))
 
     assert raw == '{"selections":[]}'
-    assert client.kwargs == {"max_tokens": 320, "temperature": 0.0, "json_mode": True}
+    assert client.kwargs == {
+        "max_tokens": 320,
+        "temperature": 0.0,
+        "json_mode": True,
+        "task_role": "npc_batch_planning",
+    }
     sent_text = "\n".join(message.content for message in client.messages)
     assert "murderer_id" not in sent_text
     assert "state_patch" not in sent_text

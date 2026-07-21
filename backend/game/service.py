@@ -65,9 +65,23 @@ DEFAULT_RECIPE_ID = "ashwick_manor_dual_spines"
 class GameService:
     """Single-session facade used by the FastAPI application."""
 
-    def __init__(self, save_root: Path | str, llm: Any | None = None) -> None:
+    def __init__(
+        self,
+        save_root: Path | str,
+        llm: Any | None = None,
+        *,
+        scenario_llm: Any | None = None,
+        npc_llm: Any | None = None,
+        portrayal_llm: Any | None = None,
+    ) -> None:
         self.save_root = Path(save_root)
+        # ``llm`` remains the production/default provider for compatibility.
+        # Experiment-only role overrides allow crossed scenario/NPC evaluation
+        # without changing accepted canonical truth or the ordinary settings UI.
         self.llm = llm
+        self._scenario_llm = scenario_llm
+        self._npc_llm = npc_llm
+        self._portrayal_llm = portrayal_llm
         self.engine: GameEngine | None = None
         self._generation_metadata: dict[str, object] | None = None
         self._action_lock = asyncio.Lock()
@@ -80,6 +94,31 @@ class GameService:
 
         async with self._action_lock:
             self.llm = llm
+
+    async def replace_role_llms(
+        self,
+        *,
+        scenario_llm: Any | None,
+        npc_llm: Any | None,
+        portrayal_llm: Any | None = None,
+    ) -> None:
+        """Atomically configure explicit experiment-only provider roles."""
+
+        async with self._action_lock:
+            self._scenario_llm = scenario_llm
+            self._npc_llm = npc_llm
+            self._portrayal_llm = portrayal_llm
+
+    def _scenario_provider(self) -> Any | None:
+        return self._scenario_llm if self._scenario_llm is not None else self.llm
+
+    def _npc_provider(self) -> Any | None:
+        return self._npc_llm if self._npc_llm is not None else self.llm
+
+    def _portrayal_provider(self) -> Any | None:
+        if self._portrayal_llm is not None:
+            return self._portrayal_llm
+        return self._npc_provider()
 
     def start(
         self,
@@ -174,7 +213,7 @@ class GameService:
         """Generate and validate a complete case before replacing the session."""
 
         async with self._action_lock:
-            provider = self.llm
+            provider = self._scenario_provider()
             selected_character_ids = select_generation_cast(
                 seed=seed,
                 character_ids=character_ids,
@@ -237,9 +276,10 @@ class GameService:
             and self._generation_metadata is not None
             and preview.private_interview_request is not None
         ):
+            npc_provider = self._npc_provider()
             coordinator = PrivateInterviewSelectionCoordinator(
-                OpenRouterPrivateInterviewSelectionAdapter(self.llm)
-                if self.llm is not None
+                OpenRouterPrivateInterviewSelectionAdapter(npc_provider)
+                if npc_provider is not None
                 else None
             )
             plan = await coordinator.select(preview.private_interview_request)
@@ -250,9 +290,10 @@ class GameService:
             and self._generation_metadata is not None
             and preview.private_npc_requests is not None
         ):
+            npc_provider = self._npc_provider()
             coordinator = PrivateNpcAgentCoordinator(
-                OpenRouterPrivateNpcAgentAdapter(self.llm)
-                if self.llm is not None
+                OpenRouterPrivateNpcAgentAdapter(npc_provider)
+                if npc_provider is not None
                 else None
             )
             plan = await coordinator.plan_all(preview.private_npc_requests)
@@ -265,8 +306,11 @@ class GameService:
                 for actor_id, source in plan.sources.items()
             }
         elif preview.result.accepted and preview.result.committed and preview.npc_request is not None:
+            npc_provider = self._npc_provider()
             coordinator = ConstrainedNpcIntentPlanningCoordinator(
-                OpenRouterNpcIntentBatchAdapter(self.llm) if self.llm is not None else None
+                OpenRouterNpcIntentBatchAdapter(npc_provider)
+                if npc_provider is not None
+                else None
             )
             plan = await coordinator.plan(preview.npc_request)
             npc_action_ids = {
@@ -330,8 +374,11 @@ class GameService:
                 permitted_facts=permitted_facts,
                 prior_public_dialogue=transcript,
             )
+            portrayal_provider = self._portrayal_provider()
             coordinator = ConstrainedPortrayalCoordinator(
-                OpenRouterPortrayalAdapter(self.llm) if self.llm is not None else None
+                OpenRouterPortrayalAdapter(portrayal_provider)
+                if portrayal_provider is not None
+                else None
             )
             response["portrayal"] = (
                 await coordinator.portray(request)

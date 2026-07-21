@@ -453,6 +453,7 @@ async def generate_validated_scenario(
                 max_tokens=16_384,
                 temperature=0.55,
                 json_mode=True,
+                task_role="case_generation",
             )
             if len(response.content.encode("utf-8")) > MAX_GENERATED_DOCUMENT_BYTES:
                 raise GeneratedScenarioError("generated document exceeds the size limit")

@@ -221,5 +221,6 @@ class OpenRouterPrivateInterviewSelectionAdapter:
             max_tokens=80,
             temperature=0.0,
             json_mode=True,
+            task_role="private_interview_selection",
         )
         return response.content

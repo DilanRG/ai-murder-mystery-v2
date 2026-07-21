@@ -35,6 +35,7 @@ chroma_data/
 
 # Artifacts
 .gemini/
+.private/
 
 # Misc
 .agent/
