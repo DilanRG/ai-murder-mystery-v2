@@ -27,6 +27,7 @@ PUBLIC_REQUEST_FIELDS = (
     "upstream_provider",
     "is_byok",
     "fallback_used",
+    "provider_failover_used",
     "request_id",
     "transport_request_id",
     "generation_id",
@@ -42,11 +43,13 @@ PUBLIC_REQUEST_FIELDS = (
     "upstream_prompt_cost_usd",
     "upstream_completion_cost_usd",
     "openrouter_fee_usd",
+    "openrouter_charge_usd",
     "total_external_cost_usd",
     "finish_reason",
     "native_finish_reason",
     "result",
     "accounting_status",
+    "accounting_mode",
     "error_type",
 )
 
@@ -78,11 +81,11 @@ def sanitize_request_records(records: Iterable[Mapping[str, Any]]) -> list[dict[
             raise ExperimentSafetyError("Metrics contain an unapproved requested model.")
         if record.get("result") == "success" and (
             record.get("actual_model") != model
-            or str(record.get("upstream_provider", "")).casefold() != "deepseek"
-            or record.get("is_byok") is not True
+            or not str(record.get("upstream_provider", ""))
             or record.get("fallback_used") is not False
+            or record.get("accounting_mode") not in {"openrouter", "byok"}
         ):
-            raise ExperimentSafetyError("Successful metrics do not prove exact DeepSeek BYOK.")
+            raise ExperimentSafetyError("Successful metrics do not prove exact OpenRouter model routing.")
         sanitized.append(
             {
                 field: record.get(field)

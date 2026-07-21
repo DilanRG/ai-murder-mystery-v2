@@ -1,4 +1,4 @@
-"""Explicit opt-in DeepSeek V4 BYOK preflight; makes exactly two tiny model calls."""
+"""Explicit opt-in DeepSeek V4 OpenRouter preflight; makes two tiny calls."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from experiments.deepseek_v4_runtime import (
     DeepSeekRequestObserver,
     RunContext,
     build_measured_client,
-    run_tiny_byok_preflight,
+    run_tiny_openrouter_preflight,
 )
 from llm.experiment import DeepSeekExperimentLedger
 
@@ -52,7 +52,12 @@ async def main() -> int:
         observer=DeepSeekRequestObserver(
             ledger=ledger,
             metrics_path=artifact_root / "requests.jsonl",
-            context=RunContext(1, git_sha, "preflight-baseline", "baseline"),
+            context=RunContext(
+                int(manifest["manifest_revision"]),
+                git_sha,
+                "preflight-baseline",
+                "baseline",
+            ),
         ),
     )
     baseline = await baseline_client.fetch_current_key_usage()
@@ -64,7 +69,7 @@ async def main() -> int:
             ledger=ledger,
             metrics_path=artifact_root / "requests.jsonl",
             context=RunContext(
-                1,
+                int(manifest["manifest_revision"]),
                 git_sha,
                 f"preflight-{model_key}",
                 "preflight",
@@ -75,22 +80,26 @@ async def main() -> int:
             model=EXPECTED_MODELS[model_key],
             observer=observer,
         )
-        await run_tiny_byok_preflight(client)
+        await run_tiny_openrouter_preflight(client)
         record = observer.last_record
         if not isinstance(record, dict) or record.get("result") != "success":
             raise RuntimeError(f"{model_key} preflight did not produce verified evidence.")
         evidence[model_key] = {
+            "experiment_revision": int(manifest["manifest_revision"]),
             "git_sha": git_sha,
             "model": record["actual_model"],
             "upstream_provider": record["upstream_provider"],
             "is_byok": record["is_byok"],
             "fallback_used": record["fallback_used"],
+            "provider_failover_used": record["provider_failover_used"],
+            "accounting_mode": record["accounting_mode"],
             "generation_id": record["generation_id"],
             "prompt_tokens": record["prompt_tokens"],
             "completion_tokens": record["completion_tokens"],
             "reasoning_tokens": record["reasoning_tokens"],
             "upstream_inference_cost_usd": record["upstream_inference_cost_usd"],
             "openrouter_fee_usd": record["openrouter_fee_usd"],
+            "openrouter_charge_usd": record["openrouter_charge_usd"],
             "total_external_cost_usd": record["total_external_cost_usd"],
         }
     verify_preflights(evidence, manifest, expected_git_sha=git_sha)
@@ -106,6 +115,7 @@ async def main() -> int:
                         "provider": value["upstream_provider"],
                         "is_byok": value["is_byok"],
                         "fallback_used": value["fallback_used"],
+                        "accounting_mode": value["accounting_mode"],
                     }
                     for key, value in evidence.items()
                 },

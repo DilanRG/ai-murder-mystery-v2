@@ -69,12 +69,13 @@ class ModelPricing:
             raise ValueError("model prices must be non-negative")
 
 
-# These are conservative *experiment defaults*, not a live pricing feed.  A
-# real evaluation must pin an explicit price card from the provider quote that
-# it is using.  Keeping prices local avoids an unreviewed network lookup.
+# These are deliberately conservative OpenRouter-route reservation ceilings,
+# not permanent product prices. Actual successful requests settle from trusted
+# response accounting, so the ceiling only decides whether a bounded request
+# may safely start under the experiment cap.
 DEFAULT_MODEL_PRICING: Mapping[AllowedModelSlug, ModelPricing] = {
-    PRO_MODEL_SLUG: ModelPricing(Decimal("0.435"), Decimal("0.87")),
-    FLASH_MODEL_SLUG: ModelPricing(Decimal("0.14"), Decimal("0.28")),
+    PRO_MODEL_SLUG: ModelPricing(Decimal("5.00"), Decimal("10.00")),
+    FLASH_MODEL_SLUG: ModelPricing(Decimal("5.00"), Decimal("10.00")),
 }
 
 
@@ -82,23 +83,23 @@ DEFAULT_MODEL_PRICING: Mapping[AllowedModelSlug, ModelPricing] = {
 class ExperimentPolicy:
     """Non-negotiable constraints for the DeepSeek V4 evaluation."""
 
-    provider: str = "deepseek"
-    allow_fallbacks: bool = False
+    provider: str = "openrouter"
+    allow_fallbacks: bool = True
     require_parameters: bool = True
     reasoning: str = "high"
     soft_stop_usd: Decimal = Decimal("8.50")
     hard_stop_usd: Decimal = Decimal("9.50")
     uncertainty_reserve_usd: Decimal = Decimal("0.50")
-    openrouter_fee_rate: Decimal = Decimal("0.05")
+    openrouter_fee_rate: Decimal = Decimal("0")
     pricing: Mapping[AllowedModelSlug, ModelPricing] = field(
         default_factory=lambda: DEFAULT_MODEL_PRICING
     )
 
     def __post_init__(self) -> None:
-        if self.provider != "deepseek":
-            raise ValueError("the experiment provider must be exactly 'deepseek'")
-        if self.allow_fallbacks:
-            raise ValueError("DeepSeek experiment fallbacks must stay disabled")
+        if self.provider != "openrouter":
+            raise ValueError("the experiment gateway must be exactly 'openrouter'")
+        if not self.allow_fallbacks:
+            raise ValueError("OpenRouter endpoint failover must match the frozen routing mode")
         if not self.require_parameters:
             raise ValueError("DeepSeek experiment parameters must be required")
         if self.reasoning != "high":
@@ -122,11 +123,11 @@ class ExperimentPolicy:
         reasoning: str,
     ) -> None:
         if provider != self.provider:
-            raise ExperimentPolicyError("only the deepseek provider is permitted")
+            raise ExperimentPolicyError("only the OpenRouter gateway is permitted")
         if model not in _ALLOWED_MODELS:
             raise ExperimentPolicyError("model must be an exact approved DeepSeek V4 slug")
-        if allow_fallbacks:
-            raise ExperimentPolicyError("provider fallbacks are forbidden")
+        if allow_fallbacks != self.allow_fallbacks:
+            raise ExperimentPolicyError("provider failover differs from the frozen OpenRouter route")
         if self.require_parameters and not parameters:
             raise ExperimentPolicyError("explicit provider parameters are required")
         if reasoning != self.reasoning:
@@ -207,7 +208,7 @@ class DeepSeekExperimentLedger:
         max_output_tokens: int,
         parameters: Mapping[str, Any] | None,
         reasoning: str = "high",
-        allow_fallbacks: bool = False,
+        allow_fallbacks: bool = True,
     ) -> Reservation:
         """Persist a worst-case reservation before the caller contacts a provider."""
 
@@ -237,7 +238,7 @@ class DeepSeekExperimentLedger:
                 "schema_version": 1,
                 "kind": "reservation",
                 "request_id": request_id,
-                "provider": "deepseek",
+                "provider": provider,
                 "model": model,
                 "prompt_tokens_upper_bound": prompt_tokens_upper_bound,
                 "max_output_tokens": max_output_tokens,
@@ -299,7 +300,7 @@ class DeepSeekExperimentLedger:
                 "schema_version": 1,
                 "kind": "provider_request",
                 "request_id": request_id,
-                "provider": "deepseek",
+                "provider": reserved["provider"],
                 "model": reserved["model"],
                 "prompt_tokens_upper_bound": reserved["prompt_tokens_upper_bound"],
                 "max_output_tokens": reserved["max_output_tokens"],
@@ -311,6 +312,28 @@ class DeepSeekExperimentLedger:
             }
             self._append_jsonl(self.metrics_path, metric)
         return Settlement(request_id, upstream, fee, total)
+
+    def settle_openrouter_charge(
+        self,
+        reservation: Reservation | str,
+        *,
+        openrouter_charge_usd: object,
+        accounting_trusted: bool,
+    ) -> Settlement:
+        """Settle a standard OpenRouter request from its inclusive charge.
+
+        For non-BYOK traffic ``usage.cost`` is the external charge. The legacy
+        two-component journal stores that inclusive amount in its router-cost
+        component and zero in the separately billed upstream component, which
+        prevents double-counting informational upstream pricing metadata.
+        """
+
+        return self.settle(
+            reservation,
+            upstream_cost_usd="0",
+            openrouter_fee_usd=openrouter_charge_usd,
+            accounting_trusted=accounting_trusted,
+        )
 
     def snapshot(self) -> dict[str, Decimal | int]:
         """Return budget state without exposing any request content."""
@@ -386,7 +409,8 @@ class DeepSeekExperimentLedger:
                 model = record.get("model")
                 prompt = record.get("prompt_tokens_upper_bound")
                 output = record.get("max_output_tokens")
-                if record.get("provider") != "deepseek" or model not in _ALLOWED_MODELS:
+                provider = record.get("provider")
+                if provider not in {"deepseek", "openrouter"} or model not in _ALLOWED_MODELS:
                     raise LedgerIntegrityError(f"invalid reservation policy at line {number}")
                 try:
                     self._validate_bounds(prompt, output)
@@ -394,6 +418,7 @@ class DeepSeekExperimentLedger:
                 except (ExperimentPolicyError, ValueError) as error:
                     raise LedgerIntegrityError(f"invalid reservation amount at line {number}") from error
                 open_reservations[request_id] = {
+                    "provider": provider,
                     "model": model,
                     "prompt_tokens_upper_bound": prompt,
                     "max_output_tokens": output,

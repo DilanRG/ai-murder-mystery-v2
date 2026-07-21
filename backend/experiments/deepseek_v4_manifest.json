@@ -1,8 +1,15 @@
 {
   "experiment_id": "deepseek-v4-phase1",
-  "manifest_revision": 1,
-  "frozen_at": "2026-07-21",
-  "git_checkpoint": "84729b17dc6e308547b78a35f1b044ee8ad633b7",
+  "manifest_revision": 2,
+  "frozen_at": "2026-07-22",
+  "git_checkpoint": "f03d14e48a38bf3bbf7f6a5bb24d84fdcf75dc2c",
+  "supersedes_revision": 1,
+  "revision_reason": "Use the proven legacy-v2 OpenRouter routing path instead of requiring a direct DeepSeek BYOK endpoint.",
+  "invalidated_preflight_attempts": {
+    "count": 3,
+    "provider_generation_ids_returned": 0,
+    "reason": "Revision 1's direct-provider restriction returned HTTP 404 before generation."
+  },
   "location_package_id": "ashwick_manor",
   "prompt_revision": "procedural-case-generation-v1",
   "schema_revision": "procedural-case-schema-v1",
@@ -11,10 +18,11 @@
     "flash": "deepseek/deepseek-v4-flash"
   },
   "provider_routing": {
-    "only": ["deepseek"],
-    "allow_fallbacks": false,
+    "allow_fallbacks": true,
     "require_parameters": true
   },
+  "gateway": "openrouter",
+  "model_fallbacks": [],
   "runtime_settings": {
     "reasoning_effort": "high",
     "sampler_defaults": {
@@ -38,6 +46,14 @@
     "hard_operational_stop_usd": 9.5,
     "reserved_uncertainty_usd": 0.5,
     "never_intentionally_spend_reserved_margin": true
+  },
+  "reservation_pricing_ceiling_usd_per_million": {
+    "pro": {"input": 5.0, "output": 10.0},
+    "flash": {"input": 5.0, "output": 10.0}
+  },
+  "observed_openrouter_endpoint_maxima_2026_07_22": {
+    "pro": {"input": 1.74, "output": 3.48},
+    "flash": {"input": 0.239, "output": 0.379}
   },
   "generation_pairs": [
     {

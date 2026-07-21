@@ -26,3 +26,7 @@ Add a new entry when a decision is settled or superseded; do not silently rewrit
 - **Forensics sequencing:** Forensic and DFIR systems are deferred until the core mystery game is proven and the forensic collaborator has completed a blind playtest.
 - **Controlled real-provider exception:** The real-provider testing hold is lifted only for the budget-capped DeepSeek V4 Pro/Flash evaluation. The experiment has a USD 8.50 soft stop, USD 9.50 operational hard stop, and USD 0.50 accounting reserve; all other real-provider playtesting remains paused.
 - **Two-phase agent acceptance:** Agent acceptance is split into Phase A blind intended play and Phase B adversarial black-box play. Phase B begins only after Phase A passes, and post-fix normal play must follow adversarial fixes.
+
+## 2026-07-22
+
+- **OpenRouter evaluation route:** The DeepSeek V4 comparison uses the OpenRouter endpoint and the exact `deepseek/deepseek-v4-pro` or `deepseek/deepseek-v4-flash` model slug, matching the proven legacy-v2 integration. OpenRouter may choose or fail over between compatible serving providers; no fallback model is configured or accepted. Every successful response must report the exact requested model, serving provider, accounting mode, and inclusive external charge. This supersedes the experiment-only decision to require a direct DeepSeek BYOK endpoint.

@@ -238,7 +238,7 @@ async def prepare_crossed_session(
         ledger=ledger,
         metrics_path=artifact_root / "requests.jsonl",
         context=RunContext(
-            1,
+            int(manifest["manifest_revision"]),
             git_sha,
             f"{phase}-{cell.cell_id}",
             phase,

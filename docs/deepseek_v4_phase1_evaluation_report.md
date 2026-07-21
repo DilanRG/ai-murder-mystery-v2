@@ -1,7 +1,7 @@
 # DeepSeek V4 Phase 1 Evaluation Report
 
-**Status:** Incomplete — stopped at the mandatory BYOK preflight gate
-**Experiment date:** 2026-07-21
+**Status:** Incomplete — OpenRouter experiment revision 2 awaiting preflight
+**Experiment date:** 2026-07-21 to 2026-07-22
 **Product:** AI Murder Mystery Game
 **Frozen input manifest:** [`backend/experiments/deepseek_v4_manifest.json`](../backend/experiments/deepseek_v4_manifest.json)
 
@@ -9,29 +9,30 @@ This is a live evidence report, not a Phase 1 or MVP completion claim. The exper
 
 ## Current provider result
 
-The first tiny request to `deepseek/deepseek-v4-flash` was rejected by OpenRouter with HTTP 404 before a generation ID or verifiable BYOK response existed. The Pro preflight was therefore not attempted. No generation, NPC, interview, portrayal, intended-play, or adversarial provider traffic followed.
+Three revision-1 requests to `deepseek/deepseek-v4-flash` were rejected by OpenRouter with HTTP 404 before a generation ID. The Pro preflight was therefore not attempted. No generation, NPC, interview, portrayal, intended-play, or adversarial provider traffic followed.
 
-Authenticated metadata confirmed that both exact model slugs are visible and that each has a DeepSeek-hosted endpoint supporting reasoning, response formatting, and bounded output. This makes a missing or unusable DeepSeek BYOK provider credential the leading configuration diagnosis; it is not proof that BYOK is configured.
+Tag `v2.0.0` confirmed that the previously working game used the OpenRouter endpoint with an exact model slug and no direct-provider restriction. Revision 1 added a direct-DeepSeek-only BYOK route, which created the incompatibility. Revision 2 restores OpenRouter provider routing, accepts provider failover between compatible endpoints, and still rejects any returned model other than the exact requested Pro or Flash slug.
 
-The OpenRouter key baseline and post-rejection check both reported zero BYOK usage and zero gateway usage, for an observed delta of USD 0.00. The local fail-closed ledger nevertheless retains its USD 0.00005410 worst-case reservation because no trusted generation accounting exists for the rejected request.
+OpenRouter key checks reported zero BYOK usage and zero gateway usage, for an observed delta of USD 0.00. The local fail-closed ledger nevertheless retains USD 0.00016230 in worst-case reservations because no trusted generation accounting exists for the three rejected revision-1 requests.
 
-Required owner action: connect a separate DeepSeek provider API credential in OpenRouter BYOK and enable the provider setting equivalent to “Always use for this provider.” The OpenRouter gateway key alone is not evidence of DeepSeek BYOK.
+The owner supplied and dashboard-tested a fresh OpenRouter credential. Revision 2 must still prove the exact returned model, serving provider, token data, and inclusive OpenRouter charge through the production adapter before substantive traffic begins.
 
 ## Frozen comparison design
 
 - Exact models: `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash`.
-- Provider route: only `deepseek`; fallbacks disabled; all parameters required.
+- Gateway route: OpenRouter selects a compatible serving provider; provider failover is recorded, all requested parameters are required, and no fallback model is configured or accepted.
 - Reasoning effort: high for both models.
 - Three predeclared paired seeds and casts, alternating Flash/Pro order.
 - One predeclared balanced reserve pair, usable only under its manifest rule.
 - Maximum three production admission attempts per model/case cell.
 - Soft stop USD 8.50; hard operational stop USD 9.50; USD 0.50 uncertainty reserve.
+- Reservation ceilings are USD 5/M input and USD 10/M output for both models. On 2026-07-22 the maximum advertised OpenRouter endpoint prices were USD 0.239/M input and USD 0.379/M output for Flash, and USD 1.74/M input and USD 3.48/M output for Pro.
 - Crossed runtime cells select the first admitted Pro case and first admitted Flash case in manifest order, never subjective favourites.
 
 ## Prepared evidence controls
 
 - Every provider request reserves worst-case spend before transport and settles only from trusted upstream cost plus OpenRouter fee data.
-- Every request records revision, Git SHA, run/phase/pair/role, exact model, provider/BYOK verification, request and generation IDs, start time, latency, token/cache/reasoning counts, cost components, finish reason, and result without prompt or private-state content.
+- Every request records revision, Git SHA, run/phase/pair/role, exact model, serving provider, BYOK/accounting mode, request and generation IDs, start time, latency, token/cache/reasoning counts, inclusive external charge, finish reason, and result without prompt or private-state content.
 - Every case candidate records attempt number, prompt/schema revision, repair use, admission outcome, rejection category, request/generation linkage, and safe validator detail.
 - Crossed play restores a pristine validated generated-save envelope. Changing NPC model cannot regenerate or edit canonical truth.
 - All seven NPC, interview-selection, and portrayal calls use the cell’s assigned runtime model. A concurrency-one wrapper serializes the production coordinator’s seven coroutines.
@@ -42,7 +43,7 @@ Required owner action: connect a separate DeepSeek provider API credential in Op
 
 | Evidence area | Pro | Flash |
 |---|---:|---:|
-| Confirmed DeepSeek BYOK preflight | Not run | Failed to produce evidence |
+| Confirmed OpenRouter exact-model preflight | Not run | Revision 1 failed before generation |
 | Paired generation cells attempted | 0 / 3 | 0 / 3 |
 | Admitted cases | 0 | 0 |
 | Crossed intended-play cells | 0 / 2 | 0 / 2 |
@@ -68,7 +69,7 @@ Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
 ## Remaining work
 
-1. Correct the DeepSeek BYOK configuration and rerun both tiny preflights.
+1. Commit revision 2 and rerun both tiny OpenRouter preflights.
 2. Attempt all six frozen paired generation cells, retaining all rejections.
 3. Select first admitted Pro/Flash cases and run crossed cells A–D with independent blind player agents.
 4. Freeze Phase A transcripts and reports, then inspect post-game audits and determine whether Phase A passes.

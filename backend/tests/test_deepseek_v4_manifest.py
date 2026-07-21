@@ -21,7 +21,16 @@ from experiments.deepseek_v4_runner import (
 
 def _verified_preflights() -> dict[str, object]:
     return {
-        key: {"model": slug, "upstream_provider": "deepseek", "is_byok": True, "fallback_used": False}
+        key: {
+            "experiment_revision": 2,
+            "model": slug,
+            "upstream_provider": "openrouter-provider",
+            "is_byok": False,
+            "fallback_used": False,
+            "accounting_mode": "openrouter",
+            "generation_id": f"preflight-{key}",
+            "total_external_cost_usd": 0.001,
+        }
         for key, slug in EXPECTED_MODELS.items()
     }
 
@@ -29,8 +38,14 @@ def _verified_preflights() -> dict[str, object]:
 def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     manifest = load_manifest()
 
-    assert manifest["manifest_revision"] == 1
-    assert manifest["git_checkpoint"] == "84729b17dc6e308547b78a35f1b044ee8ad633b7"
+    assert manifest["manifest_revision"] == 2
+    assert manifest["git_checkpoint"] == "f03d14e48a38bf3bbf7f6a5bb24d84fdcf75dc2c"
+    assert manifest["gateway"] == "openrouter"
+    assert manifest["model_fallbacks"] == []
+    assert manifest["reservation_pricing_ceiling_usd_per_million"]["pro"] == {
+        "input": 5.0,
+        "output": 10.0,
+    }
     assert manifest["models"] == EXPECTED_MODELS
     assert manifest["provider_routing"] == EXPECTED_ROUTING
     assert manifest["runtime_settings"]["reasoning_effort"] == "high"

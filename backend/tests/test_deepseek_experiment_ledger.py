@@ -37,12 +37,13 @@ def _policy(*, soft: str = "8.50", hard: str = "9.50", reserve: str = "0.50") ->
 
 def _reserve(ledger: DeepSeekExperimentLedger, **extra: object):
     request = {
-        "provider": "deepseek",
+        "provider": "openrouter",
         "model": PRO_MODEL_SLUG,
         "prompt_tokens_upper_bound": 10_000,
         "max_output_tokens": 10_000,
         "parameters": {"temperature": 0},
         "reasoning": "high",
+        "allow_fallbacks": True,
     }
     request.update(extra)
     return ledger.reserve(**request)  # type: ignore[arg-type]
@@ -52,8 +53,8 @@ def test_policy_is_exact_and_rejects_unbounded_or_fallback_requests(tmp_path):
     ledger = DeepSeekExperimentLedger(tmp_path / "ledger.jsonl", _policy())
     with pytest.raises(ExperimentPolicyError, match="exact approved"):
         _reserve(ledger, model="deepseek-v4-pro")
-    with pytest.raises(ExperimentPolicyError, match="fallback"):
-        _reserve(ledger, allow_fallbacks=True)
+    with pytest.raises(ExperimentPolicyError, match="failover"):
+        _reserve(ledger, allow_fallbacks=False)
     with pytest.raises(ExperimentPolicyError, match="parameters"):
         _reserve(ledger, parameters={})
     with pytest.raises(ExperimentPolicyError, match="reasoning"):
@@ -87,6 +88,21 @@ def test_settlement_uses_separate_trusted_components_without_double_counting(tmp
         ledger.settle(reservation, upstream_cost_usd="0", openrouter_fee_usd="0", accounting_trusted=True)
     with pytest.raises(ExperimentPolicyError, match="untrusted"):
         ledger.settle("f" * 32, upstream_cost_usd="0", openrouter_fee_usd="0", accounting_trusted=False)
+
+
+def test_standard_openrouter_charge_is_not_double_counted(tmp_path):
+    ledger = DeepSeekExperimentLedger(tmp_path / "ledger.jsonl", _policy())
+    reservation = _reserve(ledger)
+
+    settlement = ledger.settle_openrouter_charge(
+        reservation,
+        openrouter_charge_usd="0.123456789",
+        accounting_trusted=True,
+    )
+
+    assert settlement.upstream_cost_usd == Decimal("0E-8")
+    assert settlement.total_cost_usd == Decimal("0.12345679")
+    assert ledger.snapshot()["settled_usd"] == Decimal("0.12345679")
 
 
 def test_concurrent_reservations_cannot_oversubscribe_soft_ceiling(tmp_path):
@@ -141,12 +157,13 @@ def test_metrics_are_append_only_one_per_request_and_never_include_parameters(tm
     ledger = DeepSeekExperimentLedger(path, _policy())
     secret = "sk-private-prompt-and-npc-overlay"
     reservation = ledger.reserve(
-        provider="deepseek",
+        provider="openrouter",
         model=FLASH_MODEL_SLUG,
         prompt_tokens_upper_bound=4,
         max_output_tokens=5,
         parameters={"api_key": secret, "prompt": secret, "private_state": secret},
         reasoning="high",
+        allow_fallbacks=True,
     )
     ledger.settle(reservation, upstream_cost_usd="0.01", openrouter_fee_usd="0.002", accounting_trusted=True)
     metric_rows = [json.loads(line) for line in ledger.metrics_path.read_text(encoding="utf-8").splitlines()]

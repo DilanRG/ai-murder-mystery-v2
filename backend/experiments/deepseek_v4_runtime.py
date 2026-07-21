@@ -1,4 +1,4 @@
-"""Measured DeepSeek-only request boundary for the Phase 1 experiment."""
+"""Measured OpenRouter request boundary for the DeepSeek V4 experiment."""
 
 from __future__ import annotations
 
@@ -73,17 +73,17 @@ class DeepSeekRequestObserver:
         if model not in EXPECTED_MODELS.values():
             raise ExperimentSafetyError("Measured request used an unapproved model slug.")
         if routing != EXPECTED_ROUTING:
-            raise ExperimentSafetyError("Measured request was not pinned to DeepSeek-only routing.")
+            raise ExperimentSafetyError("Measured request was not pinned to OpenRouter routing.")
         if data.get("reasoning_effort") != "high":
             raise ExperimentSafetyError("Measured request did not use high reasoning effort.")
         reservation = self.ledger.reserve(
-            provider="deepseek",
+            provider="openrouter",
             model=model,  # type: ignore[arg-type]
             prompt_tokens_upper_bound=int(data.get("prompt_tokens_upper_bound", 0)),
             max_output_tokens=int(data.get("max_tokens", 0)),
             parameters=dict(routing),
             reasoning="high",
-            allow_fallbacks=False,
+            allow_fallbacks=True,
         )
         self._reservations[request_id] = reservation
 
@@ -117,17 +117,14 @@ class DeepSeekRequestObserver:
         actual_model = str(stats.get("model") or response.model)
         is_byok = stats.get("is_byok") if stats.get("is_byok") is not None else response.is_byok
         provider_responses = stats.get("provider_responses") or []
-        fallback_used = any(
-            str(item.get("provider_name", "")).casefold() not in {"", "deepseek"}
+        provider_attempts = {
+            str(item.get("provider_name", "")).strip().casefold()
             for item in provider_responses
-            if isinstance(item, Mapping)
-        )
-        if (
-            actual_model != reservation.model
-            or provider != "deepseek"
-            or is_byok is not True
-            or fallback_used
-        ):
+            if isinstance(item, Mapping) and str(item.get("provider_name", "")).strip()
+        }
+        provider_failover_used = len(provider_attempts) > 1
+        fallback_used = actual_model != reservation.model
+        if fallback_used or not provider:
             self._append_record(
                 self._base_record(data, reservation)
                 | {
@@ -136,11 +133,12 @@ class DeepSeekRequestObserver:
                     "upstream_provider": provider,
                     "is_byok": is_byok,
                     "fallback_used": fallback_used,
-                    "result": "byok_verification_failed",
+                    "provider_failover_used": provider_failover_used,
+                    "result": "model_verification_failed",
                     "accounting_status": "reservation_retained",
                 }
             )
-            raise ExperimentSafetyError("DeepSeek BYOK endpoint verification failed.")
+            raise ExperimentSafetyError("OpenRouter exact-model verification failed.")
 
         upstream_cost = response.cost_details.get("upstream_inference_cost")
         upstream_prompt_cost = response.cost_details.get(
@@ -158,36 +156,53 @@ class DeepSeekRequestObserver:
                 upstream_cost = None
         if upstream_cost is None:
             upstream_cost = stats.get("upstream_inference_cost")
-        openrouter_fee = response.cost
-        if openrouter_fee is None:
-            openrouter_fee = stats.get("total_cost")
-        if upstream_cost is None or openrouter_fee is None:
+        openrouter_charge = response.cost
+        if openrouter_charge is None:
+            openrouter_charge = stats.get("total_cost")
+        if openrouter_charge is None or (is_byok is True and upstream_cost is None):
             self._append_record(
                 self._base_record(data, reservation)
                 | {
                     "generation_id": response.id,
                     "actual_model": actual_model,
                     "upstream_provider": provider,
-                    "is_byok": True,
+                    "is_byok": is_byok,
                     "fallback_used": False,
+                    "provider_failover_used": provider_failover_used,
                     "result": "accounting_unavailable",
                     "accounting_status": "reservation_retained",
                 }
             )
-            raise ExperimentSafetyError("Trusted upstream and OpenRouter accounting are required.")
+            raise ExperimentSafetyError("Trusted OpenRouter accounting is required.")
 
-        settlement = self.ledger.settle(
-            reservation,
-            upstream_cost_usd=upstream_cost,
-            openrouter_fee_usd=openrouter_fee,
-            accounting_trusted=True,
-        )
+        if is_byok is True:
+            settlement = self.ledger.settle(
+                reservation,
+                upstream_cost_usd=upstream_cost,
+                openrouter_fee_usd=openrouter_charge,
+                accounting_trusted=True,
+            )
+            accounting_mode = "byok"
+            measured_upstream_cost = float(settlement.upstream_cost_usd)
+            measured_openrouter_fee = float(settlement.openrouter_fee_usd)
+            measured_openrouter_charge = None
+        else:
+            settlement = self.ledger.settle_openrouter_charge(
+                reservation,
+                openrouter_charge_usd=openrouter_charge,
+                accounting_trusted=True,
+            )
+            accounting_mode = "openrouter"
+            measured_upstream_cost = self._safe_optional_cost(upstream_cost)
+            measured_openrouter_fee = None
+            measured_openrouter_charge = float(settlement.total_cost_usd)
         record = self._base_record(data, reservation) | {
             "generation_id": response.id,
             "actual_model": actual_model,
             "upstream_provider": provider,
-            "is_byok": True,
+            "is_byok": is_byok,
             "fallback_used": False,
+            "provider_failover_used": provider_failover_used,
             "prompt_tokens": response.prompt_tokens,
             "cached_prompt_tokens": response.prompt_cached_tokens,
             "completion_tokens": response.completion_tokens,
@@ -197,17 +212,19 @@ class DeepSeekRequestObserver:
             "provider_latency": response.latency,
             "finish_reason": response.finish_reason,
             "native_finish_reason": response.native_finish_reason,
-            "upstream_inference_cost_usd": float(settlement.upstream_cost_usd),
+            "upstream_inference_cost_usd": measured_upstream_cost,
             "upstream_prompt_cost_usd": self._safe_optional_cost(
                 upstream_prompt_cost
             ),
             "upstream_completion_cost_usd": self._safe_optional_cost(
                 upstream_completion_cost
             ),
-            "openrouter_fee_usd": float(settlement.openrouter_fee_usd),
+            "openrouter_fee_usd": measured_openrouter_fee,
+            "openrouter_charge_usd": measured_openrouter_charge,
             "total_external_cost_usd": float(settlement.total_cost_usd),
             "result": "success",
             "accounting_status": "measured",
+            "accounting_mode": accounting_mode,
         }
         self._append_record(record)
 
@@ -320,7 +337,7 @@ def build_measured_client(
             LedgerIntegrityError,
         ) as error:
             # The production generator retries malformed candidates, but a
-            # budget/BYOK/accounting failure is never a candidate-quality issue.
+            # Budget/routing/accounting failure is never a candidate-quality issue.
             # Convert it to a non-retryable provider boundary error so the
             # generator stops after the current call and the matrix aborts.
             raise LLMProviderError(
@@ -344,7 +361,7 @@ def build_measured_client(
     return client
 
 
-async def run_tiny_byok_preflight(client: LLMClient) -> dict[str, Any]:
+async def run_tiny_openrouter_preflight(client: LLMClient) -> dict[str, Any]:
     """Spend one deliberately tiny request and return sanitized evidence."""
 
     response = await client.generate(
@@ -367,4 +384,10 @@ async def run_tiny_byok_preflight(client: LLMClient) -> dict[str, Any]:
 
 
 def run_preflight_sync(client: LLMClient) -> dict[str, Any]:
-    return asyncio.run(run_tiny_byok_preflight(client))
+    return asyncio.run(run_tiny_openrouter_preflight(client))
+
+
+# Compatibility import for the already committed opt-in runner. Revision 2
+# verifies OpenRouter exact-model/accounting evidence rather than requiring a
+# direct-provider BYOK route.
+run_tiny_byok_preflight = run_tiny_openrouter_preflight

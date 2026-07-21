@@ -75,7 +75,7 @@ def _persist_candidate_attempts(
         records.append(
             {
                 "schema_version": 1,
-                "experiment_revision": 1,
+                "experiment_revision": int(manifest["manifest_revision"]),
                 "git_sha": git_sha,
                 "pair_id": pair_id,
                 "model_key": model_key,
@@ -152,7 +152,7 @@ async def run_generation_matrix(
     """Generate each frozen cell once; the production generator owns its 1..3 attempts.
 
     Admission failures remain in the denominator and do not get an unplanned
-    outer retry. Provider, accounting, BYOK, and budget failures stop the matrix.
+    outer retry. Provider, accounting, exact-model, and budget failures stop the matrix.
     Canonical truth is written only below the ignored private artifact root.
     """
 
@@ -182,7 +182,13 @@ async def run_generation_matrix(
             observer = DeepSeekRequestObserver(
                 ledger=ledger,
                 metrics_path=metrics_path,
-                context=RunContext(1, git_sha, run_id, "generation", pair_id),
+                context=RunContext(
+                    int(manifest["manifest_revision"]),
+                    git_sha,
+                    run_id,
+                    "generation",
+                    pair_id,
+                ),
             )
             client = client_builder(
                 api_key=api_key,

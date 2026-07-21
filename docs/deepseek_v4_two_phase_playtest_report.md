@@ -1,6 +1,6 @@
 # DeepSeek V4 Two-Phase Playtest Report
 
-**Status:** Not started — DeepSeek BYOK preflight is unresolved
+**Status:** Not started — OpenRouter revision-2 preflight is pending
 **Controlling evaluation:** [deepseek_v4_phase1_evaluation_report.md](deepseek_v4_phase1_evaluation_report.md)
 
 This report intentionally separates intended play, adversarial testing, and post-fix normal regression. Empty sections are preserved so missing evidence cannot be mistaken for a pass.
