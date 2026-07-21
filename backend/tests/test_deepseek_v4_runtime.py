@@ -36,7 +36,7 @@ def _observer(tmp_path: Path) -> DeepSeekRequestObserver:
     return DeepSeekRequestObserver(
         ledger=DeepSeekExperimentLedger(tmp_path / "ledger.jsonl"),
         metrics_path=tmp_path / "requests.jsonl",
-        context=RunContext(4, "sha", "run", "preflight"),
+        context=RunContext(5, "sha", "run", "preflight"),
     )
 
 

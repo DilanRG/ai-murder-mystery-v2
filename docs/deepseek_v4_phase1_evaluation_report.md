@@ -1,6 +1,6 @@
 # DeepSeek V4 Phase 1 Evaluation Report
 
-**Status:** Incomplete — direct-DeepSeek experiment revision 4 awaiting preflight
+**Status:** Incomplete — direct-DeepSeek experiment revision 5 awaiting preflight
 **Experiment date:** 2026-07-21 to 2026-07-22
 **Product:** AI Murder Mystery Game
 **Frozen input manifest:** [`backend/experiments/deepseek_v4_manifest.json`](../backend/experiments/deepseek_v4_manifest.json)
@@ -9,13 +9,13 @@ This is a live evidence report, not a Phase 1 or MVP completion claim. The exper
 
 ## Current provider result
 
-Three revision-1 requests to `deepseek/deepseek-v4-flash` were rejected before generation. One revision-2 routing diagnostic completed through WandB and is invalidated because it did not use the required DeepSeek upstream. Two revision-3 forced-DeepSeek requests were rejected before generation because the OpenRouter account guardrail/data policy excluded the endpoint. The Pro preflight was not attempted. No case generation, NPC, interview, portrayal, intended-play, or adversarial provider traffic followed.
+Three revision-1 requests to `deepseek/deepseek-v4-flash` were rejected before generation. One revision-2 routing diagnostic completed through WandB and is invalidated because it did not use the required DeepSeek upstream. Two revision-3 forced-DeepSeek requests were rejected before generation because the OpenRouter account guardrail/data policy excluded the endpoint. Revision 4 then verified both direct models and complete token accounting.
 
-Official OpenRouter documentation confirms that revision 3 used the correct routing payload. OpenRouter's sanitized 404 identified account privacy/guardrail policy, rather than payload syntax, as the remaining block. The owner therefore authorized an official direct DeepSeek API fallback. Revision 4 uses DeepSeek's OpenAI-compatible endpoint, exact direct model IDs, thinking mode, and high reasoning effort; the ordinary product adapter remains OpenRouter-compatible.
+The revision-4 generation diagnostic retained P1/Flash as rejected after three structurally different failures. P1/Pro used all 16,384 completion tokens for reasoning on all three attempts, returned `finish_reason=length`, and emitted no final JSON. P2/Pro repeated the same shape once; the next repair call was interrupted to prevent known-invalid repeated spend. Revision 5 raises the shared Pro/Flash case-generation allowance to 32,768 so the comparison remains symmetric and high reasoning has room to emit the required document.
 
-The WandB diagnostic cost USD 0.00000490 and is settled in the private ledger. The ledger currently retains USD 0.00391080 across five unresolved failed-call reservations because they produced no trusted generation accounting. This conservative reservation is not confirmed provider spend and still leaves USD 7.99608430 before the soft stop.
+Confirmed cumulative external spend is USD 0.08494433. The ledger retains USD 0.49912080 across six unresolved reservations: five earlier gateway uncertainties plus the interrupted revision-4 P2/Pro repair. This conservative reservation is not confirmed provider spend and still leaves USD 7.41593487 before the soft stop.
 
-The owner supplied a separate direct DeepSeek development key. Revision 4 must still prove both exact models, direct transport identity, complete token accounting, and zero gateway fee through the production adapter before substantive traffic begins.
+The owner supplied a separate direct DeepSeek development key. Revision 5 must re-prove both exact models, direct transport identity, complete token accounting, and zero gateway fee before the revised matrix begins.
 
 ## Frozen comparison design
 
@@ -24,7 +24,7 @@ The owner supplied a separate direct DeepSeek development key. Revision 4 must s
 - Reasoning effort: high for both models. DeepSeek documents `temperature` and `top_p` as ignored in thinking mode, so revision 4 omits them from direct requests while retaining the frozen values as historical cross-route metadata.
 - Three predeclared paired seeds and casts, alternating Flash/Pro order.
 - One predeclared balanced reserve pair, usable only under its manifest rule.
-- Maximum three production admission attempts per model/case cell.
+- Maximum three production admission attempts per model/case cell, with a shared 32,768-token generation allowance.
 - Soft stop USD 8.50; hard operational stop USD 9.50; USD 0.50 uncertainty reserve.
 - Reservation ceilings are USD 5/M input and USD 10/M output for both models. On 2026-07-22 the direct DeepSeek endpoint advertised USD 0.14/M input and USD 0.28/M output for Flash, and USD 0.435/M input and USD 0.87/M output for Pro.
 - Crossed runtime cells select the first admitted Pro case and first admitted Flash case in manifest order, never subjective favourites.
@@ -43,12 +43,12 @@ The owner supplied a separate direct DeepSeek development key. Revision 4 must s
 
 | Evidence area | Pro | Flash |
 |---|---:|---:|
-| Confirmed direct DeepSeek preflight | Not run | Not run; earlier gateway diagnostics invalidated |
-| Paired generation cells attempted | 0 / 3 | 0 / 3 |
+| Confirmed direct DeepSeek preflight | Revision 4 passed; revision 5 pending | Revision 4 passed; revision 5 pending |
+| Paired generation cells attempted | Revision-4 diagnostic: P1 rejected; P2 interrupted | Revision-4 diagnostic: P1 rejected |
 | Admitted cases | 0 | 0 |
 | Crossed intended-play cells | 0 / 2 | 0 / 2 |
 | Adversarial sessions | 0 / 1 | 0 / 1 |
-| Measured external cost | USD 0.00 | USD 0.00 observed |
+| Measured external cost | USD 0.07093663 direct diagnostic | USD 0.01399790 direct diagnostic |
 
 Generation quality, NPC quality, latency, cache behaviour, cost per case/turn/interview/game, and qualitative model comparisons are not yet measurable. No routing recommendation is justified yet.
 
@@ -69,7 +69,7 @@ Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
 ## Remaining work
 
-1. Commit revision 4 and run both tiny direct DeepSeek preflights.
+1. Commit revision 5 and rerun both tiny direct DeepSeek preflights.
 2. Attempt all six frozen paired generation cells, retaining all rejections.
 3. Select first admitted Pro/Flash cases and run crossed cells A–D with independent blind player agents.
 4. Freeze Phase A transcripts and reports, then inspect post-game audits and determine whether Phase A passes.

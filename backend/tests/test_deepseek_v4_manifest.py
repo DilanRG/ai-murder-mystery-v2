@@ -22,7 +22,7 @@ from experiments.deepseek_v4_runner import (
 def _verified_preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 4,
+            "experiment_revision": 5,
             "model": slug,
             "actual_model": slug,
             "upstream_provider": "deepseek",
@@ -40,8 +40,8 @@ def _verified_preflights() -> dict[str, object]:
 def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     manifest = load_manifest()
 
-    assert manifest["manifest_revision"] == 4
-    assert manifest["git_checkpoint"] == "b6edfbf6875ab1627c14a81e63071cfbc509a4e6"
+    assert manifest["manifest_revision"] == 5
+    assert manifest["git_checkpoint"] == "bf955f301f1707a1e400bf189080bfd2433d6d36"
     assert manifest["gateway"] == "deepseek_direct"
     assert manifest["model_fallbacks"] == []
     assert manifest["runtime_settings"]["sampler_defaults"]["top_k"] is None
@@ -59,7 +59,7 @@ def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     assert manifest["runtime_settings"]["reasoning_effort"] == "high"
     assert manifest["runtime_settings"]["generation_attempt_limit"] == 3
     assert manifest["runtime_settings"]["roles"] == {
-        "case_generation": {"max_tokens": 16_384, "temperature": 0.55, "json_mode": True},
+        "case_generation": {"max_tokens": 32_768, "temperature": 0.55, "json_mode": True},
         "private_npc_action": {"max_tokens": 80, "temperature": 0.0, "json_mode": True},
         "private_interview_selection": {"max_tokens": 80, "temperature": 0.0, "json_mode": True},
         "portrayal": {"max_tokens": 220, "temperature": 0.2, "json_mode": True},

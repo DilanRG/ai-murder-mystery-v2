@@ -25,8 +25,8 @@ EXPECTED_MODELS = {
     "flash": "deepseek-v4-flash",
 }
 EXPECTED_RESOLVED_MODELS = dict(EXPECTED_MODELS)
-EXPECTED_MANIFEST_REVISION = 4
-EXPECTED_GIT_CHECKPOINT = "b6edfbf6875ab1627c14a81e63071cfbc509a4e6"
+EXPECTED_MANIFEST_REVISION = 5
+EXPECTED_GIT_CHECKPOINT = "bf955f301f1707a1e400bf189080bfd2433d6d36"
 EXPECTED_GATEWAY = "deepseek_direct"
 EXPECTED_ROUTING = None
 
@@ -65,15 +65,15 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Reject changes that would make the paired measurement unfair or unsafe."""
 
     if manifest.get("manifest_revision") != EXPECTED_MANIFEST_REVISION:
-        raise ExperimentSafetyError("Only frozen manifest revision 4 is accepted.")
+        raise ExperimentSafetyError("Only frozen manifest revision 5 is accepted.")
     if manifest.get("git_checkpoint") != EXPECTED_GIT_CHECKPOINT:
-        raise ExperimentSafetyError("Manifest must retain the revision-3 evaluator checkpoint.")
+        raise ExperimentSafetyError("Manifest must retain the revision-4 direct-provider checkpoint.")
     if (
-        manifest.get("supersedes_revision") != 3
+        manifest.get("supersedes_revision") != 4
         or manifest.get("gateway") != EXPECTED_GATEWAY
         or manifest.get("model_fallbacks") != []
     ):
-        raise ExperimentSafetyError("Manifest revision 4 must require direct DeepSeek without fallback.")
+        raise ExperimentSafetyError("Manifest revision 5 must require direct DeepSeek without fallback.")
     if manifest.get("models") != EXPECTED_MODELS:
         raise ExperimentSafetyError("Manifest model slugs must be the exact DeepSeek V4 pair.")
     if manifest.get("resolved_models") != EXPECTED_RESOLVED_MODELS:
@@ -89,7 +89,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     if dict(settings.get("sampler_defaults", {})) != {"top_p": 0.95, "top_k": None}:
         raise ExperimentSafetyError("Identical sampler defaults are required.")
     expected_roles = {
-        "case_generation": (16_384, 0.55),
+        "case_generation": (32_768, 0.55),
         "private_npc_action": (80, 0.0),
         "private_interview_selection": (80, 0.0),
         "portrayal": (220, 0.2),
