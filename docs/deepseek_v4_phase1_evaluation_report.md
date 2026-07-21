@@ -1,6 +1,6 @@
 # DeepSeek V4 Phase 1 Evaluation Report
 
-**Status:** Incomplete — revision 6 staged-generation gate under deterministic validation
+**Status:** Incomplete — revision 6 preflight passed; staged generation pending
 **Experiment date:** 2026-07-21 to 2026-07-22
 **Product:** AI Murder Mystery Game
 **Frozen input manifest:** [`backend/experiments/deepseek_v4_manifest.json`](../backend/experiments/deepseek_v4_manifest.json)
@@ -15,9 +15,9 @@ The revision-4 generation diagnostic retained P1/Flash as rejected after three s
 
 Revision 6 replaces that one-shot candidate with four independently schema-validated stages: crime/facts, evidence/solution, private overlays, and public presentation. The first two prompt messages are byte-identical across stages and repairs so DeepSeek's automatic prefix cache can be measured and reused. Truth is assembled deterministically and must pass the unchanged global validator before the public-presentation stage runs.
 
-Confirmed cumulative external spend is USD 0.12920344. The ledger retains USD 1.68643580 across eight unresolved reservations. This conservative reservation is not confirmed provider spend and still leaves USD 6.18436076 before the soft stop. The corrected revision-5 one-shot baseline, including hashes, requests, diagnostics, results, and ledger snapshot, is preserved under the ignored private artifact tree.
+The first revision-6 Flash and Pro preflights both verified the exact model, direct DeepSeek transport, no fallback, and complete direct token metering. They cost USD 0.00002013 total. Confirmed cumulative external spend at that checkpoint is USD 0.12922357. The ledger retains USD 1.68643580 across eight unresolved reservations. This conservative reservation is not confirmed provider spend and still leaves USD 6.18434063 before the soft stop. The corrected revision-5 one-shot baseline, including hashes, requests, diagnostics, results, and ledger snapshot, is preserved under the ignored private artifact tree.
 
-The owner supplied a separate direct DeepSeek development key. Revision 6 must re-prove both exact models, direct transport identity, complete token accounting, zero gateway fee, and the staged per-role limits before the revised matrix begins.
+The owner supplied a separate direct DeepSeek development key. Revision 6 has re-proved both exact models, direct transport identity, complete token accounting, and zero gateway fee. Because evidence is bound to an exact clean Git SHA, the two tiny checks will be recorded once more after this status-only commit before the revised matrix begins.
 
 ## Frozen comparison design
 
@@ -45,7 +45,7 @@ The owner supplied a separate direct DeepSeek development key. Revision 6 must r
 
 | Evidence area | Pro | Flash |
 |---|---:|---:|
-| Confirmed direct DeepSeek preflight | Revision 4 passed; revision 6 pending | Revision 4 passed; revision 6 pending |
+| Confirmed direct DeepSeek preflight | Revision 6 passed on staged code checkpoint | Revision 6 passed on staged code checkpoint |
 | Paired generation cells attempted | Revision-4 diagnostic: P1 rejected; P2 interrupted | Revision-4 P1 rejected; corrected revision-5 P1 rejected |
 | Admitted cases | 0 | 0 |
 | Crossed intended-play cells | 0 / 2 | 0 / 2 |
@@ -74,7 +74,7 @@ Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
 ## Remaining work
 
-1. Commit revision 6, complete all deterministic gates, and rerun both tiny direct DeepSeek preflights.
+1. Re-record both tiny direct DeepSeek preflights against the final status-only Git SHA.
 2. Attempt all six frozen paired generation cells, retaining all rejections.
 3. Select first admitted Pro/Flash cases and run crossed cells A–D with independent blind player agents.
 4. Freeze Phase A transcripts and reports, then inspect post-game audits and determine whether Phase A passes.
