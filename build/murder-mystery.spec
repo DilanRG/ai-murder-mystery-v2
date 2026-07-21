@@ -10,6 +10,7 @@ ROOT = Path(SPECPATH).parent
 BACKEND = ROOT / 'backend'
 STATIC = BACKEND / 'static'
 CHARACTERS = BACKEND / 'characters'
+CONTENT = BACKEND / 'content'
 
 block_cipher = None
 
@@ -20,6 +21,7 @@ a = Analysis(
     datas=[
         (str(STATIC), 'static'),
         (str(CHARACTERS), 'characters'),
+        (str(CONTENT), 'content'),
         (str(BACKEND / 'config'), 'config'),
         (str(BACKEND / 'routers'), 'routers'),
     ],

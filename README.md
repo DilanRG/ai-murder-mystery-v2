@@ -36,6 +36,16 @@ python -m uvicorn main:app --host 127.0.0.1 --port 8765
 
 Open [http://127.0.0.1:8765](http://127.0.0.1:8765). The production frontend is built into `backend/static`; Vite development mode is also available with `npm run dev` from `frontend`.
 
+## Build the executable
+
+From the repository root, after installing the backend dependencies:
+
+```powershell
+.\backend\.venv\Scripts\python.exe build\build.py
+```
+
+The build produces `dist/ai-murder-mystery.exe` on Windows (or the corresponding extensionless binary on macOS/Linux). A build is considered successful only after the produced executable starts headlessly, loads all eight characters and both authored cases, advances a turn, and writes and reloads a v2 save. Use `--skip-frontend` only when `backend/static` is already current; `--skip-smoke` is available for build diagnostics, not release publishing.
+
 ## Test
 
 ```powershell
@@ -44,7 +54,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 .\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
 ```
 
-The 133-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
+The 140-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
 
 ## Optional AI layer
 
@@ -55,7 +65,7 @@ The core game is deterministic. In Settings, an OpenRouter key and model can opt
 
 Provider output is schema-validated, dialogue fact references and action IDs are allow-listed, timeouts and malformed output fall back locally, and generated output cannot mutate world state. The provider receives neither an arbitrary state-patch interface nor authority to invent rooms, evidence, facts, or tools.
 
-The key is stored locally in `backend/user_config.json`. Save games are stored in `backend/saves/`, and imported card drafts in `backend/card_drafts/`; all three paths are ignored by Git.
+In a source checkout, the key is stored locally in `backend/user_config.json`, save games in `backend/saves/`, and imported card drafts in `backend/card_drafts/`; all three paths are ignored by Git. Packaged builds use durable per-user data instead of PyInstaller's temporary extraction folder: `%LOCALAPPDATA%\AshwickTrust` on Windows, `~/Library/Application Support/Ashwick Trust` on macOS, and `$XDG_DATA_HOME/ashwick-trust` (or `~/.local/share/ashwick-trust`) on Linux. Set `ASHWICK_TRUST_DATA_DIR` to use an explicit portable location.
 
 ## Project map
 

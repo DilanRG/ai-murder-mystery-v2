@@ -2,13 +2,14 @@
 Launcher — Entry point for the packaged executable.
 Finds a free port, starts the FastAPI server, and opens the browser.
 """
+import argparse
 import logging
 import socket
 import sys
 import threading
 import time
 import webbrowser
-from pathlib import Path
+from collections.abc import Sequence
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,6 +17,33 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("launcher")
+
+
+def _valid_port(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("port must be an integer") from error
+    if not 1 <= port <= 65_535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535")
+    return port
+
+
+def parse_launcher_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse launcher controls used by people and packaged smoke tests."""
+
+    parser = argparse.ArgumentParser(description="Launch The Ashwick Trust")
+    parser.add_argument(
+        "--port",
+        type=_valid_port,
+        help="Use a specific localhost port instead of scanning 8765-8799.",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Start the server without opening the default web browser.",
+    )
+    return parser.parse_args(argv)
 
 
 def find_free_port(start: int = 8765, end: int = 8800) -> int:
@@ -42,12 +70,13 @@ def wait_for_server(host: str, port: int, timeout: float = 15.0) -> bool:
     return False
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
+    options = parse_launcher_args(argv)
     host = "127.0.0.1"
-    port = find_free_port()
+    port = options.port or find_free_port()
     url = f"http://{host}:{port}"
 
-    logger.info("🔪 AI Murder Mystery v2")
+    logger.info("The Ashwick Trust")
     logger.info("Starting server on %s ...", url)
 
     # Start uvicorn in a background thread
@@ -65,10 +94,13 @@ def main() -> None:
 
     # Wait for the server to be ready, then open browser
     if wait_for_server(host, port):
-        logger.info("✅ Server ready — opening browser...")
-        webbrowser.open(url)
+        if options.no_browser:
+            logger.info("Server ready.")
+        else:
+            logger.info("Server ready - opening browser...")
+            webbrowser.open(url)
     else:
-        logger.error("❌ Server did not start within timeout.")
+        logger.error("Server did not start within timeout.")
         sys.exit(1)
 
     # Keep the main thread alive
