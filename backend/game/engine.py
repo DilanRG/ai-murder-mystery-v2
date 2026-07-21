@@ -53,6 +53,12 @@ from game.npc_planning import (
     NpcIntentPlanningRequest,
     SafeNpcTurnSnapshot,
 )
+from game.private_npc_agents import (
+    PrivateNpcAgentRequest,
+    PrivateNpcBriefing,
+    PrivateNpcFact,
+    PrivateNpcRuntimeState,
+)
 from game.validator import validate_case
 from game.public_assets import portrait_url
 from game.recipes import CaseRecipeSelection
@@ -97,6 +103,7 @@ class EngineActionPreview:
 
     result: TurnResultView
     npc_request: NpcIntentPlanningRequest | None
+    private_npc_requests: tuple[PrivateNpcAgentRequest, ...] | None
 
 
 class GameEngine:
@@ -386,7 +393,16 @@ class GameEngine:
         clone.runtime = self.runtime.model_copy(deep=True)
         result = clone._apply(intent, npc_action_ids=None, defer_npc_phase=True)
         request = clone._build_npc_planning_request() if result.accepted and result.committed else None
-        return EngineActionPreview(result=result, npc_request=request)
+        private_requests = (
+            clone._build_private_npc_requests(request)
+            if request is not None
+            else None
+        )
+        return EngineActionPreview(
+            result=result,
+            npc_request=request,
+            private_npc_requests=private_requests,
+        )
 
     def _apply(
         self,
@@ -825,6 +841,100 @@ class GameEngine:
                 for character_id, actor_candidates in candidates.items()
             ),
         )
+
+    def _build_private_npc_requests(
+        self,
+        public_request: NpcIntentPlanningRequest,
+    ) -> tuple[PrivateNpcAgentRequest, ...]:
+        """Partition canonical truth into one bounded briefing per survivor."""
+
+        options_by_actor = {
+            options.actor_id: options for options in public_request.actor_options
+        }
+        requests: list[PrivateNpcAgentRequest] = []
+        for character_id in sorted(options_by_actor):
+            overlay = self.case.overlays[character_id]
+            runtime = self.runtime.characters[character_id]
+            try:
+                card = load_character_card(character_id)
+                extension = card.data.extensions.murder_mystery
+                persona = (
+                    f"Name: {card.data.name}. Identity: {extension.identity}. "
+                    f"Personality: {card.data.personality}. "
+                    f"Speaking style: {extension.speaking_style}."
+                )
+            except (OSError, ValueError):
+                persona = f"Name: {self._name(character_id)}."
+            briefing_parts = [
+                f"Assigned role: {overlay.role.value}.",
+                persona,
+                f"Public relationship to victim: {overlay.public_relationship_to_victim}.",
+                f"Private motive: {overlay.private_motive}.",
+                f"Secrets: {'; '.join(overlay.secrets) or 'none'}.",
+                f"Alibi claim: {overlay.alibi_claim}.",
+                f"Goals: {'; '.join(overlay.goals) or 'none'}.",
+                "Authorized lies: "
+                + ("; ".join(lie.claim for lie in overlay.lies) or "none")
+                + ".",
+            ]
+            private_facts: list[PrivateNpcFact] = []
+            if character_id == self.case.murder.murderer_id:
+                murder = self.case.murder
+                # Put the crime truth first so the bounded fact window can
+                # never evict the one fact the murderer must always retain.
+                private_facts.append(
+                    PrivateNpcFact(
+                        id="host_murder_truth",
+                        statement=(
+                            f"You killed {self._name(murder.victim_id)} at "
+                            f"{self._time_label(murder.minute)} in "
+                            f"{self.location.rooms[murder.room_id].name}, using "
+                            f"{murder.method}. Means: {murder.means}. Motive: "
+                            f"{murder.motive}. Cover story: {murder.cover_story}."
+                        )[:1_000],
+                    )
+                )
+            private_facts.extend(
+                PrivateNpcFact(
+                    id=fact_id,
+                    statement=self.case.facts[fact_id].statement[:1_000],
+                )
+                for fact_id in sorted(runtime.known_fact_ids)
+                if fact_id in self.case.facts
+            )
+            belief_summary = "; ".join(
+                f"{subject_id}={belief.suspicion} ({belief.summary})"
+                for subject_id, belief in sorted(runtime.beliefs.items())
+            )
+            memory_summary = "; ".join(
+                memory.text for memory in runtime.conversation_memory[-6:]
+            )
+            state_summary = (
+                f"Room: {self.location.rooms[runtime.current_room_id].name}. "
+                f"Activity: {runtime.current_activity}. Emotion: {runtime.emotional_state}. "
+                f"Beliefs: {belief_summary or 'none'}. "
+                f"Recent private memory: {memory_summary or 'none'}."
+            )[:1_000]
+            urgency = max(
+                (belief.suspicion for belief in runtime.beliefs.values()),
+                default=0,
+            )
+            requests.append(
+                PrivateNpcAgentRequest(
+                    actor_id=character_id,
+                    private_briefing=PrivateNpcBriefing(
+                        character_summary=" ".join(briefing_parts)[:1_200],
+                        private_facts=tuple(private_facts[:24]),
+                    ),
+                    runtime_state=PrivateNpcRuntimeState(
+                        state_summary=state_summary,
+                        urgency=urgency,
+                    ),
+                    snapshot=public_request.snapshot,
+                    actor_options=options_by_actor[character_id],
+                )
+            )
+        return tuple(requests)
 
     def _run_npc_phase(self, selected_action_ids: Mapping[str, str] | None = None) -> list[str]:
         """Resolve only engine-generated choices, with deterministic fallback."""

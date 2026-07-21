@@ -2,19 +2,21 @@
 
 [![Verify packaged game](https://github.com/DilanRG/ai-murder-mystery/actions/workflows/verify-packages.yml/badge.svg)](https://github.com/DilanRG/ai-murder-mystery/actions/workflows/verify-packages.yml)
 
-A local-first, turn-based murder mystery in which the rules engine owns the truth and AI is an optional performance layer. Investigate Ashwick Manor, interview its inhabitants, reconcile evidence and testimony, then make a supported accusation before time expires.
+A local-first, turn-based murder mystery in which OpenRouter generates a new canonical case from a selected cast and location, then the rules engine owns and enforces that truth. Investigate Ashwick Manor, interview its inhabitants, reconcile evidence and testimony, then make a supported accusation before time expires.
 
-The current build is a complete playable vertical slice. It needs no API key and does not send case truth to a model.
+Normal **New Story** generation requires an OpenRouter API key. Two clearly labelled offline demo fixtures remain available for development, automated testing, and provider outages; they are not substitutes for the generation engine.
 
 ## What is playable
 
-- Two complete Ashwick Manor crime spines combined with automatic or manual eight-person casts, yielding 13,122 validated cast/story combinations.
+- Automatic or manual selection of any eight characters from the 24-card pool, followed by validated OpenRouter generation of the roles, timeline, murder, evidence, private overlays, solution, and public framing.
+- Two complete authored Ashwick Manor demo mysteries for deterministic implementation and offline testing.
 - Twenty-four Character Card V3 characters plus a local JSON import, validation, draft, and export editor.
 - Discovery, room-to-room investigation, body examination, searches, evidence review, and limited interviews.
 - A sourced notebook with facts, notes, timeline entries, contradictions, and suspects.
 - Ten-minute deterministic turns with NPC activity resolved from one immutable turn-start snapshot, including bounded private exchanges and evolving suspicion.
 - Replay-verified v2 local JSON saves, safe legacy-v1 resume, timeout, supported accusation, and post-game debrief.
-- Optional OpenRouter story direction, dialogue portrayal, and NPC intent selection, all bounded by content the engine has already authorized.
+- Seven separately partitioned living-NPC planning calls per committed generated-story turn. Each receives one private briefing plus the same immutable public snapshot and may select only its own engine-authored action ID.
+- Optional bounded dialogue portrayal after the engine has committed an authorized claim.
 - Distinct, versioned noir portrait placeholders for the full cast, with accessible text fallbacks.
 - Responsive desktop and mobile browser UI.
 
@@ -56,24 +58,24 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 .\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
 ```
 
-The automated suite contains 206 Python tests plus six dependency-free frontend boundary tests. It covers rules, transport-level truth redaction, generated-case admission and repair, full solve paths for both authored dummy mysteries, every pooled card solved against both dummy spines, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
+The automated suite contains 226 Python tests plus ten dependency-free frontend boundary tests. It covers rules, transport-level truth redaction, generated-case admission and retry, full solve paths for both authored dummy mysteries, every pooled card solved against both dummy spines, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, generated-case save/restore, replay and tamper checks, seven-way private NPC isolation, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
 
-## Optional AI layer
+## OpenRouter generation and agent boundary
 
-The validated case engine is playable without a provider. In Settings, an OpenRouter key and model can optionally be supplied for three bounded jobs:
+In Settings, supply an OpenRouter key and model before choosing **Generate new mystery**. The selected eight Character Card V3 profiles and the predefined location package are sent to one scenario-generation call. The host injects IDs and turn policy, parses the result into strict schemas, and rejects it unless chronology, discovery routes, prerequisite reachability, evidence placement, red-herring bounds, reciprocal solution links, and unique solvability all validate. A failed generation never replaces the currently active game.
 
-- Direct a newly selected cast's public title, opening, atmosphere, room flavour, and social tensions without changing case truth.
-- Restyle an already-approved interview claim in character voice.
-- Select one opaque, engine-authored NPC action option for each living character in a single turn batch.
+Once admitted, that immutable case spawns seven private NPC contexts: the victim is excluded, the murderer alone receives the crime truth, and no living agent receives another character's motive, secrets, or private memory. On each committed turn the seven calls run independently against the same frozen snapshot. A response can contain only one allow-listed action ID; malformed, timed-out, or out-of-set responses fall back independently without breaking the turn. Interview wording can also be portrayed after the engine has selected and recorded the underlying authorized facts.
 
-Provider output is schema-validated, dialogue fact references and action IDs are allow-listed, timeouts and malformed output fall back locally, and generated output cannot mutate world state. The provider receives neither an arbitrary state-patch interface nor authority to invent rooms, evidence, facts, or tools.
+Generated cases are saved with their canonical truth and a content fingerprint, then fully revalidated and replay-checked on restore without another provider call. Provider output never receives an arbitrary state-patch interface or authority to mutate rooms, evidence, facts, or tools.
+
+Automated and initial integration tests use an in-process dummy provider and spend no OpenRouter credits. Real-provider playtesting is the next validation stage after the deterministic suite is stable.
 
 In a source checkout, the key is stored locally in `backend/user_config.json`, save games in `backend/saves/`, and imported card drafts in `backend/card_drafts/`; all three paths are ignored by Git. Packaged builds use durable per-user data instead of PyInstaller's temporary extraction folder: `%LOCALAPPDATA%\AshwickTrust` on Windows, `~/Library/Application Support/Ashwick Trust` on macOS, and `$XDG_DATA_HOME/ashwick-trust` (or `~/.local/share/ashwick-trust`) on Linux. Set `ASHWICK_TRUST_DATA_DIR` to use an explicit portable location.
 
 ## Project map
 
-- `backend/game/` — canonical models, seeded cast/story recipes, bounded story director, turn engine, public projections, saves, card library, and portrayal boundary.
-- `backend/content/` — two Ashwick cases, their 24-card assembly recipe, the manor, and CCv3 cards.
+- `backend/game/` — generated-case admission, canonical models, private NPC boundaries, turn engine, public projections, saves, card library, and portrayal boundary.
+- `backend/content/` — two offline demo cases, the structured manor location, and 24 CCv3 cards.
 - `backend/routers/` — FastAPI transport.
 - `frontend/` — vanilla JavaScript/Vite interface.
 - `backend/tests/` — unit, contract, adversarial, and playthrough coverage.

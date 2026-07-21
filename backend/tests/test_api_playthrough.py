@@ -53,7 +53,7 @@ def _assert_no_solution_leak(payload: object) -> None:
 
 def test_public_api_vertical_slice_playthrough_and_restore(tmp_path) -> None:
     with _client(tmp_path) as client:
-        new_game = client.post("/api/game/new", json={})
+        new_game = client.post("/api/game/demo", json={})
         assert new_game.status_code == 200
         new_payload = new_game.json()
         opening_game = new_payload["game"]

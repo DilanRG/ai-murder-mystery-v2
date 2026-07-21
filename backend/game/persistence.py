@@ -1,9 +1,10 @@
 """Validated, local save files for the deterministic game engine.
 
-Save files deliberately contain only mutable runtime state plus stable authored
-content identifiers.  They never embed a :class:`CaseDefinition` or location
-package, which keeps canonical truth out of portable/client-facing payloads and
-means authored updates are detected when a save is restored.
+Authored cases use stable content identifiers so updates are detected on
+restore. Provider-generated cases have no authored source to reload, so their
+validated immutable :class:`CaseDefinition` is embedded with a content
+fingerprint. Save files remain local server-side artifacts and are never
+returned by the public game-state API.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from game.recipes import (
     resolve_case_recipe,
 )
 from game.story_director import StoryPresentationPatch, validate_story_presentation
+from game.validator import validate_case
 
 
 SAVE_SCHEMA_VERSION = 2
@@ -48,7 +50,7 @@ class SaveValidationError(ValueError):
 
 
 class SaveEnvelope(StrictModel):
-    """Portable save document with no authored ground truth embedded in it."""
+    """Portable runtime plus either authored IDs or fingerprinted generated truth."""
 
     schema_version: Literal[1, 2] = SAVE_SCHEMA_VERSION
     case_id: str
@@ -59,12 +61,28 @@ class SaveEnvelope(StrictModel):
         max_length=MAX_ACTION_HISTORY,
     )
     story_presentation: StoryPresentationPatch | None = None
+    generated_case: CaseDefinition | None = None
+    generated_case_fingerprint: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     runtime: WorldRuntimeState
 
     @model_validator(mode="after")
     def require_v2_history(self) -> "SaveEnvelope":
         if self.schema_version == SAVE_SCHEMA_VERSION and self.action_history is None:
             raise ValueError("save schema v2 requires action history")
+        if (self.generated_case is None) != (self.generated_case_fingerprint is None):
+            raise ValueError("generated case and fingerprint must appear together")
+        if self.generated_case is not None:
+            if self.case_recipe is not None:
+                raise ValueError("generated saves cannot contain an authored recipe")
+            if self.generated_case.id != self.case_id:
+                raise ValueError("embedded generated case ID must match the save")
+            if self.generated_case.location_package_id != self.location_id:
+                raise ValueError("embedded generated case location must match the save")
         return self
 
 
@@ -315,6 +333,18 @@ def validate_save_envelope(
         _fail("save references different authored content")
     if case.location_package_id != location.id:
         _fail("provided case and location are not compatible")
+    if envelope.generated_case is not None:
+        if envelope.generated_case != case:
+            _fail("embedded generated case does not match restored truth")
+        if envelope.generated_case_fingerprint != case_content_fingerprint(case):
+            _fail("embedded generated case fingerprint does not match its truth")
+        # A fingerprint detects accidental edits but is not an admission
+        # decision: a local editor can recompute it.  Re-run the authoritative
+        # structural/solvability validator before any embedded truth is used.
+        if not validate_case(case, location).valid:
+            _fail("embedded generated case is not a valid playable mystery")
+    elif case.id.startswith("generated_"):
+        _fail("generated save is missing embedded canonical truth")
     if envelope.case_recipe is not None:
         selection = envelope.case_recipe
         if selection.selected_case_id != envelope.case_id:
@@ -377,9 +407,15 @@ def validate_save_envelope(
 
 
 def snapshot_engine(engine: Any) -> SaveEnvelope:
-    """Create a validated envelope from a ``GameEngine`` without copying truth."""
+    """Create a validated envelope from a ``GameEngine``."""
 
     history = getattr(engine, "action_history", None)
+    generated_case = (
+        engine.case
+        if engine.case.id.startswith("generated_")
+        and engine.recipe_selection is None
+        else None
+    )
     envelope = SaveEnvelope(
         schema_version=(
             SAVE_SCHEMA_VERSION
@@ -395,6 +431,12 @@ def snapshot_engine(engine: Any) -> SaveEnvelope:
             else None
         ),
         story_presentation=getattr(engine, "story_presentation", None),
+        generated_case=generated_case,
+        generated_case_fingerprint=(
+            case_content_fingerprint(generated_case)
+            if generated_case is not None
+            else None
+        ),
         runtime=engine.runtime.model_copy(deep=True),
     )
     return validate_save_envelope(envelope, engine.case, engine.location)
@@ -450,6 +492,9 @@ def write_save(engine: Any, save_root: Path | str, filename: str) -> Path:
     envelope = snapshot_engine(engine)
     destination.parent.mkdir(parents=True, exist_ok=True)
     document = envelope.model_dump(mode="json")
+    if envelope.generated_case is None:
+        document.pop("generated_case", None)
+        document.pop("generated_case_fingerprint", None)
     if envelope.schema_version == LEGACY_SAVE_SCHEMA_VERSION:
         document.pop("action_history", None)
     payload = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -492,7 +537,7 @@ def load_engine(
     case_loader: Callable[[str], CaseDefinition] | None = None,
     location_loader: Callable[[str], LocationPackage] | None = None,
 ) -> Any:
-    """Load authored IDs from a save and restore its validated engine state."""
+    """Load authored IDs or embedded generated truth and restore engine state."""
 
     envelope = read_save(save_root, filename)
     if case_loader is None or location_loader is None:
@@ -501,11 +546,22 @@ def load_engine(
         case_loader = case_loader or load_case
         location_loader = location_loader or load_location
     try:
-        if envelope.case_recipe is not None and envelope.case_recipe.slot_card_ids:
+        if envelope.generated_case is not None:
+            case = envelope.generated_case
+            if (
+                envelope.generated_case_fingerprint
+                != case_content_fingerprint(case)
+            ):
+                raise SaveValidationError(
+                    "embedded generated case fingerprint does not match its truth"
+                )
+        elif envelope.case_recipe is not None and envelope.case_recipe.slot_card_ids:
             case = materialize_case_recipe(envelope.case_recipe)
         else:
             case = case_loader(envelope.case_id)
         location = location_loader(envelope.location_id)
+    except SaveValidationError:
+        raise
     except (OSError, ValueError, FileNotFoundError) as error:
         raise SaveValidationError("save references unavailable authored content") from error
     return restore_engine(envelope, case, location)

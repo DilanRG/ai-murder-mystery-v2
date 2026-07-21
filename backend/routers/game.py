@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 
 from game.actions import InterviewExchangeIntent, parse_player_intent
+from game.case_generation import GeneratedScenarioError
 from game.persistence import SAVE_SCHEMA_VERSION, SaveValidationError
 from game.recipes import MAX_RECIPE_SEED
 from game.service import DEFAULT_CASE_ID, DEFAULT_LOCATION_ID
@@ -16,7 +17,7 @@ from game.service import DEFAULT_CASE_ID, DEFAULT_LOCATION_ID
 router = APIRouter(prefix="/api/game")
 
 
-class StartGameRequest(BaseModel):
+class DemoStartRequest(BaseModel):
     """Choose either explicit authored content or one seeded case recipe."""
 
     model_config = ConfigDict(extra="forbid")
@@ -28,7 +29,7 @@ class StartGameRequest(BaseModel):
     character_ids: tuple[str, ...] | None = Field(default=None, min_length=8, max_length=8)
 
     @model_validator(mode="after")
-    def validate_mode(self) -> "StartGameRequest":
+    def validate_mode(self) -> "DemoStartRequest":
         if self.recipe_id is not None:
             if self.seed is None:
                 raise ValueError("a recipe start requires a seed")
@@ -38,6 +39,27 @@ class StartGameRequest(BaseModel):
             raise ValueError("a seed requires a recipe_id")
         elif self.character_ids is not None:
             raise ValueError("manual character selection requires a recipe_id")
+        if self.character_ids is not None and len(set(self.character_ids)) != 8:
+            raise ValueError("manual character selection requires eight unique IDs")
+        return self
+
+
+class GeneratedStartRequest(BaseModel):
+    """Select a location and any eight cards for provider-backed generation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seed: StrictInt = Field(ge=0, le=MAX_RECIPE_SEED)
+    location_id: str = Field(default=DEFAULT_LOCATION_ID, min_length=1, max_length=64)
+    character_ids: tuple[str, ...] | None = Field(
+        default=None,
+        min_length=8,
+        max_length=8,
+    )
+    difficulty: Literal["easy", "normal", "hard"] = "normal"
+
+    @model_validator(mode="after")
+    def validate_characters(self) -> "GeneratedStartRequest":
         if self.character_ids is not None and len(set(self.character_ids)) != 8:
             raise ValueError("manual character selection requires eight unique IDs")
         return self
@@ -77,8 +99,50 @@ async def bootstrap() -> dict[str, object]:
 
 
 @router.post("/new")
-async def new_game(request: StartGameRequest) -> dict[str, object]:
-    """Start fixed or seeded Ashwick content; an API key is never required."""
+async def new_game(request: GeneratedStartRequest) -> dict[str, object]:
+    """Generate and validate canonical truth from the chosen cards and location."""
+
+    try:
+        game = await _service().start_generated_async(
+            seed=request.seed,
+            location_id=request.location_id,
+            character_ids=request.character_ids,
+            difficulty=request.difficulty,
+        )
+    except GeneratedScenarioError as error:
+        status_code = {
+            "provider_not_configured": 428,
+            "provider_rate_limited": 429,
+            "provider_unavailable": 503,
+            "provider_timeout": 504,
+        }.get(error.code, 502)
+        message = {
+            "provider_not_configured": "Add an OpenRouter API key in Settings to generate a new story.",
+            "provider_auth_failed": "OpenRouter rejected the stored API key. Update it in Settings.",
+            "provider_rate_limited": "OpenRouter is rate-limiting requests. Wait briefly and try again.",
+            "provider_timeout": "OpenRouter timed out while generating the story. Try again.",
+            "provider_unavailable": "OpenRouter is currently unavailable. Try again later.",
+        }.get(
+            error.code,
+            "The generated story did not pass validation. Try again.",
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": error.code, "message": message},
+        ) from error
+    except (FileNotFoundError, ValueError) as error:
+        raise _not_found_or_bad_request(error) from error
+    return {
+        "status": "ok",
+        "game": game.model_dump(mode="json"),
+        "catalog": _service().catalog(),
+        "generation": _service().generation_metadata(),
+    }
+
+
+@router.post("/demo")
+async def demo_game(request: DemoStartRequest) -> dict[str, object]:
+    """Start an explicitly offline authored fixture without calling OpenRouter."""
 
     try:
         if request.recipe_id is not None:
@@ -100,6 +164,7 @@ async def new_game(request: StartGameRequest) -> dict[str, object]:
         "game": game.model_dump(mode="json"),
         "catalog": _service().catalog(),
         "recipe": _service().recipe_metadata(),
+        "generation": None,
     }
 
 

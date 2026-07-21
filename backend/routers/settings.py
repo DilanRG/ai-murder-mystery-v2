@@ -1,9 +1,11 @@
-"""Settings, optional OpenRouter discovery, and public character card data."""
+"""OpenRouter generation settings and public character card data."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from config.user_settings import get_user_config, save_user_config
 from game.content import CHARACTER_CARDS_DIR, list_content_ids, load_character_card
@@ -14,17 +16,19 @@ router = APIRouter()
 
 
 class SettingsUpdateRequest(BaseModel):
-    api_key: str | None = None
-    model: str | None = None
-    temperature: float | None = None
-    top_p: float | None = None
-    top_k: int | None = None
-    max_tokens: int | None = None
-    context_tokens: int | None = None
-    autonomy: str | None = None
-    timer_mode: str | None = None
-    timer_minutes: int | None = None
-    difficulty: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    api_key: str | None = Field(default=None, min_length=8, max_length=512)
+    model: str | None = Field(default=None, min_length=1, max_length=240)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    top_k: int | None = Field(default=None, ge=0, le=1_000)
+    max_tokens: int | None = Field(default=None, ge=1, le=65_536)
+    context_tokens: int | None = Field(default=None, ge=1, le=2_000_000)
+    autonomy: Literal["low", "high"] | None = None
+    timer_mode: Literal["none", "realtime", "event"] | None = None
+    timer_minutes: int | None = Field(default=None, ge=1, le=1_440)
+    difficulty: Literal["easy", "normal", "hard"] | None = None
 
 
 @router.get("/api/health")
@@ -57,7 +61,7 @@ async def update_settings(request: SettingsUpdateRequest) -> dict[str, object]:
     updates = request.model_dump(exclude_none=True)
     save_user_config(updates)
     if any(key in updates for key in ("api_key", "model", "temperature", "top_p", "top_k", "max_tokens")):
-        session.llm = make_llm_client()
+        await session.replace_llm(make_llm_client())
     return {
         "status": "ok",
         "llm_connected": session.llm is not None,
@@ -73,7 +77,13 @@ async def list_models(q: str = "", provider: str = "") -> dict[str, object]:
     try:
         models = await LLMClient.fetch_models(config.get("api_key", ""))
     except Exception as error:
-        raise HTTPException(status_code=502, detail=f"Could not fetch models: {error}") from error
+        # Provider bodies can contain account details or reflected request
+        # data.  Never make arbitrary upstream exception text part of the
+        # public API response.
+        raise HTTPException(
+            status_code=502,
+            detail="Could not fetch OpenRouter models.",
+        ) from error
     if q:
         query = q.lower()
         models = [model for model in models if query in model["id"].lower() or query in model["name"].lower()]

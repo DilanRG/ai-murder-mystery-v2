@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from pydantic import Field, ValidationError
 
-from game.content import load_character_card
+from game.content import CHARACTER_CARDS_DIR, list_content_ids, load_character_card
 from game.models import (
     CanonicalTimelineEvent,
     CaseDefinition,
@@ -35,7 +35,7 @@ from game.story_director import (
     validate_story_presentation,
 )
 from game.validator import validate_case
-from llm.client import LLMMessage
+from llm.client import LLMMessage, LLMProviderError
 
 
 MAX_GENERATED_DOCUMENT_BYTES = 512 * 1024
@@ -86,6 +86,45 @@ class ValidatedGeneratedScenario:
 
 class GeneratedScenarioError(ValueError):
     """A provider document failed schema, reference, or solvability admission."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "invalid_generated_case",
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def select_generation_cast(
+    *,
+    seed: int,
+    character_ids: tuple[str, ...] | None = None,
+) -> tuple[str, ...]:
+    """Select any eight cards from the full pool with cross-platform stability."""
+
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise GeneratedScenarioError("seed must be a non-negative integer")
+    pool = tuple(list_content_ids(CHARACTER_CARDS_DIR))
+    if len(pool) < 8:
+        raise GeneratedScenarioError("the character pool must contain at least eight cards")
+    if character_ids is not None:
+        if len(character_ids) != 8 or len(set(character_ids)) != 8:
+            raise GeneratedScenarioError("manual selection requires eight unique characters")
+        unknown = sorted(set(character_ids) - set(pool))
+        if unknown:
+            raise GeneratedScenarioError(
+                f"manual selection contains unknown characters: {', '.join(unknown)}"
+            )
+        return character_ids
+    ranked = sorted(
+        pool,
+        key=lambda character_id: hashlib.sha256(
+            f"{seed}:{character_id}".encode("utf-8")
+        ).digest(),
+    )
+    return tuple(ranked[:8])
 
 
 def _safe_card_context(character_id: str) -> dict[str, object]:
@@ -327,7 +366,10 @@ async def generate_validated_scenario(
     """Generate, repair, and admit canonical truth; never use an authored fallback."""
 
     if llm is None:
-        raise GeneratedScenarioError("OpenRouter is not configured for scenario generation")
+        raise GeneratedScenarioError(
+            "OpenRouter is not configured for scenario generation",
+            code="provider_not_configured",
+        )
     if max_attempts < 1 or max_attempts > 3:
         raise ValueError("max_attempts must be from 1 to 3")
     context = build_generation_context(
@@ -374,9 +416,23 @@ async def generate_validated_scenario(
         except (json.JSONDecodeError, GeneratedScenarioError, ValidationError) as error:
             last_error = error
             feedback = str(error)[:MAX_GENERATION_FEEDBACK_CHARS]
+        except LLMProviderError as error:
+            last_error = error
+            feedback = error.code
+            if not error.retryable:
+                break
         except Exception as error:
             last_error = error
             feedback = f"provider request failed with {type(error).__name__}"
+    failure_code = (
+        last_error.code
+        if isinstance(last_error, (GeneratedScenarioError, LLMProviderError))
+        else "provider_unavailable"
+        if last_error is not None
+        and not isinstance(last_error, (json.JSONDecodeError, ValidationError))
+        else "invalid_generated_case"
+    )
     raise GeneratedScenarioError(
-        f"scenario generation failed after {max_attempts} attempts"
+        f"scenario generation failed after {max_attempts} attempts",
+        code=failure_code,
     ) from last_error

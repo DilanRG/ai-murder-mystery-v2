@@ -7,6 +7,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
+from conftest import make_dummy_generated_document
 
 from game.case_generation import (
     GeneratedScenarioError,
@@ -23,7 +24,6 @@ from game.actions import (
 )
 from game.content import load_case, load_location
 from game.engine import GameEngine
-from game.story_director import fallback_story_presentation
 from game.validator import validate_case
 
 
@@ -41,71 +41,7 @@ class DummyScenarioLLM:
 
 
 def _dummy_document() -> dict[str, object]:
-    """Treat the validated authored sample as if a provider had emitted it."""
-
-    case = load_case("ashwick_sample")
-    location = load_location("ashwick_manor")
-    case_data = case.model_dump(mode="json")
-    retained_evidence_ids = {
-        "ev_library_poker",
-        "ev_fireplace_trace",
-        "ev_medical_assessment",
-        "ev_library_clock",
-        "ev_edgar_cuff_fibre",
-        "ev_vivienne_memo",
-        "ev_sabrina_earring",
-        "ev_captain_letter",
-        "ev_port_rag",
-        "ev_sabrina_captain_alibi",
-    }
-    case_data["evidence"] = {
-        evidence_id: evidence
-        for evidence_id, evidence in case_data["evidence"].items()
-        if evidence_id in retained_evidence_ids
-    }
-    for fact in case_data["facts"].values():
-        fact["related_evidence_ids"] = [
-            evidence_id
-            for evidence_id in fact["related_evidence_ids"]
-            if evidence_id in retained_evidence_ids
-        ]
-    for overlay in case_data["overlays"].values():
-        overlay["supporting_evidence_ids"] = [
-            evidence_id
-            for evidence_id in overlay["supporting_evidence_ids"]
-            if evidence_id in retained_evidence_ids
-        ]
-    case_data["solution"]["method_evidence_ids"] = [
-        "ev_library_poker",
-        "ev_fireplace_trace",
-        "ev_medical_assessment",
-    ]
-    case_data["solution"]["motive_evidence_ids"] = ["ev_vivienne_memo"]
-    case_data["solution"]["opportunity_evidence_ids"] = [
-        "ev_library_clock",
-        "ev_edgar_cuff_fibre",
-    ]
-    opening = dict(case_data["opening"])
-    opening.pop("assembly_room_id")
-    presentation = fallback_story_presentation(case, location).model_dump(mode="json")
-    for host_field in ("schema_version", "base_case_fingerprint", "source"):
-        presentation.pop(host_field)
-    return {
-        "schema_version": 1,
-        "case": {
-            "schema_version": 1,
-            "title": case.title,
-            "investigation_start_minute": case.investigation_start_minute,
-            "murder": case_data["murder"],
-            "facts": case_data["facts"],
-            "timeline": case_data["timeline"],
-            "overlays": case_data["overlays"],
-            "evidence": case_data["evidence"],
-            "opening": opening,
-            "solution": case_data["solution"],
-        },
-        "presentation": presentation,
-    }
+    return make_dummy_generated_document()
 
 
 def test_dummy_generated_document_compiles_only_after_full_validation() -> None:

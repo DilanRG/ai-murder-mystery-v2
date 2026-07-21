@@ -5,29 +5,31 @@
 
 ## Playable now
 
-- Two complete Ashwick Manor mysteries with distinct culprits, scenes, motives, and three-part proof paths.
-- Stable seeded selection between complete validated crime spines plus automatic or manual eight-person casting from 24 cards, including reproducible save/load metadata and legacy v1-save compatibility.
+- Normal New Story now requires OpenRouter and generates one complete canonical mystery from the predefined Ashwick Manor package plus either an automatic or manual eight-person cast selected from all 24 cards.
+- Two complete Ashwick Manor mysteries remain as explicitly labelled offline demo/test fixtures with distinct culprits, scenes, motives, and three-part proof paths.
 - Twenty-four validated CCv3 characters plus bounded JSON import, safe preview, local drafts, collision-safe atomic replacement, and export through an in-game editor.
 - Authoritative discovery, investigation, interview, evidence, notebook, accusation, timeout, result, and debrief loops.
-- Deterministic ten-minute turns and seven-NPC batch resolution from an immutable NPC-phase snapshot, with authored initial suspicions and bounded, fact-free private NPC exchanges outside the player's room.
-- Optional provider-neutral AI story direction, portrayal, and intent selection. The director generates bounded public presentation only; every remote output is schema constrained and cannot alter case truth.
+- Deterministic ten-minute turns. Generated games issue seven separately partitioned living-NPC planning calls from one immutable NPC-phase snapshot; each agent sees only its own private briefing/state and one finite engine-authored action set.
+- The murderer alone receives the canonical crime truth. Provider responses select action IDs only, fall back independently, and cannot patch world state; bounded post-commit interview portrayal remains available.
 - Replay-verified v2 local saves with legacy-v1 loading, truth-redacted APIs, responsive desktop/mobile UI, and distinct portrait placeholders.
 - Bounded notebooks, accusation payloads, conversation memories, and action histories, with rejected actions leaving time and history unchanged.
 - Frozen builds bundle all authored content and write config, saves, and card drafts to durable per-user storage. The build fails closed and smoke-tests the real artifact across automatic casting, an exact manual cast, both fixed cases, and v2 save/load.
 - The package-verification matrix builds and launches the distributable successfully on Windows, Ubuntu, and macOS; the latest three-run matrix completed without annotations.
-- 212 automated unit, contract, adversarial, persistence, AI-boundary, concurrency, packaging, cast-reachability, frontend-boundary, and solve tests (206 Python plus six Node tests). The deterministic soak matrix solves every pooled card against both dummy mystery spines; desktop/mobile browser playthroughs cover both mysteries and the card editor.
+- 236 automated unit, contract, adversarial, persistence, AI-boundary, concurrency, packaging, cast-reachability, frontend-boundary, and solve tests (226 Python plus ten Node tests). The deterministic soak matrix solves every pooled card against both dummy mystery spines; desktop/mobile browser playthroughs cover both mysteries and the card editor.
 
-## Architecture correction in progress
+## Generated-story architecture now connected
 
 - A provider-shaped scenario document can now describe complete canonical truth plus public framing. Host-owned IDs and turn policy are injected locally, and schema, chronology, reciprocal solution linkage, clue-count, red-herring, discovery-path, evidence-cycle, schedule, unique-culprit, and public-spoiler validation must all pass before the document is admitted.
 - Runtime discovery now enforces clue prerequisites and physical room/slot placement, while admission rejects unreachable prerequisite chains and action routes the engine cannot execute. Accepted generation constraints therefore remain true during play rather than existing only on paper.
-- Initial tests feed the admission layer an authored dummy document and make no OpenRouter requests. This boundary is not yet connected to the normal New Story route.
+- The normal New Story route requires a configured provider. Selected card/location data is sent to one canonical scenario-generation call; only a fully admitted result atomically replaces the current session.
+- Accepted generated truth is embedded only in local saves with a content fingerprint, revalidated, and replay-checked during restore. Restore does not make another provider call.
+- Initial implementation and automated tests feed the exact production boundary a dummy provider document and spend no OpenRouter credits.
 
 ## Still to build
 
-1. Make validated OpenRouter scenario generation the normal New Story path; retain authored mysteries only as explicitly labelled offline/test fixtures.
-2. Spawn seven separately partitioned NPC agent contexts from the accepted case and run their constrained reasoning during turn resolution.
-3. Add generated-case persistence and conduct real-provider playtesting once the generation path is complete.
-4. Additional expression artwork after the AI-driven game loop is stable.
+1. Conduct the first real-provider playtest, then tune the scenario prompt, retry policy, model defaults, latency, token use, and case variety from observed failures.
+2. Expand the seven private agents beyond current movement/hold/evidence-manipulation choices into bounded claims, reactions, and richer dialogue decisions without granting state-authoring authority.
+3. Repeat desktop/mobile browser regression testing against real generated cases and harden packaging around provider configuration and failure recovery.
+4. Add expression artwork after the AI-driven game loop is stable.
 
 The original continuous-real-time prototype documents are historical references. They do not describe the active turn-based build.

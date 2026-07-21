@@ -32,7 +32,7 @@ def _public_cast_ids(payload: dict[str, object]) -> set[str]:
     return cast_ids
 
 
-def test_no_key_start_catalog_opening_and_safe_state(tmp_path):
+def test_no_key_demo_catalog_opening_and_safe_state(tmp_path):
     with _client(tmp_path) as client:
         social_preview = client.get("/og.png")
         assert social_preview.status_code == 200
@@ -62,7 +62,7 @@ def test_no_key_start_catalog_opening_and_safe_state(tmp_path):
             assert portrait.status_code == 200
             assert "svg" in portrait.headers["content-type"]
 
-        response = client.post("/api/game/new", json={})
+        response = client.post("/api/game/demo", json={})
         assert response.status_code == 200
         opening = response.json()["game"]
         assert opening["phase"] == "discovery"
@@ -83,7 +83,7 @@ def test_seeded_recipe_start_is_reproducible_and_does_not_leak_selection_metadat
         titles_by_seed = {}
         for seed in range(32):
             response = client.post(
-                "/api/game/new",
+                "/api/game/demo",
                 json={"recipe_id": "ashwick_manor_dual_spines", "seed": seed},
             )
             assert response.status_code == 200
@@ -102,7 +102,7 @@ def test_seeded_recipe_start_is_reproducible_and_does_not_leak_selection_metadat
         assert len(set(titles_by_seed.values())) == 2
         repeated_seed = next(iter(titles_by_seed))
         repeated = client.post(
-            "/api/game/new",
+            "/api/game/demo",
             json={"recipe_id": "ashwick_manor_dual_spines", "seed": repeated_seed},
         ).json()
         assert repeated["game"]["case_title"] == titles_by_seed[repeated_seed]
@@ -112,7 +112,7 @@ def test_recipe_seed_boundary_and_conflicting_inputs_are_rejected(tmp_path):
     with _client(tmp_path) as client:
         for seed in (0, 1_000_000, 2_147_483_648, (1 << 53) - 1):
             response = client.post(
-                "/api/game/new",
+                "/api/game/demo",
                 json={"recipe_id": "ashwick_manor_dual_spines", "seed": seed},
             )
             assert response.status_code == 200
@@ -132,13 +132,13 @@ def test_recipe_seed_boundary_and_conflicting_inputs_are_rejected(tmp_path):
             {"unexpected": "field"},
         )
         for payload in invalid_payloads:
-            assert client.post("/api/game/new", json=payload).status_code == 422
+            assert client.post("/api/game/demo", json=payload).status_code == 422
 
 
 def test_recipe_selection_survives_save_load_without_public_spine_id(tmp_path):
     with _client(tmp_path) as client:
         started = client.post(
-            "/api/game/new",
+            "/api/game/demo",
             json={"recipe_id": "ashwick_manor_dual_spines", "seed": 42},
         ).json()
         title = started["game"]["case_title"]
@@ -147,7 +147,7 @@ def test_recipe_selection_survives_save_load_without_public_spine_id(tmp_path):
         assert client.post("/api/game/saves/v1", json={"filename": "seeded"}).status_code == 200
 
         replacement = client.post(
-            "/api/game/new",
+            "/api/game/demo",
             json={"recipe_id": "ashwick_manor_dual_spines", "seed": 43},
         ).json()
         assert _public_cast_ids(replacement) != selected_cast
@@ -167,7 +167,7 @@ def test_recipe_selection_survives_save_load_without_public_spine_id(tmp_path):
 
 def test_action_validation_and_opening_progression(tmp_path):
     with _client(tmp_path) as client:
-        client.post("/api/game/new", json={})
+        client.post("/api/game/demo", json={})
         assert client.post("/api/game/action", json={"kind": "not_real"}).status_code == 422
         assert client.post("/api/game/action", json=["advance_opening"]).status_code == 422
 
@@ -185,7 +185,7 @@ def test_action_validation_and_opening_progression(tmp_path):
 
 def test_save_load_and_debrief_gating(tmp_path):
     with _client(tmp_path) as client:
-        client.post("/api/game/new", json={})
+        client.post("/api/game/demo", json={})
         assert client.get("/api/game/debrief").status_code == 400
 
         saved = client.post("/api/game/saves/v2", json={"filename": "ashwick.json"})
@@ -230,7 +230,7 @@ def test_interview_portrayal_is_optional_and_never_replaces_canonical_statement(
     with _client(tmp_path) as client:
         llm = ValidLLM()
         main._session.llm = llm
-        client.post("/api/game/new", json={})
+        client.post("/api/game/demo", json={})
         client.post("/api/game/action", json={"kind": "advance_opening"})
         client.post(
             "/api/game/action",
@@ -259,7 +259,7 @@ def test_failed_portrayal_provider_falls_back_after_engine_commits_statement(tmp
 
     with _client(tmp_path) as client:
         main._session.llm = FailingLLM()
-        client.post("/api/game/new", json={})
+        client.post("/api/game/demo", json={})
         client.post("/api/game/action", json={"kind": "advance_opening"})
         client.post(
             "/api/game/action",
@@ -279,7 +279,7 @@ def test_failed_portrayal_provider_falls_back_after_engine_commits_statement(tmp
 
 def test_invalid_interview_text_is_rejected_before_engine_mutates(tmp_path):
     with _client(tmp_path) as client:
-        client.post("/api/game/new", json={})
+        client.post("/api/game/demo", json={})
         client.post("/api/game/action", json={"kind": "advance_opening"})
         client.post(
             "/api/game/action",

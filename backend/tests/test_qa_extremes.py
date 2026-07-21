@@ -56,7 +56,7 @@ def _state(client: TestClient) -> dict[str, object]:
 
 
 def _start_investigation(client: TestClient) -> dict[str, object]:
-    started = client.post("/api/game/new", json={})
+    started = client.post("/api/game/demo", json={})
     assert started.status_code == 200
     _assert_no_truth(started.json())
     advanced = client.post("/api/game/action", json={"kind": "advance_opening"})
@@ -310,7 +310,7 @@ def test_save_names_and_tampered_documents_are_rejected_safely(tmp_path: Path) -
 
         # A fresh game must discard every old note/timeline/interview trace.
         client.post("/api/game/action", json={"kind": "add_note", "text": "discard me"})
-        reset = client.post("/api/game/new", json={})
+        reset = client.post("/api/game/demo", json={})
         assert reset.status_code == 200
         assert reset.json()["game"]["turn"] == 0
         assert reset.json()["game"]["notes"] == []

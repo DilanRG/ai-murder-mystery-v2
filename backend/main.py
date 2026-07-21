@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 def _make_llm_client() -> LLMClient | None:
-    """Keep OpenRouter settings available without coupling core play to it."""
+    """Build the configured OpenRouter client used by generated play."""
 
     config = get_user_config()
     if not config.get("api_key"):

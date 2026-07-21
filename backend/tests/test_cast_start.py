@@ -44,7 +44,7 @@ def _new_recipe(client: TestClient, seed: int, character_ids: list[str] | None =
     payload: dict[str, object] = {"recipe_id": RECIPE_ID, "seed": seed}
     if character_ids is not None:
         payload["character_ids"] = character_ids
-    return client.post("/api/game/new", json=payload)
+    return client.post("/api/game/demo", json=payload)
 
 
 def _public_cast_ids(payload: dict[str, object]) -> set[str]:
@@ -127,7 +127,7 @@ def test_recipe_start_rejects_invalid_manual_casts(tmp_path, invalid_kind: str) 
 def test_manual_cast_is_not_accepted_for_a_fixed_case_start(tmp_path) -> None:
     with _client(tmp_path) as client:
         response = client.post(
-            "/api/game/new",
+            "/api/game/demo",
             json={
                 "case_id": "ashwick_sample",
                 "location_id": "ashwick_manor",

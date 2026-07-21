@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from game.actions import InterviewExchangeIntent, PlayerIntent, parse_player_intent
+from game.case_generation import generate_validated_scenario, select_generation_cast
 from game.content import (
     CHARACTER_CARDS_DIR,
     list_content_ids,
@@ -32,13 +33,16 @@ from game.recipes import (
     load_case_recipe,
     resolve_materialized_case_recipe,
 )
-from game.story_director import generate_story_presentation
 from game.portrayal import (
     ConstrainedPortrayalCoordinator,
     OpenRouterPortrayalAdapter,
     PermittedFact,
     PortrayalRequest,
     PublicDialogueLine,
+)
+from game.private_npc_agents import (
+    OpenRouterPrivateNpcAgentAdapter,
+    PrivateNpcAgentCoordinator,
 )
 from game.views import PlayerGameView, TurnResultView
 
@@ -55,10 +59,17 @@ class GameService:
         self.save_root = Path(save_root)
         self.llm = llm
         self.engine: GameEngine | None = None
+        self._generation_metadata: dict[str, object] | None = None
         self._action_lock = asyncio.Lock()
 
     def is_active(self) -> bool:
         return self.engine is not None and self.engine.runtime.phase.value != "ended"
+
+    async def replace_llm(self, llm: Any | None) -> None:
+        """Replace provider settings only between generation/action transactions."""
+
+        async with self._action_lock:
+            self.llm = llm
 
     def start(
         self,
@@ -71,11 +82,13 @@ class GameService:
         location = load_location(location_id)
         if case.location_package_id != location.id:
             raise ValueError("case and location package are not compatible")
-        self.engine = GameEngine.create(
+        candidate = GameEngine.create(
             case,
             location,
             recipe_selection=recipe_selection,
         )
+        self.engine = candidate
+        self._generation_metadata = None
         return self.engine.view()
 
     def start_recipe(
@@ -94,11 +107,13 @@ class GameService:
         )
         recipe = load_case_recipe(recipe_id)
         location = load_location(recipe.location_package_id)
-        self.engine = GameEngine.create(
+        candidate = GameEngine.create(
             case,
             location,
             recipe_selection=selection,
         )
+        self.engine = candidate
+        self._generation_metadata = None
         return self.engine.view()
 
     async def start_async(
@@ -129,14 +144,54 @@ class GameService:
             )
             recipe = load_case_recipe(recipe_id)
             location = load_location(recipe.location_package_id)
-            presentation = await generate_story_presentation(self.llm, case, location)
-            self.engine = GameEngine.create(
+            candidate = GameEngine.create(
                 case,
                 location,
                 recipe_selection=selection,
-                story_presentation=presentation,
             )
+            self.engine = candidate
+            self._generation_metadata = None
             return self.engine.view()
+
+    async def start_generated_async(
+        self,
+        *,
+        seed: int,
+        location_id: str = DEFAULT_LOCATION_ID,
+        character_ids: tuple[str, ...] | None = None,
+        difficulty: str = "normal",
+    ) -> PlayerGameView:
+        """Generate and validate a complete case before replacing the session."""
+
+        async with self._action_lock:
+            provider = self.llm
+            selected_character_ids = select_generation_cast(
+                seed=seed,
+                character_ids=character_ids,
+            )
+            location = load_location(location_id)
+            generated = await generate_validated_scenario(
+                provider,
+                character_ids=selected_character_ids,
+                location=location,
+                seed=seed,
+                difficulty=difficulty,
+            )
+            candidate = GameEngine.create(
+                generated.case,
+                location,
+                story_presentation=generated.presentation,
+            )
+            self.engine = candidate
+            self._generation_metadata = {
+                "mode": "generated",
+                "seed": seed,
+                "cast_mode": "manual" if character_ids is not None else "automatic",
+                "location_id": location.id,
+                "story_source": "openrouter",
+                "story_status": "ready",
+            }
+            return candidate.view()
 
     def state(self) -> PlayerGameView:
         return self._require_engine().view()
@@ -164,7 +219,23 @@ class GameService:
         engine = self._require_engine()
         preview = engine.preview(command)
         npc_action_ids: dict[str, str] | None = None
-        if preview.result.accepted and preview.result.committed and preview.npc_request is not None:
+        if (
+            preview.result.accepted
+            and preview.result.committed
+            and self._generation_metadata is not None
+            and preview.private_npc_requests is not None
+        ):
+            coordinator = PrivateNpcAgentCoordinator(
+                OpenRouterPrivateNpcAgentAdapter(self.llm)
+                if self.llm is not None
+                else None
+            )
+            plan = await coordinator.plan_all(preview.private_npc_requests)
+            npc_action_ids = {
+                actor_id: selection.action_id
+                for actor_id, selection in plan.selections.items()
+            }
+        elif preview.result.accepted and preview.result.committed and preview.npc_request is not None:
             coordinator = ConstrainedNpcIntentPlanningCoordinator(
                 OpenRouterNpcIntentBatchAdapter(self.llm) if self.llm is not None else None
             )
@@ -243,6 +314,18 @@ class GameService:
 
     def load(self, filename: str) -> PlayerGameView:
         self.engine = load_engine(self.save_root, filename)
+        self._generation_metadata = (
+            {
+                "mode": "generated",
+                "seed": self.engine.case.seed,
+                "cast_mode": "restored",
+                "location_id": self.engine.location.id,
+                "story_source": "openrouter",
+                "story_status": "ready",
+            }
+            if self.engine.case.id.startswith("generated_")
+            else None
+        )
         return self.engine.view()
 
     async def load_async(self, filename: str) -> PlayerGameView:
@@ -268,10 +351,10 @@ class GameService:
             recipes.append(
                 {
                     "id": recipe.id,
-                    "name": "Fresh authored Ashwick mystery",
+                    "name": "Offline demo: authored Ashwick mystery",
                     "description": (
-                        f"A seed selects one of {len(recipe.case_ids)} complete mysteries "
-                        f"and a compatible eight-person cast from {character_pool_size} cards."
+                        f"A provider-free test fixture selecting one of {len(recipe.case_ids)} "
+                        f"authored mysteries and a compatible cast from {character_pool_size} cards."
                     ),
                     "location_package_id": recipe.location_package_id,
                     "variation_count": total_variations,
@@ -290,6 +373,12 @@ class GameService:
             "default_case_id": DEFAULT_CASE_ID,
             "default_location_id": DEFAULT_LOCATION_ID,
             "default_recipe_id": DEFAULT_RECIPE_ID,
+            "generation": {
+                "provider": "openrouter",
+                "provider_required": True,
+                "cast_size": 8,
+                "character_pool_size": len(list_content_ids(CHARACTER_CARDS_DIR)),
+            },
             "recipes": recipes,
             "locations": [self._location_summary(location)],
             "characters": [
@@ -303,7 +392,13 @@ class GameService:
             "catalog": self.catalog(),
             "game": self.engine.view() if self.engine else None,
             "recipe": self.recipe_metadata(),
+            "generation": self.generation_metadata(),
         }
+
+    def generation_metadata(self) -> dict[str, object] | None:
+        if self.engine is None or self._generation_metadata is None:
+            return None
+        return dict(self._generation_metadata)
 
     def recipe_metadata(self) -> dict[str, object] | None:
         """Return reproducibility metadata without exposing the selected spine."""

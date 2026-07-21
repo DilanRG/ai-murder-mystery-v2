@@ -24,7 +24,7 @@
         <p class="lead">A murder has stopped the house. Eight people remain. Every action moves the night forward.</p>
         <div class="title-actions"><button id="new-game" class="primary">Begin investigation</button><button id="resume-game" class="secondary">Resume saved session</button></div>
         <p id="connection" class="status">Checking local case file…</p>
-        <button id="title-settings" class="text-button">Settings · optional AI direction</button>
+        <button id="title-settings" class="text-button">OpenRouter settings</button>
       </div>
     </section>
 
@@ -32,19 +32,21 @@
       <div class="setup-card">
         <button class="text-button back" data-screen="title">← Return</button>
         <p class="eyebrow">Case file</p><h2 id="setup-title">Prepare for Ashwick</h2>
-        <p>Choose the eight-person cast automatically or manually. A configured backend AI director creates this playthrough's public story presentation; the validated mystery engine keeps the clues and solution coherent. No provider is required to play.</p>
+        <p>Choose the eight-person cast automatically or manually. OpenRouter then generates the canonical timeline, roles, clues, private briefings, and solution. The host validates the complete mystery before play begins.</p>
         <dl id="case-summary" class="case-summary"></dl>
         <div class="case-options">
-          <label for="case-mode">Mystery</label>
-          <select id="case-mode"></select>
+          <label for="location-mode">Location</label>
+          <select id="location-mode"></select>
           <label for="case-seed">Case seed <span class="muted">(leave blank for random)</span></label>
           <input id="case-seed" type="number" min="0" max="9007199254740991" step="1" inputmode="numeric" placeholder="Random seed">
-          <p id="case-seed-note" class="field-note">The same seed always selects the same complete authored mystery.</p>
+          <p id="case-seed-note" class="field-note">The seed makes automatic cast selection reproducible and is supplied to the story generator.</p>
+          <label for="case-difficulty">Difficulty</label>
+          <select id="case-difficulty"><option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option></select>
           <label for="cast-mode">Cast selection</label>
           <select id="cast-mode"><option value="automatic">Automatic — draw a new ensemble</option><option value="manual">Manual — choose the ensemble</option></select>
-          <fieldset id="manual-cast" class="manual-cast" hidden><legend>Choose one character from each ensemble group</legend><p class="field-note">Your eight choices are locked when the story begins.</p><div id="cast-picker" class="cast-picker"></div></fieldset>
+          <fieldset id="manual-cast" class="manual-cast" hidden><legend>Choose any eight characters</legend><p class="field-note">All 24 cards are available. Your eight choices are locked when generation begins.</p><div id="cast-picker" class="cast-picker"></div></fieldset>
         </div>
-        <div class="setup-actions"><button id="start-case" class="primary">Open the case</button><button id="card-editor" class="secondary">Character card editor</button><button id="setup-settings" class="secondary">Optional AI settings</button></div>
+        <div class="setup-actions"><button id="start-case" class="primary">Generate new mystery</button><button id="offline-demo" class="secondary">Run offline demo fixture</button><button id="card-editor" class="secondary">Character card editor</button><button id="setup-settings" class="secondary">OpenRouter settings</button></div>
       </div>
     </section>
 

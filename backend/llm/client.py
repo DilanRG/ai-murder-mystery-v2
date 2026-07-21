@@ -14,6 +14,23 @@ from config.settings import OPENROUTER_BASE_URL
 logger = logging.getLogger(__name__)
 
 
+class LLMProviderError(RuntimeError):
+    """Sanitized provider failure suitable for orchestration and UI mapping."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        status_code: int | None = None,
+        retryable: bool = True,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.retryable = retryable
+
+
 @dataclass
 class LLMMessage:
     role: str   # "system" | "user" | "assistant" | "tool"
@@ -138,16 +155,49 @@ class LLMClient:
                 )
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
-                body = e.response.text
-                logger.error("LLM API error %s: %s", e.response.status_code, body)
-                raise RuntimeError(f"LLM API error {e.response.status_code}: {body}") from e
+                status_code = e.response.status_code
+                if status_code in {401, 403}:
+                    code, retryable = "provider_auth_failed", False
+                elif status_code == 429:
+                    code, retryable = "provider_rate_limited", True
+                elif status_code >= 500:
+                    code, retryable = "provider_unavailable", True
+                else:
+                    code, retryable = "provider_rejected_request", False
+                logger.error(
+                    "OpenRouter request failed with status %s (%s)",
+                    status_code,
+                    code,
+                )
+                raise LLMProviderError(
+                    "OpenRouter request failed.",
+                    code=code,
+                    status_code=status_code,
+                    retryable=retryable,
+                ) from e
+            except httpx.TimeoutException as e:
+                logger.error("OpenRouter request timed out")
+                raise LLMProviderError(
+                    "OpenRouter request timed out.",
+                    code="provider_timeout",
+                ) from e
             except httpx.RequestError as e:
-                logger.error("LLM request failed: %s", e)
-                raise RuntimeError(f"LLM request failed: {e}") from e
+                logger.error("OpenRouter request could not be completed")
+                raise LLMProviderError(
+                    "OpenRouter request could not be completed.",
+                    code="provider_unavailable",
+                ) from e
 
         data = resp.json()
-        choice = data["choices"][0]
-        msg = choice["message"]
+        try:
+            choice = data["choices"][0]
+            msg = choice["message"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise LLMProviderError(
+                "OpenRouter returned an invalid response.",
+                code="provider_invalid_response",
+                retryable=True,
+            ) from error
         usage = data.get("usage", {})
 
         # Parse tool calls if present
