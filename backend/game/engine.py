@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -38,6 +39,7 @@ from game.models import (
     GamePhase,
     GameResult,
     ItemRuntimeState,
+    MAX_ACTION_CLAIM_LENGTH,
     LocationPackage,
     MAX_CONVERSATION_MEMORIES,
     MAX_NOTEBOOK_RECORDS,
@@ -48,6 +50,7 @@ from game.models import (
     WorldRuntimeState,
 )
 from game.npc_planning import (
+    MAX_CANDIDATES_PER_ACTOR,
     NpcActionCandidate,
     NpcActorActionOptions,
     NpcIntentPlanningRequest,
@@ -95,6 +98,18 @@ class _NpcIntent:
     character_id: str
     destination_room_id: str | None
     manipulate_evidence_id: str | None
+    social: _NpcSocialIntent | None = None
+
+
+@dataclass(frozen=True)
+class _NpcSocialIntent:
+    """An engine-authored private claim or reaction to one co-located NPC."""
+
+    target_character_id: str
+    topic: str
+    claim: str
+    referenced_fact_ids: tuple[str, ...] = ()
+    transfers_facts: bool = False
 
 
 @dataclass(frozen=True)
@@ -848,9 +863,36 @@ class GameEngine:
     ) -> tuple[PrivateNpcAgentRequest, ...]:
         """Partition canonical truth into one bounded briefing per survivor."""
 
-        options_by_actor = {
-            options.actor_id: options for options in public_request.actor_options
+        snapshot = {
+            character_id: state.current_room_id
+            for character_id, state in self.runtime.characters.items()
         }
+        private_candidates = self._npc_candidate_sets(
+            snapshot,
+            include_private_social=True,
+        )
+        options_by_actor = {
+            character_id: NpcActorActionOptions(
+                actor_id=character_id,
+                candidates=tuple(
+                    NpcActionCandidate(
+                        action_id=action_id,
+                        summary=self._npc_candidate_summary(intent),
+                    )
+                    for action_id, intent in actor_candidates
+                ),
+            )
+            for character_id, actor_candidates in private_candidates.items()
+        }
+        private_snapshot = SafeNpcTurnSnapshot(
+            turn_number=public_request.snapshot.turn_number,
+            phase=public_request.snapshot.phase,
+            public_scene_summary=public_request.snapshot.public_scene_summary,
+            public_event_summaries=tuple(
+                summary[:240]
+                for summary in public_request.snapshot.public_event_summaries[-8:]
+            ),
+        )
         requests: list[PrivateNpcAgentRequest] = []
         for character_id in sorted(options_by_actor):
             overlay = self.case.overlays[character_id]
@@ -919,29 +961,58 @@ class GameEngine:
                 (belief.suspicion for belief in runtime.beliefs.values()),
                 default=0,
             )
-            requests.append(
-                PrivateNpcAgentRequest(
+            character_summary = " ".join(briefing_parts)[:1_200]
+            runtime_state = PrivateNpcRuntimeState(
+                state_summary=state_summary,
+                urgency=urgency,
+            )
+
+            def make_request(
+                facts: tuple[PrivateNpcFact, ...],
+            ) -> PrivateNpcAgentRequest:
+                return PrivateNpcAgentRequest(
                     actor_id=character_id,
                     private_briefing=PrivateNpcBriefing(
-                        character_summary=" ".join(briefing_parts)[:1_200],
-                        private_facts=tuple(private_facts[:24]),
+                        character_summary=character_summary,
+                        private_facts=facts,
                     ),
-                    runtime_state=PrivateNpcRuntimeState(
-                        state_summary=state_summary,
-                        urgency=urgency,
-                    ),
-                    snapshot=public_request.snapshot,
+                    runtime_state=runtime_state,
+                    snapshot=private_snapshot,
                     actor_options=options_by_actor[character_id],
                 )
-            )
+
+            accepted_facts: list[PrivateNpcFact] = []
+            request = make_request(())
+            for fact in private_facts[:24]:
+                # Fill the fixed envelope without letting unusually wordy
+                # facts abort an otherwise valid player turn. Important facts
+                # remain first, including the murderer's crime truth.
+                for statement_limit in (1_000, 720, 480, 240):
+                    bounded_fact = fact.model_copy(
+                        update={"statement": fact.statement[:statement_limit]}
+                    )
+                    try:
+                        candidate = make_request(
+                            tuple((*accepted_facts, bounded_fact))
+                        )
+                    except ValueError:
+                        continue
+                    accepted_facts.append(bounded_fact)
+                    request = candidate
+                    break
+            requests.append(request)
         return tuple(requests)
 
     def _run_npc_phase(self, selected_action_ids: Mapping[str, str] | None = None) -> list[str]:
         """Resolve only engine-generated choices, with deterministic fallback."""
 
         snapshot = {character_id: state.current_room_id for character_id, state in self.runtime.characters.items()}
-        candidate_sets = self._npc_candidate_sets(snapshot)
+        candidate_sets = self._npc_candidate_sets(
+            snapshot,
+            include_private_social=True,
+        )
         public_events: list[str] = []
+        selected_social: list[tuple[str, _NpcSocialIntent]] = []
         for character_id, actor_candidates in candidate_sets.items():
             by_id = dict(actor_candidates)
             requested_id = selected_action_ids.get(character_id) if selected_action_ids else None
@@ -966,13 +1037,73 @@ class GameEngine:
                     EvidenceCondition.DESTROYED if self.runtime.turn % 2 == 0 else EvidenceCondition.CONCEALED
                 )
                 evidence.current_slot_id = None
+            if intent.social is not None:
+                selected_social.append((character_id, intent.social))
             if character.current_room_id == self.runtime.player_room_id:
                 self.runtime.player_knowledge.observed_character_room_ids[intent.character_id] = character.current_room_id
                 public_events.append(f"{self._name(intent.character_id)} is now in the room.")
-        self._resolve_private_exchanges()
+        social_participants: set[str] = set()
+        for character_id, social in selected_social:
+            if (
+                character_id in social_participants
+                or social.target_character_id in social_participants
+            ):
+                continue
+            if self._resolve_private_social_action(character_id, social):
+                social_participants.update(
+                    (character_id, social.target_character_id)
+                )
+        self._resolve_private_exchanges(
+            excluded_character_ids=social_participants
+        )
         return public_events
 
-    def _resolve_private_exchanges(self) -> None:
+    def _resolve_private_social_action(
+        self,
+        speaker_id: str,
+        social: _NpcSocialIntent,
+    ) -> bool:
+        """Apply one pre-authorized private social choice, if still possible."""
+
+        speaker = self.runtime.characters.get(speaker_id)
+        listener = self.runtime.characters.get(social.target_character_id)
+        if (
+            speaker is None
+            or listener is None
+            or not speaker.alive
+            or not listener.alive
+            or speaker.current_room_id != listener.current_room_id
+            or speaker.current_room_id == self.runtime.player_room_id
+            or len(speaker.conversation_memory) >= MAX_CONVERSATION_MEMORIES
+            or len(listener.conversation_memory) >= MAX_CONVERSATION_MEMORIES
+            or any(
+                fact_id not in speaker.known_fact_ids
+                for fact_id in social.referenced_fact_ids
+            )
+        ):
+            return False
+        memory = ConversationMemoryEntry(
+            turn=self.runtime.turn,
+            speaker_id=speaker_id,
+            listener_ids=[social.target_character_id],
+            topic=social.topic,
+            text=social.claim[:MAX_ACTION_CLAIM_LENGTH],
+            referenced_fact_ids=list(social.referenced_fact_ids),
+        )
+        speaker.conversation_memory.append(memory)
+        listener.conversation_memory.append(memory.model_copy(deep=True))
+        speaker.current_activity = "speaking privately"
+        listener.current_activity = "listening privately"
+        if social.transfers_facts:
+            listener.known_fact_ids.update(social.referenced_fact_ids)
+        self._adjust_private_suspicion(social.target_character_id, speaker_id)
+        return True
+
+    def _resolve_private_exchanges(
+        self,
+        *,
+        excluded_character_ids: set[str] | None = None,
+    ) -> None:
         """Evolve social state without transferring facts or exposing dialogue.
 
         Living NPCs in rooms away from the investigator pair once, in stable
@@ -980,6 +1111,7 @@ class GameEngine:
         emotional vocabulary, and each participant's private memory.
         """
 
+        excluded_character_ids = excluded_character_ids or set()
         occupants_by_room: dict[str, list[str]] = {}
         for character_id, character in sorted(self.runtime.characters.items()):
             if (
@@ -995,6 +1127,11 @@ class GameEngine:
             occupants = occupants_by_room[room_id]
             for index in range(0, len(occupants) - 1, 2):
                 speaker_id, listener_id = occupants[index : index + 2]
+                if (
+                    speaker_id in excluded_character_ids
+                    or listener_id in excluded_character_ids
+                ):
+                    continue
                 if any(
                     len(self.runtime.characters[participant_id].conversation_memory)
                     >= MAX_CONVERSATION_MEMORIES
@@ -1047,7 +1184,10 @@ class GameEngine:
         observer.emotional_state = "wary" if delta > 0 else "steadied"
 
     def _npc_candidate_sets(
-        self, snapshot: Mapping[str, str]
+        self,
+        snapshot: Mapping[str, str],
+        *,
+        include_private_social: bool = False,
     ) -> dict[str, tuple[tuple[str, _NpcIntent], ...]]:
         """Return finite choices with the deterministic choice first."""
 
@@ -1073,9 +1213,20 @@ class GameEngine:
                 if identity not in seen:
                     seen.add(identity)
                     unique.append(intent)
-            candidate_sets[character_id] = tuple(
+            choices: list[tuple[str, _NpcIntent]] = [
                 (f"option_{index:02d}", intent) for index, intent in enumerate(unique)
-            )
+            ]
+            if include_private_social:
+                for social in self._private_social_intents(character_id, snapshot):
+                    if len(choices) >= MAX_CANDIDATES_PER_ACTOR:
+                        break
+                    choices.append(
+                        (
+                            self._private_social_action_id(social),
+                            _NpcIntent(character_id, None, None, social),
+                        )
+                    )
+            candidate_sets[character_id] = tuple(choices)
         return candidate_sets
 
     def _npc_candidate_summary(self, intent: _NpcIntent) -> str:
@@ -1083,7 +1234,143 @@ class GameEngine:
             return f"Move by an available route to {self.location.rooms[intent.destination_room_id].name}."
         if intent.manipulate_evidence_id:
             return "Perform a currently permitted local interaction."
+        if intent.social is not None:
+            target_name = self._name(intent.social.target_character_id)
+            if intent.social.topic == "private observation":
+                return f"Privately share one known observation with {target_name}."
+            if intent.social.topic == "private alibi":
+                return f"Privately state an authored alibi to {target_name}."
+            if intent.social.topic == "private authorized claim":
+                return f"Privately make an authorized claim to {target_name}."
+            return f"Privately react guardedly to {target_name} without making a factual claim."
         return "Remain in place."
+
+    def _private_social_intents(
+        self,
+        character_id: str,
+        snapshot: Mapping[str, str],
+    ) -> tuple[_NpcSocialIntent, ...]:
+        """Build at most three actor-local claims for one unobserved pair."""
+
+        actor = self.runtime.characters[character_id]
+        actor_room_id = snapshot[character_id]
+        if (
+            not actor.alive
+            or actor_room_id == self.runtime.player_room_id
+            or len(actor.conversation_memory) >= MAX_CONVERSATION_MEMORIES
+        ):
+            return ()
+        target_id = next(
+            (
+                other_id
+                for other_id in sorted(snapshot)
+                if other_id != character_id
+                and snapshot[other_id] == actor_room_id
+                and self.runtime.characters[other_id].alive
+                and len(self.runtime.characters[other_id].conversation_memory)
+                < MAX_CONVERSATION_MEMORIES
+            ),
+            None,
+        )
+        if target_id is None:
+            return ()
+
+        overlay = self.case.overlays[character_id]
+        intents: list[_NpcSocialIntent] = []
+
+        def add(
+            topic: str,
+            claim: str,
+            fact_ids: tuple[str, ...] = (),
+            *,
+            transfers_facts: bool = False,
+        ) -> None:
+            bounded_claim = claim[:MAX_ACTION_CLAIM_LENGTH]
+            if not bounded_claim or self._private_claim_already_made(
+                character_id,
+                target_id,
+                bounded_claim,
+            ):
+                return
+            intents.append(
+                _NpcSocialIntent(
+                    target_character_id=target_id,
+                    topic=topic,
+                    claim=bounded_claim,
+                    referenced_fact_ids=fact_ids,
+                    transfers_facts=transfers_facts,
+                )
+            )
+
+        add("private alibi", overlay.alibi_claim)
+        observation = next(
+            (
+                item
+                for item in sorted(overlay.observations, key=lambda item: item.id)
+                if set(item.fact_ids) <= actor.known_fact_ids
+                and not self._private_claim_already_made(
+                    character_id,
+                    target_id,
+                    item.summary[:MAX_ACTION_CLAIM_LENGTH],
+                )
+            ),
+            None,
+        )
+        if observation is not None:
+            add(
+                "private observation",
+                observation.summary,
+                observation.fact_ids,
+                transfers_facts=True,
+            )
+        lie = next(
+            (
+                item
+                for item in sorted(overlay.lies, key=lambda item: item.id)
+                if not self._private_claim_already_made(
+                    character_id,
+                    target_id,
+                    item.claim[:MAX_ACTION_CLAIM_LENGTH],
+                )
+            ),
+            None,
+        )
+        if lie is not None:
+            add("private authorized claim", lie.claim)
+        if not intents:
+            add(
+                "private reaction",
+                f"{self._name(character_id)} remains guarded and offers no factual claim.",
+            )
+        return tuple(intents[:3])
+
+    @staticmethod
+    def _private_social_action_id(social: _NpcSocialIntent) -> str:
+        """Bind an opaque ID to the exact target and authorized semantics."""
+
+        material = "\x1f".join(
+            (
+                social.target_character_id,
+                social.topic,
+                social.claim,
+                ",".join(social.referenced_fact_ids),
+                "1" if social.transfers_facts else "0",
+            )
+        ).encode("utf-8")
+        return f"social_{hashlib.sha256(material).hexdigest()[:24]}"
+
+    def _private_claim_already_made(
+        self,
+        speaker_id: str,
+        listener_id: str,
+        claim: str,
+    ) -> bool:
+        return any(
+            memory.speaker_id == speaker_id
+            and listener_id in memory.listener_ids
+            and memory.text == claim
+            for memory in self.runtime.characters[speaker_id].conversation_memory
+        )
 
     def _plan_npc(self, character_id: str, snapshot: Mapping[str, str]) -> _NpcIntent:
         character = self.runtime.characters[character_id]

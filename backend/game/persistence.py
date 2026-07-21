@@ -127,6 +127,13 @@ def validate_runtime_state(
     weapon_ids = set(location.potential_weapons)
     slot_ids = set(location.evidence_slots)
     fact_ids = set(case.facts)
+    private_memory_topics = {
+        "private exchange",
+        "private alibi",
+        "private observation",
+        "private authorized claim",
+        "private reaction",
+    }
 
     _require_exact_keys("characters", runtime.characters, cast_ids)
     _require_exact_keys("evidence", runtime.evidence, evidence_ids)
@@ -167,13 +174,46 @@ def validate_runtime_state(
                 _fail("conversation memory occurs after the saved runtime")
             if character_id not in {memory.speaker_id, *memory.listener_ids}:
                 _fail("conversation memory is stored by a non-participant")
-            if memory.topic == "private exchange" and (
-                memory.speaker_id == victim_id
-                or len(memory.listener_ids) != 1
-                or memory.listener_ids[0] in {memory.speaker_id, victim_id, PLAYER_ID}
-                or memory.referenced_fact_ids
-            ):
-                _fail("private conversation memory is invalid")
+            if memory.topic in private_memory_topics:
+                listener_id = (
+                    memory.listener_ids[0]
+                    if len(memory.listener_ids) == 1
+                    else None
+                )
+                speaker = runtime.characters.get(memory.speaker_id)
+                listener = (
+                    runtime.characters.get(listener_id)
+                    if listener_id is not None
+                    else None
+                )
+                if (
+                    memory.speaker_id == victim_id
+                    or listener_id
+                    in {None, memory.speaker_id, victim_id, PLAYER_ID}
+                    or speaker is None
+                    or listener is None
+                    or not speaker.alive
+                    or not listener.alive
+                    or not set(memory.referenced_fact_ids)
+                    <= speaker.known_fact_ids
+                    or (
+                        memory.topic == "private observation"
+                        and (
+                            not memory.referenced_fact_ids
+                            or not set(memory.referenced_fact_ids)
+                            <= listener.known_fact_ids
+                        )
+                    )
+                    or (
+                        memory.topic != "private observation"
+                        and memory.referenced_fact_ids
+                    )
+                    or not any(
+                        counterpart == memory
+                        for counterpart in listener.conversation_memory
+                    )
+                ):
+                    _fail("private conversation memory is invalid")
 
     for evidence_id, state in runtime.evidence.items():
         if state.evidence_id != evidence_id:
