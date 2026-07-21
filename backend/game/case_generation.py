@@ -612,6 +612,7 @@ def _validate_evidence_stage(
     issues: list[str] = []
     red_herrings = 0
     implication_groups: dict[str, set[str]] = {character_id: set() for character_id in cast}
+    slot_occupancy: dict[str, int] = {}
     for key, item in stage.evidence.items():
         if key != item.id:
             issues.append(f"evidence key {key!r} differs from id {item.id!r}")
@@ -623,6 +624,18 @@ def _validate_evidence_stage(
             issues.append(f"evidence {key!r} names an unknown character")
         if item.initial_slot_id and item.initial_slot_id not in location.evidence_slots:
             issues.append(f"evidence {key!r} uses an unknown slot")
+        elif item.initial_slot_id:
+            slot_occupancy[item.initial_slot_id] = (
+                slot_occupancy.get(item.initial_slot_id, 0) + 1
+            )
+            object_id = location.evidence_slots[item.initial_slot_id].object_id
+            search_routes = {
+                route for route in item.discoverable_via if route.startswith("search:")
+            }
+            if search_routes != {f"search:{object_id}"}:
+                issues.append(
+                    f"slotted evidence {key!r} must use its containing object's search route"
+                )
         for route in item.discoverable_via:
             try:
                 route_kind, target_id = route.split(":", 1)
@@ -650,6 +663,42 @@ def _validate_evidence_stage(
         else:
             for character_id in item.implicates_character_ids:
                 implication_groups[character_id].add(item.redundancy_group)
+    for slot_id, occupancy in slot_occupancy.items():
+        if occupancy > location.evidence_slots[slot_id].capacity:
+            issues.append(f"evidence slot {slot_id!r} exceeds its capacity")
+
+    def evidence_closure(start_ids: set[str]) -> set[str]:
+        closure: set[str] = set()
+        pending = list(start_ids)
+        while pending:
+            evidence_id = pending.pop()
+            if evidence_id in closure or evidence_id not in stage.evidence:
+                continue
+            closure.add(evidence_id)
+            pending.extend(stage.evidence[evidence_id].prerequisite_evidence_ids)
+        return closure
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def has_prerequisite_cycle(evidence_id: str) -> bool:
+        if evidence_id in visiting:
+            return True
+        if evidence_id in visited:
+            return False
+        visiting.add(evidence_id)
+        if any(
+            prerequisite_id in stage.evidence
+            and has_prerequisite_cycle(prerequisite_id)
+            for prerequisite_id in stage.evidence[evidence_id].prerequisite_evidence_ids
+        ):
+            return True
+        visiting.remove(evidence_id)
+        visited.add(evidence_id)
+        return False
+
+    if any(has_prerequisite_cycle(evidence_id) for evidence_id in sorted(evidence_ids)):
+        issues.append("evidence prerequisites must not contain a cycle")
     if not 2 <= red_herrings <= 4:
         issues.append("evidence must contain 2 to 4 explained red herrings")
     solution = stage.solution
@@ -691,29 +740,103 @@ def _validate_evidence_stage(
         issues.append(
             "non-red-herring evidence does not uniquely support the culprit across enough groups"
         )
-    route_supports: list[tuple[set[str], set[str], set[str]]] = []
+    allowed_by_axis = {
+        "method": set(solution.method_evidence_ids),
+        "motive": set(solution.motive_evidence_ids),
+        "opportunity": set(solution.opportunity_evidence_ids),
+    }
+    allowed_timeline_facts = set(solution.timeline_fact_ids)
+    route_supports: list[tuple[set[str], set[str]]] = []
+    route_ids: set[str] = set()
     for route in solution.evidence_routes:
-        route_evidence = (
-            set(route.method_evidence_ids)
-            | set(route.motive_evidence_ids)
-            | set(route.opportunity_evidence_ids)
+        if route.id in route_ids:
+            issues.append(f"duplicate evidence route id {route.id!r}")
+        route_ids.add(route.id)
+        route_axis_sets = (
+            set(route.method_evidence_ids),
+            set(route.motive_evidence_ids),
+            set(route.opportunity_evidence_ids),
         )
+        if any(
+            len(values) != len(set(values))
+            for values in (
+                route.method_evidence_ids,
+                route.motive_evidence_ids,
+                route.opportunity_evidence_ids,
+                route.timeline_fact_ids,
+            )
+        ):
+            issues.append(f"evidence route {route.id!r} repeats a reference")
+        if any(
+            route_axis_sets[left] & route_axis_sets[right]
+            for left, right in ((0, 1), (0, 2), (1, 2))
+        ):
+            issues.append(f"evidence route {route.id!r} reuses evidence across axes")
+        for axis, route_ids_for_axis in zip(
+            ("method", "motive", "opportunity"),
+            route_axis_sets,
+            strict=True,
+        ):
+            if route_ids_for_axis - allowed_by_axis[axis]:
+                issues.append(
+                    f"evidence route {route.id!r} uses support outside the {axis} solution axis"
+                )
+        if set(route.timeline_fact_ids) - allowed_timeline_facts:
+            issues.append(
+                f"evidence route {route.id!r} uses timeline facts outside the solution"
+            )
+        route_evidence = set().union(*route_axis_sets)
         if route_evidence - evidence_ids or set(route.timeline_fact_ids) - facts:
             issues.append(f"evidence route {route.id!r} names unknown support")
+        closure = evidence_closure(route_evidence)
+        supported_facts = {
+            fact_id
+            for evidence_id in closure
+            for fact_id in stage.evidence[evidence_id].fact_ids
+        }
+        if not set(route.timeline_fact_ids) <= supported_facts:
+            issues.append(
+                f"evidence route {route.id!r} does not support its timeline facts"
+            )
+        route_implication_groups: dict[str, set[str]] = {
+            character_id: set() for character_id in cast
+        }
+        for evidence_id in closure:
+            item = stage.evidence[evidence_id]
+            if item.is_red_herring:
+                issues.append(f"evidence route {route.id!r} contains a red herring")
+                continue
+            if core.murder.murderer_id in item.exonerates_character_ids:
+                issues.append(f"evidence route {route.id!r} exonerates the culprit")
+            for character_id in item.implicates_character_ids:
+                route_implication_groups[character_id].add(item.redundancy_group)
+        route_culprit_score = len(
+            route_implication_groups[core.murder.murderer_id]
+        )
+        route_rival_score = max(
+            (
+                len(route_implication_groups[character_id])
+                for character_id in cast - {core.murder.murderer_id}
+            ),
+            default=0,
+        )
+        if route_culprit_score < 2 or route_culprit_score <= route_rival_score:
+            issues.append(
+                f"evidence route {route.id!r} does not uniquely support the culprit"
+            )
         route_supports.append(
             (
-                route_evidence,
+                closure,
                 {
                     stage.evidence[evidence_id].redundancy_group
-                    for evidence_id in route_evidence
+                    for evidence_id in closure
                     if evidence_id in stage.evidence
                 },
-                set(route.timeline_fact_ids),
             )
         )
     for left_index, left in enumerate(route_supports):
         for right in route_supports[left_index + 1 :]:
-            if left[0] & right[0] or left[1] & right[1] or left[2] & right[2]:
+            if left[0] & right[0] or left[1] & right[1]:
                 issues.append("independent evidence routes must not overlap")
                 break
     _reject_stage("evidence", issues)

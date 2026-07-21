@@ -93,8 +93,14 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     settings = manifest.get("runtime_settings")
     if not isinstance(settings, Mapping) or settings.get("reasoning_effort") != "high":
         raise ExperimentSafetyError("Both model cells require reasoning_effort=high.")
-    if settings.get("generation_attempt_limit") != 3 or settings.get("concurrency") != 1:
-        raise ExperimentSafetyError("Generation is limited to three attempts and sequential calls.")
+    if (
+        settings.get("candidate_pipeline_limit") != 1
+        or settings.get("stage_attempt_limit") != 3
+        or settings.get("concurrency") != 1
+    ):
+        raise ExperimentSafetyError(
+            "Generation is limited to one candidate pipeline, three repairs per stage, and sequential calls."
+        )
     if dict(settings.get("sampler_defaults", {})) != {"top_p": 0.95, "top_k": None}:
         raise ExperimentSafetyError("Identical sampler defaults are required.")
     expected_roles = {

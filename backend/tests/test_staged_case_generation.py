@@ -196,6 +196,32 @@ async def test_malformed_evidence_stage_stops_downstream_and_never_admits_partia
 
 
 @pytest.mark.asyncio
+async def test_cross_axis_evidence_route_is_rejected_before_overlay_spend() -> None:
+    source = load_case("ashwick_sample")
+    payloads = _stage_payloads()
+    solution = payloads["case_generation_evidence"]["solution"]
+    assert isinstance(solution, dict)
+    routes = solution["evidence_routes"]
+    assert isinstance(routes, list)
+    routes[0]["method_evidence_ids"] = deepcopy(routes[0]["motive_evidence_ids"])
+    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
+
+    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
+        await generate_validated_scenario(
+            llm,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=907,
+            max_attempts=1,
+        )
+
+    assert _roles(llm) == [
+        "case_generation_core",
+        "case_generation_evidence",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_overlay_stage_requires_the_exact_selected_cast_before_presentation() -> None:
     source = load_case("ashwick_sample")
     payloads = _stage_payloads()

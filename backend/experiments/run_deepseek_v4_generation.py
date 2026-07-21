@@ -74,7 +74,7 @@ def _persist_candidate_attempts(
         request_record = observer.records[index] if index < len(observer.records) else {}
         records.append(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "experiment_revision": int(manifest["manifest_revision"]),
                 "git_sha": git_sha,
                 "pair_id": pair_id,
@@ -82,8 +82,9 @@ def _persist_candidate_attempts(
                 "model": EXPECTED_MODELS[model_key],
                 "prompt_revision": manifest["prompt_revision"],
                 "schema_revision": manifest["schema_revision"],
+                "candidate_attempt": 1,
                 "stage": diagnostic.get("stage"),
-                "attempt": diagnostic["attempt"],
+                "stage_attempt": diagnostic["attempt"],
                 "admission_result": diagnostic["result"],
                 "failure_category": diagnostic.get("failure_category"),
                 "failure_code": diagnostic.get("failure_code"),
@@ -234,7 +235,13 @@ async def run_generation_matrix(
                 outcome.update(
                     {
                         "admitted": False,
-                        "attempts": len(attempt_records),
+                        "candidate_attempts": 1,
+                        "stage_requests": len(attempt_records),
+                        "failed_stage": (
+                            attempt_records[-1].get("stage")
+                            if attempt_records
+                            else None
+                        ),
                         "failure_code": error.code,
                         "measured_external_cost_usd": _money_total(observer.records),
                     }
@@ -260,7 +267,8 @@ async def run_generation_matrix(
                 outcome.update(
                     {
                         "admitted": True,
-                        "attempts": len(attempt_records),
+                        "candidate_attempts": 1,
+                        "stage_requests": len(attempt_records),
                         "case_id": service.engine.case.id,
                         "case_fingerprint": fingerprint,
                         "canonical_artifact": str(canonical_path.relative_to(artifact_root)),

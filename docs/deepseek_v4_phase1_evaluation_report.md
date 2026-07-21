@@ -26,7 +26,7 @@ The owner supplied a separate direct DeepSeek development key. Revision 6 has re
 - Reasoning effort: high for both models. DeepSeek documents `temperature` and `top_p` as ignored in thinking mode, so revision 4 omits them from direct requests while retaining the frozen values as historical cross-route metadata.
 - Three predeclared paired seeds and casts, alternating Flash/Pro order.
 - One predeclared balanced reserve pair, usable only under its manifest rule.
-- Maximum three attempts per stage with identical Pro/Flash limits: 20,000 core, 20,000 evidence/solution, 24,000 overlays, and 8,000 public presentation tokens. Calls remain sequential and stop before downstream stages when an upstream stage exhausts its attempts.
+- One candidate pipeline per model/case cell, with maximum three attempts per stage and identical Pro/Flash limits: 20,000 core, 20,000 evidence/solution, 24,000 overlays, and 8,000 public presentation tokens. Calls remain sequential and stop before downstream stages when an upstream stage exhausts its attempts. Reports distinguish candidate pipelines from chargeable stage requests.
 - Soft stop USD 8.50; hard operational stop USD 9.50; USD 0.50 uncertainty reserve.
 - Reservation ceilings are USD 5/M input and USD 10/M output for both models. On 2026-07-22 the direct DeepSeek endpoint advertised USD 0.14/M input and USD 0.28/M output for Flash, and USD 0.435/M input and USD 0.87/M output for Pro.
 - Crossed runtime cells select the first admitted Pro case and first admitted Flash case in manifest order, never subjective favourites.
@@ -58,7 +58,7 @@ Generation quality, NPC quality, latency, cache behaviour, cost per case/turn/in
 
 ```text
 python -m pytest backend\tests -q -p no:cacheprovider
-380 passed, 20 warnings
+381 passed, 20 warnings
 
 npm.cmd test -- --test-reporter=spec
 16 passed

@@ -57,7 +57,8 @@ def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     assert manifest["models"] == EXPECTED_MODELS
     assert manifest["provider_routing"] is EXPECTED_ROUTING is None
     assert manifest["runtime_settings"]["reasoning_effort"] == "high"
-    assert manifest["runtime_settings"]["generation_attempt_limit"] == 3
+    assert manifest["runtime_settings"]["candidate_pipeline_limit"] == 1
+    assert manifest["runtime_settings"]["stage_attempt_limit"] == 3
     assert manifest["runtime_settings"]["roles"] == {
         "case_generation_core": {"max_tokens": 20_000, "temperature": 0.55, "json_mode": True},
         "case_generation_evidence": {"max_tokens": 20_000, "temperature": 0.55, "json_mode": True},

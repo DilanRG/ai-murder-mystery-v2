@@ -159,7 +159,8 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
 
     assert [outcome["model_key"] for outcome in outcomes] == pair["model_order"]
     assert all(outcome["admitted"] is True for outcome in outcomes)
-    assert all(outcome["attempts"] == 4 for outcome in outcomes)
+    assert all(outcome["candidate_attempts"] == 1 for outcome in outcomes)
+    assert all(outcome["stage_requests"] == 4 for outcome in outcomes)
     assert all(len(outcome["case_fingerprint"]) == 64 for outcome in outcomes)
     assert all((tmp_path / outcome["canonical_artifact"]).is_file() for outcome in outcomes)
     progress = json.loads((tmp_path / "generation_results.json").read_text(encoding="utf-8"))
@@ -212,7 +213,9 @@ def test_generation_matrix_counts_three_rejected_candidates_without_outer_retry(
 
     assert len(outcomes) == 2
     assert all(outcome["admitted"] is False for outcome in outcomes)
-    assert all(outcome["attempts"] == 3 for outcome in outcomes)
+    assert all(outcome["candidate_attempts"] == 1 for outcome in outcomes)
+    assert all(outcome["stage_requests"] == 3 for outcome in outcomes)
+    assert all(outcome["failed_stage"] == "case_generation_core" for outcome in outcomes)
     assert all(outcome["failure_code"] == "invalid_generated_case" for outcome in outcomes)
     assert len((tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()) == 6
     attempts = [
@@ -224,6 +227,8 @@ def test_generation_matrix_counts_three_rejected_candidates_without_outer_retry(
     assert len(attempts) == 6
     assert all(record["failure_category"] == "malformed_json" for record in attempts)
     assert [record["repair_feedback_used"] for record in attempts[:3]] == [False, True, True]
+    assert all(record["candidate_attempt"] == 1 for record in attempts)
+    assert [record["stage_attempt"] for record in attempts[:3]] == [1, 2, 3]
 
 
 def test_generation_matrix_refuses_unverified_revision_before_building_client(
