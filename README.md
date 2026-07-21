@@ -1,5 +1,7 @@
 # The Ashwick Trust
 
+[![Verify packaged game](https://github.com/DilanRG/ai-murder-mystery/actions/workflows/verify-packages.yml/badge.svg)](https://github.com/DilanRG/ai-murder-mystery/actions/workflows/verify-packages.yml)
+
 A local-first, turn-based murder mystery in which the rules engine owns the truth and AI is an optional performance layer. Investigate Ashwick Manor, interview its inhabitants, reconcile evidence and testimony, then make a supported accusation before time expires.
 
 The current build is a complete playable vertical slice. It needs no API key and does not send case truth to a model.
