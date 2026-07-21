@@ -14,10 +14,11 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Literal, Mapping
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError, model_validator
 
 from game.accusation import evaluate_accusation_support
 from game.models import (
+    ActionHistoryEntry,
     CaseDefinition,
     EvidenceCondition,
     GamePhase,
@@ -33,7 +34,10 @@ from game.recipes import (
 )
 
 
-SAVE_SCHEMA_VERSION = 1
+SAVE_SCHEMA_VERSION = 2
+LEGACY_SAVE_SCHEMA_VERSION = 1
+RUNTIME_SCHEMA_VERSION = 1
+MAX_ACTION_HISTORY = 1_024
 PLAYER_ID = "player"
 
 
@@ -44,11 +48,21 @@ class SaveValidationError(ValueError):
 class SaveEnvelope(StrictModel):
     """Portable save document with no authored ground truth embedded in it."""
 
-    schema_version: Literal[1] = SAVE_SCHEMA_VERSION
+    schema_version: Literal[1, 2] = SAVE_SCHEMA_VERSION
     case_id: str
     location_id: str
     case_recipe: CaseRecipeSelection | None = None
+    action_history: list[ActionHistoryEntry] | None = Field(
+        default=None,
+        max_length=MAX_ACTION_HISTORY,
+    )
     runtime: WorldRuntimeState
+
+    @model_validator(mode="after")
+    def require_v2_history(self) -> "SaveEnvelope":
+        if self.schema_version == SAVE_SCHEMA_VERSION and self.action_history is None:
+            raise ValueError("save schema v2 requires action history")
+        return self
 
 
 def _fail(message: str) -> None:
@@ -78,7 +92,7 @@ def validate_runtime_state(
     source, so a hand-edited save cannot inject or remove an entity.
     """
 
-    if runtime.schema_version != SAVE_SCHEMA_VERSION:
+    if runtime.schema_version != RUNTIME_SCHEMA_VERSION:
         _fail("unsupported runtime schema version")
     if runtime.case_id != case.id or runtime.seed != case.seed:
         _fail("runtime does not belong to the requested authored case")
@@ -128,6 +142,17 @@ def validate_runtime_state(
                 _fail("conversation memory has an unknown speaker")
             _require_subset("conversation listeners", memory.listener_ids, cast_ids | {PLAYER_ID})
             _require_subset("conversation facts", memory.referenced_fact_ids, fact_ids)
+            if memory.turn > runtime.turn:
+                _fail("conversation memory occurs after the saved runtime")
+            if character_id not in {memory.speaker_id, *memory.listener_ids}:
+                _fail("conversation memory is stored by a non-participant")
+            if memory.topic == "private exchange" and (
+                memory.speaker_id == victim_id
+                or len(memory.listener_ids) != 1
+                or memory.listener_ids[0] in {memory.speaker_id, victim_id, PLAYER_ID}
+                or memory.referenced_fact_ids
+            ):
+                _fail("private conversation memory is invalid")
 
     for evidence_id, state in runtime.evidence.items():
         if state.evidence_id != evidence_id:
@@ -259,6 +284,12 @@ def validate_runtime_state(
             _fail("discovery phase cannot have an interview or result")
     elif runtime.phase == GamePhase.INVESTIGATION and runtime.result is not None:
         _fail("investigation phase cannot contain a final result")
+    elif (
+        runtime.phase == GamePhase.ENDED
+        and runtime.result is None
+        and runtime.turn < case.max_turns
+    ):
+        _fail("game ended before timeout without an accusation result")
 
 
 def validate_save_envelope(
@@ -272,7 +303,10 @@ def validate_save_envelope(
         envelope = value if isinstance(value, SaveEnvelope) else SaveEnvelope.model_validate(value)
     except ValidationError as error:
         raise SaveValidationError("save document does not match the supported schema") from error
-    if envelope.schema_version != SAVE_SCHEMA_VERSION:
+    if envelope.schema_version not in {
+        LEGACY_SAVE_SCHEMA_VERSION,
+        SAVE_SCHEMA_VERSION,
+    }:
         _fail("unsupported save schema version")
     if envelope.case_id != case.id or envelope.location_id != location.id:
         _fail("save references different authored content")
@@ -291,16 +325,50 @@ def validate_save_envelope(
         if resolved != selection:
             _fail("saved recipe selection is not reproducible")
     validate_runtime_state(envelope.runtime, case, location)
+    if envelope.schema_version == SAVE_SCHEMA_VERSION:
+        assert envelope.action_history is not None
+        from game.engine import GameEngine
+
+        replay = GameEngine(
+            case,
+            location,
+            recipe_selection=envelope.case_recipe,
+        )
+        for entry in envelope.action_history:
+            try:
+                result = replay.apply(
+                    entry.intent,
+                    npc_action_ids=entry.npc_action_ids,
+                )
+            except (TypeError, ValueError, ValidationError) as error:
+                raise SaveValidationError(
+                    "save action history contains an invalid command"
+                ) from error
+            if not result.accepted:
+                _fail("save action history contains a rejected command")
+        if replay.runtime != envelope.runtime:
+            _fail("save runtime does not match its action history")
     return envelope
 
 
 def snapshot_engine(engine: Any) -> SaveEnvelope:
     """Create a validated envelope from a ``GameEngine`` without copying truth."""
 
+    history = getattr(engine, "action_history", None)
     envelope = SaveEnvelope(
+        schema_version=(
+            SAVE_SCHEMA_VERSION
+            if history is not None
+            else LEGACY_SAVE_SCHEMA_VERSION
+        ),
         case_id=engine.case.id,
         location_id=engine.location.id,
         case_recipe=engine.recipe_selection,
+        action_history=(
+            [entry.model_copy(deep=True) for entry in history]
+            if history is not None
+            else None
+        ),
         runtime=engine.runtime.model_copy(deep=True),
     )
     return validate_save_envelope(envelope, engine.case, engine.location)
@@ -319,6 +387,11 @@ def restore_engine(
 
     engine = GameEngine(case, location, recipe_selection=envelope.case_recipe)
     engine.runtime = envelope.runtime.model_copy(deep=True)
+    engine.action_history = (
+        [entry.model_copy(deep=True) for entry in envelope.action_history]
+        if envelope.action_history is not None
+        else None
+    )
     return engine
 
 
@@ -345,7 +418,10 @@ def write_save(engine: Any, save_root: Path | str, filename: str) -> Path:
     destination = safe_save_path(save_root, filename)
     envelope = snapshot_engine(engine)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(envelope.model_dump(mode="json"), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    document = envelope.model_dump(mode="json")
+    if envelope.schema_version == LEGACY_SAVE_SCHEMA_VERSION:
+        document.pop("action_history", None)
+    payload = json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     temporary_name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(

@@ -8,7 +8,7 @@ state and from player-visible knowledge. API routes must never serialize a
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -66,6 +66,14 @@ class FrozenModel(StrictModel):
         if extra:
             object.__setattr__(self, "__pydantic_extra__", _deep_freeze(extra))
         return self
+
+
+MAX_NOTEBOOK_RECORDS = 128
+MAX_ACTION_ID_REFERENCES = 64
+MAX_ACTION_CLAIM_LENGTH = 2_000
+MAX_CONVERSATION_MEMORIES = 256
+BoundedNote = Annotated[str, Field(min_length=1, max_length=1_000)]
+BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=100)]
 
 
 class CharacterRole(str, Enum):
@@ -517,17 +525,17 @@ class CaseDefinition(FrozenModel):
 class BeliefState(StrictModel):
     subject_character_id: str
     suspicion: int = Field(default=0, ge=0, le=100)
-    reason_fact_ids: list[str] = Field(default_factory=list)
-    summary: str = ""
+    reason_fact_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
+    summary: str = Field(default="", max_length=240)
 
 
 class ConversationMemoryEntry(StrictModel):
     turn: int = Field(ge=0)
     speaker_id: str
-    listener_ids: list[str]
-    topic: str
-    text: str
-    referenced_fact_ids: list[str] = Field(default_factory=list)
+    listener_ids: list[str] = Field(max_length=8)
+    topic: str = Field(max_length=80)
+    text: str = Field(max_length=MAX_ACTION_CLAIM_LENGTH)
+    referenced_fact_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
 
 
 class CharacterRuntimeState(StrictModel):
@@ -536,13 +544,16 @@ class CharacterRuntimeState(StrictModel):
     current_room_id: str
     current_activity: str = "waiting"
     emotional_state: str = "guarded"
-    beliefs: dict[str, BeliefState] = Field(default_factory=dict)
+    beliefs: dict[str, BeliefState] = Field(default_factory=dict, max_length=8)
     known_fact_ids: set[str] = Field(default_factory=set)
     statement_ids_heard: set[str] = Field(default_factory=set)
     known_evidence_ids: set[str] = Field(default_factory=set)
     inventory_item_ids: list[str] = Field(default_factory=list)
     intentions: list[str] = Field(default_factory=list)
-    conversation_memory: list[ConversationMemoryEntry] = Field(default_factory=list)
+    conversation_memory: list[ConversationMemoryEntry] = Field(
+        default_factory=list,
+        max_length=MAX_CONVERSATION_MEMORIES,
+    )
 
 
 class EvidenceRuntimeState(StrictModel):
@@ -585,26 +596,26 @@ class StatementRecord(StrictModel):
     turn: int = Field(ge=0)
     minute: int = Field(ge=0)
     speaker_id: str
-    audience_ids: list[str]
-    topic: str
-    claim: str
-    referenced_fact_ids: list[str] = Field(default_factory=list)
+    audience_ids: list[str] = Field(max_length=8)
+    topic: str = Field(max_length=80)
+    claim: str = Field(max_length=MAX_ACTION_CLAIM_LENGTH)
+    referenced_fact_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
     source: str = "dialogue"
 
 
 class PlayerTimelineEntry(StrictModel):
     id: str
     minute: int | None = Field(default=None, ge=0)
-    text: str
-    source_ids: list[str] = Field(default_factory=list)
-    player_note: str = ""
+    text: str = Field(max_length=1_000)
+    source_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
+    player_note: str = Field(default="", max_length=1_000)
 
 
 class ContradictionRecord(StrictModel):
     id: str
     left_statement_id: str
     right_statement_id: str
-    note: str = ""
+    note: str = Field(default="", max_length=1_000)
     confirmed: bool = False
 
 
@@ -613,10 +624,10 @@ class PlayerKnowledgeState(StrictModel):
     observed_character_room_ids: dict[str, str] = Field(default_factory=dict)
     known_fact_ids: set[str] = Field(default_factory=set)
     discovered_evidence_ids: set[str] = Field(default_factory=set)
-    statements: list[StatementRecord] = Field(default_factory=list)
-    timeline: list[PlayerTimelineEntry] = Field(default_factory=list)
-    contradictions: list[ContradictionRecord] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
+    statements: list[StatementRecord] = Field(default_factory=list, max_length=MAX_NOTEBOOK_RECORDS)
+    timeline: list[PlayerTimelineEntry] = Field(default_factory=list, max_length=MAX_NOTEBOOK_RECORDS)
+    contradictions: list[ContradictionRecord] = Field(default_factory=list, max_length=MAX_NOTEBOOK_RECORDS)
+    notes: list[BoundedNote] = Field(default_factory=list, max_length=MAX_NOTEBOOK_RECORDS)
     unread_item_ids: set[str] = Field(default_factory=set)
 
 
@@ -645,16 +656,26 @@ class GameResult(StrictModel):
     accused_character_id: str
     correct_culprit: bool
     support_score: int = Field(ge=0, le=3)
-    submitted_method: str
-    submitted_motive: str
-    submitted_timeline: str
+    submitted_method: str = Field(max_length=MAX_ACTION_CLAIM_LENGTH)
+    submitted_motive: str = Field(max_length=MAX_ACTION_CLAIM_LENGTH)
+    submitted_timeline: str = Field(max_length=MAX_ACTION_CLAIM_LENGTH)
     method_supported: bool = False
     motive_supported: bool = False
     timeline_supported: bool = False
     solved: bool
-    selected_evidence_ids: list[str]
-    selected_timeline_fact_ids: list[str]
-    summary: str
+    selected_evidence_ids: list[str] = Field(max_length=MAX_ACTION_ID_REFERENCES)
+    selected_timeline_fact_ids: list[str] = Field(max_length=MAX_ACTION_ID_REFERENCES)
+    summary: str = Field(max_length=500)
+
+
+class ActionHistoryEntry(StrictModel):
+    """One accepted state-changing command plus its bounded NPC selections."""
+
+    intent: dict[str, Any] = Field(max_length=16)
+    npc_action_ids: dict[BoundedIdentifier, BoundedIdentifier] | None = Field(
+        default=None,
+        max_length=8,
+    )
 
 
 class WorldRuntimeState(StrictModel):

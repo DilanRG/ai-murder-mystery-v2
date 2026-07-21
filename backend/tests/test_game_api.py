@@ -163,16 +163,18 @@ def test_save_load_and_debrief_gating(tmp_path):
         client.post("/api/game/new", json={})
         assert client.get("/api/game/debrief").status_code == 400
 
-        saved = client.post("/api/game/saves/v1", json={"filename": "ashwick.json"})
+        saved = client.post("/api/game/saves/v2", json={"filename": "ashwick.json"})
         assert saved.status_code == 200
+        assert saved.json()["schema_version"] == 2
         assert saved.json()["filename"] == "ashwick.json"
-        friendly = client.post("/api/game/saves/v1", json={"filename": "second-slot"})
+        friendly = client.post("/api/game/saves/v2", json={"filename": "second-slot"})
         assert friendly.status_code == 200
         assert friendly.json()["filename"] == "second-slot.json"
-        assert client.get("/api/game/saves/v1").json()["saves"] == ["ashwick.json", "second-slot.json"]
+        assert client.get("/api/game/saves/v2").json()["saves"] == ["ashwick.json", "second-slot.json"]
+        assert client.get("/api/game/saves/v1").json()["schema_version"] == 2
 
         client.post("/api/game/action", json={"kind": "advance_opening"})
-        loaded = client.post("/api/game/saves/v1/ashwick.json/load")
+        loaded = client.post("/api/game/saves/v2/ashwick.json/load")
         assert loaded.status_code == 200
         assert loaded.json()["game"]["phase"] == "discovery"
 

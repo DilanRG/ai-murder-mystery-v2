@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 
 from game.actions import InterviewExchangeIntent, parse_player_intent
-from game.persistence import SaveValidationError
+from game.persistence import SAVE_SCHEMA_VERSION, SaveValidationError
 from game.recipes import MAX_RECIPE_SEED
 from game.service import DEFAULT_CASE_ID, DEFAULT_LOCATION_ID
 
@@ -130,28 +130,31 @@ async def action(payload: dict[str, Any]) -> dict[str, object]:
     return result
 
 
-@router.get("/saves/v1")
+@router.get("/saves/v2")
+@router.get("/saves/v1", include_in_schema=False)
 async def list_saves() -> dict[str, object]:
-    return {"schema_version": 1, "saves": _service().list_saves()}
+    return {"schema_version": SAVE_SCHEMA_VERSION, "saves": _service().list_saves()}
 
 
-@router.post("/saves/v1")
+@router.post("/saves/v2")
+@router.post("/saves/v1", include_in_schema=False)
 async def save_game(request: SaveRequest) -> dict[str, object]:
     try:
         filename = _service().save(request.filename)
     except (SaveValidationError, ValueError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return {"schema_version": 1, "status": "saved", "filename": filename}
+    return {"schema_version": SAVE_SCHEMA_VERSION, "status": "saved", "filename": filename}
 
 
-@router.post("/saves/v1/{filename}/load")
+@router.post("/saves/v2/{filename}/load")
+@router.post("/saves/v1/{filename}/load", include_in_schema=False)
 async def load_game(filename: str) -> dict[str, object]:
     try:
         game = await _service().load_async(filename)
     except (SaveValidationError, ValueError, FileNotFoundError) as error:
         raise _not_found_or_bad_request(error) from error
     return {
-        "schema_version": 1,
+        "schema_version": SAVE_SCHEMA_VERSION,
         "status": "loaded",
         "game": game.model_dump(mode="json"),
         "recipe": _service().recipe_metadata(),

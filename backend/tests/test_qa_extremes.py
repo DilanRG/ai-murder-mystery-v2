@@ -199,6 +199,34 @@ def test_interview_and_accusation_extremes_stay_controlled(tmp_path: Path) -> No
         assert repeated.status_code == 200 and repeated.json()["accepted"] is False
 
 
+def test_huge_accusation_fields_and_id_lists_reject_before_state_mutation(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _start_investigation(client)
+        before = _state(client)
+        payloads = (
+            {
+                "kind": "accuse",
+                "character_id": "edgar_blackwood",
+                "method": "x" * 2_001,
+            },
+            {
+                "kind": "accuse",
+                "character_id": "edgar_blackwood",
+                "evidence_ids": ["ev_library_poker"] * 65,
+            },
+            {
+                "kind": "add_timeline_entry",
+                "text": "too many sources",
+                "source_ids": ["future_fact"] * 65,
+            },
+        )
+        for payload in payloads:
+            response = client.post("/api/game/action", json=payload)
+            assert response.status_code == 422
+            _assert_no_truth(response.json())
+            assert _state(client) == before
+
+
 @pytest.mark.parametrize("message", ["", "q" * 10_000])
 def test_rejected_interview_text_never_consumes_hidden_session_state(tmp_path: Path, message: str) -> None:
     """Validation failures must precede any canonical statement/session mutation."""

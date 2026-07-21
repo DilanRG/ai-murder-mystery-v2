@@ -10,8 +10,8 @@ The current build is a complete playable vertical slice. It needs no API key and
 - Eight Character Card V3 characters plus a local JSON import, validation, draft, and export editor.
 - Discovery, room-to-room investigation, body examination, searches, evidence review, and limited interviews.
 - A sourced notebook with facts, notes, timeline entries, contradictions, and suspects.
-- Ten-minute deterministic turns with NPC activity resolved from one immutable turn-start snapshot.
-- Versioned local JSON saves, safe resume, timeout, supported accusation, and post-game debrief.
+- Ten-minute deterministic turns with NPC activity resolved from one immutable turn-start snapshot, including bounded private exchanges and evolving suspicion.
+- Replay-verified v2 local JSON saves, safe legacy-v1 resume, timeout, supported accusation, and post-game debrief.
 - Optional OpenRouter dialogue portrayal and NPC intent selection, both constrained to choices the engine has already authorized.
 - Distinct, versioned noir portrait placeholders for the full cast, with accessible text fallbacks.
 - Responsive desktop and mobile browser UI.
@@ -44,7 +44,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 .\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
 ```
 
-The 124-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, recipe reproducibility, persistence and tamper checks, constrained-AI boundaries, concurrent cancellation, and adversarial input/state-atomicity cases.
+The 133-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
 
 ## Optional AI layer
 

@@ -6,7 +6,11 @@ from typing import Annotated, Literal, Union
 
 from pydantic import AliasChoices, Field, TypeAdapter, field_validator
 
-from game.models import StrictModel
+from game.models import (
+    MAX_ACTION_CLAIM_LENGTH,
+    MAX_ACTION_ID_REFERENCES,
+    StrictModel,
+)
 
 
 class PlayerIntentBase(StrictModel):
@@ -84,7 +88,7 @@ class AddTimelineEntryIntent(PlayerIntentBase):
     kind: Literal["add_timeline_entry"] = "add_timeline_entry"
     text: str = Field(min_length=1, max_length=1_000)
     minute: int | None = Field(default=None, ge=0)
-    source_ids: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
 
 
 class MarkContradictionIntent(PlayerIntentBase):
@@ -101,16 +105,17 @@ class AccuseIntent(PlayerIntentBase):
     )
     evidence_ids: list[str] = Field(
         default_factory=list,
+        max_length=MAX_ACTION_ID_REFERENCES,
         validation_alias=AliasChoices("evidence_ids", "selected_evidence_ids"),
     )
-    method: str = ""
-    motive: str = ""
-    timeline: str = ""
-    method_evidence_ids: list[str] = Field(default_factory=list)
-    motive_evidence_ids: list[str] = Field(default_factory=list)
-    opportunity_evidence_ids: list[str] = Field(default_factory=list)
-    timeline_evidence_ids: list[str] = Field(default_factory=list)
-    timeline_fact_ids: list[str] = Field(default_factory=list)
+    method: str = Field(default="", max_length=MAX_ACTION_CLAIM_LENGTH)
+    motive: str = Field(default="", max_length=MAX_ACTION_CLAIM_LENGTH)
+    timeline: str = Field(default="", max_length=MAX_ACTION_CLAIM_LENGTH)
+    method_evidence_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
+    motive_evidence_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
+    opportunity_evidence_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
+    timeline_evidence_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
+    timeline_fact_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
 
 
 # ``AccusationIntent`` reads more naturally at call sites while preserving the

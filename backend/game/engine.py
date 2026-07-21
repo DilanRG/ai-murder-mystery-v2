@@ -25,6 +25,8 @@ from game.actions import (
 )
 from game.accusation import evaluate_accusation_support
 from game.models import (
+    ActionHistoryEntry,
+    BeliefState,
     CaseDefinition,
     CharacterRuntimeState,
     ConversationMemoryEntry,
@@ -36,6 +38,8 @@ from game.models import (
     GameResult,
     ItemRuntimeState,
     LocationPackage,
+    MAX_CONVERSATION_MEMORIES,
+    MAX_NOTEBOOK_RECORDS,
     SearchableObjectRuntimeState,
     StatementRecord,
     PlayerTimelineEntry,
@@ -104,6 +108,7 @@ class GameEngine:
         self.case = case
         self.location = location
         self.recipe_selection = recipe_selection
+        self.action_history: list[ActionHistoryEntry] | None = []
         self.runtime = self._initial_runtime()
 
     @classmethod
@@ -128,6 +133,20 @@ class GameEngine:
                 ),
                 current_activity=("dead" if character_id == self.case.murder.victim_id else "at the opening meeting"),
                 emotional_state=self.case.overlays[character_id].initial_emotional_state,
+                beliefs=(
+                    {
+                        subject_id: BeliefState(
+                            subject_character_id=subject_id,
+                            suspicion=suspicion,
+                            summary="Authored initial suspicion.",
+                        )
+                        for subject_id, suspicion in self.case.overlays[
+                            character_id
+                        ].initial_suspicions.items()
+                    }
+                    if character_id != self.case.murder.victim_id
+                    else {}
+                ),
                 # Related-character links are validation metadata, not a grant
                 # of omniscience.  Runtime knowledge starts only with authored
                 # observations and facts the overlay explicitly says this NPC
@@ -285,11 +304,26 @@ class GameEngine:
         before resolving them; absent or stale IDs fall back deterministically.
         """
 
-        return self._apply(
-            intent,
+        command = parse_player_intent(intent) if isinstance(intent, dict) else intent
+        result = self._apply(
+            command,
             npc_action_ids=npc_action_ids,
             defer_npc_phase=False,
         )
+        if (
+            result.accepted
+            and not isinstance(command, ReviewNotebookIntent)
+            and self.action_history is not None
+        ):
+            self.action_history.append(
+                ActionHistoryEntry(
+                    intent=command.model_dump(mode="json"),
+                    npc_action_ids=(
+                        dict(npc_action_ids) if npc_action_ids is not None else None
+                    ),
+                )
+            )
+        return result
 
     def preview(self, intent: PlayerIntent | dict[str, object]) -> EngineActionPreview:
         """Preview against a deep copy and capture the post-player NPC request.
@@ -303,6 +337,11 @@ class GameEngine:
         clone.case = self.case
         clone.location = self.location
         clone.recipe_selection = self.recipe_selection
+        clone.action_history = (
+            [entry.model_copy(deep=True) for entry in self.action_history]
+            if self.action_history is not None
+            else None
+        )
         clone.runtime = self.runtime.model_copy(deep=True)
         result = clone._apply(intent, npc_action_ids=None, defer_npc_phase=True)
         request = clone._build_npc_planning_request() if result.accepted and result.committed else None
@@ -339,6 +378,8 @@ class GameEngine:
         if isinstance(command, ReviewNotebookIntent):
             return self._accept(False, "You review the notes without spending investigation time.")
         if isinstance(command, AddNoteIntent):
+            if len(self.runtime.player_knowledge.notes) >= MAX_NOTEBOOK_RECORDS:
+                return self._reject("The notebook note limit has been reached.")
             self.runtime.player_knowledge.notes.append(command.text)
             return self._accept(False, "You add a note to the notebook.")
         if isinstance(command, AddTimelineEntryIntent):
@@ -458,6 +499,8 @@ class GameEngine:
             self.runtime.active_interview = None
             return self._reject("The interview is no longer possible in this room.")
         overlay = self.case.overlays[session.character_id]
+        if len(self.runtime.player_knowledge.statements) >= MAX_NOTEBOOK_RECORDS:
+            return self._reject("The interview record limit has been reached.")
         index = session.exchanges_used
         # Only authored observations carry fact references.  Alibis and lies
         # are still recordable character claims, but must not accidentally
@@ -516,6 +559,8 @@ class GameEngine:
         )
 
     def _add_timeline_entry(self, intent: AddTimelineEntryIntent) -> TurnResultView:
+        if len(self.runtime.player_knowledge.timeline) >= MAX_NOTEBOOK_RECORDS:
+            return self._reject("The timeline entry limit has been reached.")
         valid_sources = self._notebook_source_ids()
         if any(source_id not in valid_sources for source_id in intent.source_ids):
             return self._reject(
@@ -533,6 +578,8 @@ class GameEngine:
         return self._accept(False, "You add an entry to the timeline.")
 
     def _mark_contradiction(self, intent: MarkContradictionIntent) -> TurnResultView:
+        if len(self.runtime.player_knowledge.contradictions) >= MAX_NOTEBOOK_RECORDS:
+            return self._reject("The contradiction record limit has been reached.")
         known_statement_ids = {statement.id for statement in self.runtime.player_knowledge.statements}
         if (
             intent.left_statement_id == intent.right_statement_id
@@ -754,7 +801,82 @@ class GameEngine:
             if character.current_room_id == self.runtime.player_room_id:
                 self.runtime.player_knowledge.observed_character_room_ids[intent.character_id] = character.current_room_id
                 public_events.append(f"{self._name(intent.character_id)} is now in the room.")
+        self._resolve_private_exchanges()
         return public_events
+
+    def _resolve_private_exchanges(self) -> None:
+        """Evolve social state without transferring facts or exposing dialogue.
+
+        Living NPCs in rooms away from the investigator pair once, in stable
+        ID order.  These exchanges affect only bounded suspicion, a small
+        emotional vocabulary, and each participant's private memory.
+        """
+
+        occupants_by_room: dict[str, list[str]] = {}
+        for character_id, character in sorted(self.runtime.characters.items()):
+            if (
+                not character.alive
+                or character.current_room_id == self.runtime.player_room_id
+            ):
+                continue
+            occupants_by_room.setdefault(character.current_room_id, []).append(
+                character_id
+            )
+
+        for room_id in sorted(occupants_by_room):
+            occupants = occupants_by_room[room_id]
+            for index in range(0, len(occupants) - 1, 2):
+                speaker_id, listener_id = occupants[index : index + 2]
+                if any(
+                    len(self.runtime.characters[participant_id].conversation_memory)
+                    >= MAX_CONVERSATION_MEMORIES
+                    for participant_id in (speaker_id, listener_id)
+                ):
+                    continue
+                self._adjust_private_suspicion(speaker_id, listener_id)
+                self._adjust_private_suspicion(listener_id, speaker_id)
+                memory = ConversationMemoryEntry(
+                    turn=self.runtime.turn,
+                    speaker_id=speaker_id,
+                    listener_ids=[listener_id],
+                    topic="private exchange",
+                    text="They exchange guarded words away from the investigator.",
+                    referenced_fact_ids=[],
+                )
+                self.runtime.characters[speaker_id].conversation_memory.append(
+                    memory
+                )
+                self.runtime.characters[listener_id].conversation_memory.append(
+                    memory.model_copy(deep=True)
+                )
+
+    def _adjust_private_suspicion(
+        self,
+        observer_id: str,
+        subject_id: str,
+    ) -> None:
+        relationships = self.case.overlays[observer_id].relationships
+        affinity = next(
+            (
+                relationship.affinity
+                for relationship in relationships
+                if relationship.target_character_id == subject_id
+            ),
+            0,
+        )
+        delta = 5 if affinity <= -25 else -3 if affinity >= 25 else 1
+        observer = self.runtime.characters[observer_id]
+        belief = observer.beliefs.setdefault(
+            subject_id,
+            BeliefState(subject_character_id=subject_id),
+        )
+        belief.suspicion = max(0, min(100, belief.suspicion + delta))
+        belief.summary = (
+            "Private contact increased unease."
+            if delta > 0
+            else "Private contact reduced immediate concern."
+        )
+        observer.emotional_state = "wary" if delta > 0 else "steadied"
 
     def _npc_candidate_sets(
         self, snapshot: Mapping[str, str]

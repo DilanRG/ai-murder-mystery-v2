@@ -34,7 +34,15 @@ def test_save_round_trip_restores_runtime_without_embedded_truth(tmp_path: Path)
 
     written = write_save(engine, tmp_path, "ashwick-slot.json")
     payload = json.loads(written.read_text(encoding="utf-8"))
-    assert set(payload) == {"schema_version", "case_id", "location_id", "case_recipe", "runtime"}
+    assert set(payload) == {
+        "schema_version",
+        "case_id",
+        "location_id",
+        "case_recipe",
+        "action_history",
+        "runtime",
+    }
+    assert payload["schema_version"] == 2
     assert payload["case_recipe"] is None
     # Runtime may legitimately contain opaque fact IDs, but never a copied
     # authored solution object or an authored murder-truth field.
@@ -53,6 +61,86 @@ def test_snapshot_and_restore_accept_a_valid_in_memory_round_trip() -> None:
     envelope = snapshot_engine(engine)
     restored = restore_engine(envelope.model_dump(mode="json"), engine.case, engine.location)
     assert restored.runtime == engine.runtime
+    assert restored.action_history == engine.action_history
+
+
+def test_v2_action_history_rejects_forged_evidence_progression() -> None:
+    engine = make_engine()
+    engine.apply(AdvanceOpeningIntent())
+    payload = snapshot_engine(engine).model_dump(mode="json")
+    evidence_id = "ev_library_poker"
+    evidence = payload["runtime"]["evidence"][evidence_id]
+    evidence.update(
+        {
+            "condition": "collected",
+            "current_slot_id": None,
+            "discovered_by_character_ids": ["player"],
+            "discovered_by_player": True,
+            "discovered_turn": 0,
+        }
+    )
+    payload["runtime"]["player_knowledge"]["discovered_evidence_ids"] = [
+        evidence_id
+    ]
+    payload["runtime"]["player_knowledge"]["known_fact_ids"] = list(
+        engine.case.evidence[evidence_id].fact_ids
+    )
+
+    with pytest.raises(SaveValidationError, match="action history"):
+        restore_engine(payload, engine.case, engine.location)
+
+
+def test_v2_rejects_removed_or_invalid_history_but_v1_legacy_still_loads() -> None:
+    engine = make_engine()
+    engine.apply(AdvanceOpeningIntent())
+    engine.apply(MoveIntent(room_id="library"))
+    payload = snapshot_engine(engine).model_dump(mode="json")
+
+    removed = json.loads(json.dumps(payload))
+    removed["action_history"] = removed["action_history"][:-1]
+    with pytest.raises(SaveValidationError, match="action history"):
+        restore_engine(removed, engine.case, engine.location)
+
+    invalid = json.loads(json.dumps(payload))
+    invalid["action_history"][0]["intent"] = {"kind": "not_real"}
+    with pytest.raises(SaveValidationError, match="action history"):
+        restore_engine(invalid, engine.case, engine.location)
+
+    legacy = json.loads(json.dumps(payload))
+    legacy["schema_version"] = 1
+    legacy.pop("action_history")
+    restored = restore_engine(legacy, engine.case, engine.location)
+    assert restored.runtime == engine.runtime
+    assert restored.action_history is None
+
+
+def test_v2_rejects_unbounded_or_oversized_npc_history_selections() -> None:
+    engine = make_engine()
+    engine.apply(AdvanceOpeningIntent())
+    payload = snapshot_engine(engine).model_dump(mode="json")
+
+    too_many = json.loads(json.dumps(payload))
+    too_many["action_history"][0]["npc_action_ids"] = {
+        f"character_{index}": "stay" for index in range(9)
+    }
+    with pytest.raises(SaveValidationError, match="supported schema"):
+        restore_engine(too_many, engine.case, engine.location)
+
+    oversized = json.loads(json.dumps(payload))
+    oversized["action_history"][0]["npc_action_ids"] = {"x" * 101: "stay"}
+    with pytest.raises(SaveValidationError, match="supported schema"):
+        restore_engine(oversized, engine.case, engine.location)
+
+
+def test_impossible_early_ended_save_is_rejected() -> None:
+    engine = make_engine()
+    engine.apply(AdvanceOpeningIntent())
+    payload = snapshot_engine(engine).model_dump(mode="json")
+    payload["runtime"]["phase"] = "ended"
+    payload["runtime"]["result"] = None
+
+    with pytest.raises(SaveValidationError, match="ended before timeout"):
+        restore_engine(payload, engine.case, engine.location)
 
 
 def test_seeded_recipe_round_trip_is_reproducible_and_old_v1_save_still_loads() -> None:

@@ -206,6 +206,33 @@ def test_notebook_intents_are_free_and_validate_public_references() -> None:
     assert notebook.contradictions[0].left_statement_id == first.dialogue.id
 
 
+def test_free_notebook_collections_have_a_hard_nonmutating_limit() -> None:
+    engine = make_engine()
+    engine.apply(AdvanceOpeningIntent())
+    before_clock = (engine.runtime.turn, engine.runtime.in_game_minute)
+
+    for index in range(128):
+        result = engine.apply(AddNoteIntent(text=f"note {index}"))
+        assert result.accepted and not result.committed
+    before_history = len(engine.action_history or [])
+    overflow = engine.apply(AddNoteIntent(text="one note too many"))
+    assert not overflow.accepted
+    assert len(engine.runtime.player_knowledge.notes) == 128
+    assert len(engine.action_history or []) == before_history
+
+    for index in range(128):
+        result = engine.apply(
+            AddTimelineEntryIntent(text=f"timeline item {index}")
+        )
+        assert result.accepted and not result.committed
+    before_history = len(engine.action_history or [])
+    overflow = engine.apply(AddTimelineEntryIntent(text="one entry too many"))
+    assert not overflow.accepted
+    assert len(engine.runtime.player_knowledge.timeline) == 128
+    assert len(engine.action_history or []) == before_history
+    assert (engine.runtime.turn, engine.runtime.in_game_minute) == before_clock
+
+
 def test_search_reports_and_persists_discovered_inventory_item() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
@@ -242,6 +269,115 @@ def test_initial_npc_knowledge_comes_from_authored_observations_and_secrets() ->
     assert zara.known_fact_ids == {"fact_financial_exposure", "fact_edgar_left_study"}
     # A relationship to the victim is not itself knowledge of the murderer.
     assert "fact_murderer_identity" not in zara.known_fact_ids
+
+
+def test_authored_initial_suspicions_hydrate_bounded_private_beliefs() -> None:
+    engine = make_engine()
+    victim_id = engine.case.murder.victim_id
+
+    for character_id, character in engine.runtime.characters.items():
+        overlay = engine.case.overlays[character_id]
+        if character_id == victim_id:
+            assert character.beliefs == {}
+            continue
+        assert {
+            subject_id: belief.suspicion
+            for subject_id, belief in character.beliefs.items()
+        } == overlay.initial_suspicions
+        for subject_id, belief in character.beliefs.items():
+            assert belief.subject_character_id == subject_id
+            assert belief.reason_fact_ids == []
+            assert 0 <= belief.suspicion <= 100
+            assert "murder" not in belief.summary.casefold()
+
+
+def _hold_npc_selections(engine: GameEngine) -> dict[str, str]:
+    snapshot = {
+        character_id: state.current_room_id
+        for character_id, state in engine.runtime.characters.items()
+    }
+    return {
+        character_id: next(
+            option_id
+            for option_id, intent in options
+            if intent.destination_room_id is None
+            and intent.manipulate_evidence_id is None
+        )
+        for character_id, options in engine._npc_candidate_sets(snapshot).items()
+    }
+
+
+def _isolate_private_pair(engine: GameEngine, room_id: str) -> tuple[str, str]:
+    pair = ("edgar_blackwood", "zara_okonkwo")
+    spare_rooms = iter(("study", "dining_room", "kitchen", "gallery", "chapel"))
+    for character_id, state in engine.runtime.characters.items():
+        if not state.alive:
+            continue
+        state.current_room_id = room_id if character_id in pair else next(spare_rooms)
+    return pair
+
+
+def test_private_npc_exchange_is_deterministic_bounded_and_not_player_visible() -> None:
+    first = make_engine()
+    second = make_engine()
+    signatures = []
+    for engine in (first, second):
+        edgar_id, zara_id = _isolate_private_pair(engine, "library")
+        engine.runtime.player_room_id = "great_hall"
+        engine._run_npc_phase(_hold_npc_selections(engine))
+
+        edgar = engine.runtime.characters[edgar_id]
+        zara = engine.runtime.characters[zara_id]
+        assert edgar.beliefs[zara_id].suspicion == 85
+        assert zara.beliefs[edgar_id].suspicion == 75
+        assert edgar.emotional_state == zara.emotional_state == "wary"
+        assert len(edgar.conversation_memory) == len(zara.conversation_memory) == 1
+        assert edgar.conversation_memory[0] == zara.conversation_memory[0]
+        memory = edgar.conversation_memory[0]
+        assert memory.speaker_id == edgar_id
+        assert memory.listener_ids == [zara_id]
+        assert memory.topic == "private exchange"
+        assert memory.referenced_fact_ids == []
+        assert "murder" not in memory.text.casefold()
+        assert sum(
+            len(state.conversation_memory)
+            for state in engine.runtime.characters.values()
+        ) == 2
+
+        public_text = nested_text(engine.view().model_dump(mode="json")).casefold()
+        assert "private exchange" not in public_text
+        assert "belief" not in public_text
+        signatures.append(
+            (
+                edgar.beliefs[zara_id].model_dump(mode="json"),
+                zara.beliefs[edgar_id].model_dump(mode="json"),
+                memory.model_dump(mode="json"),
+            )
+        )
+    assert signatures[0] == signatures[1]
+
+
+def test_player_presence_blocks_private_exchange_and_suspicion_stays_bounded() -> None:
+    engine = make_engine()
+    edgar_id, zara_id = _isolate_private_pair(engine, "great_hall")
+    engine.runtime.player_room_id = "great_hall"
+    before = (
+        engine.runtime.characters[edgar_id].model_copy(deep=True),
+        engine.runtime.characters[zara_id].model_copy(deep=True),
+    )
+    engine._run_npc_phase(_hold_npc_selections(engine))
+    assert engine.runtime.characters[edgar_id] == before[0]
+    assert engine.runtime.characters[zara_id] == before[1]
+
+    engine.runtime.player_room_id = "chapel"
+    _isolate_private_pair(engine, "library")
+    for _ in range(120):
+        engine._run_npc_phase(_hold_npc_selections(engine))
+    for character_id, subject_id in ((edgar_id, zara_id), (zara_id, edgar_id)):
+        character = engine.runtime.characters[character_id]
+        assert character.beliefs[subject_id].suspicion == 100
+        assert len(character.conversation_memory) == 120
+        assert all(memory.referenced_fact_ids == [] for memory in character.conversation_memory)
 
 
 def test_murderer_cannot_move_and_manipulate_or_act_under_player_observation() -> None:
