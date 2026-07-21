@@ -15,6 +15,7 @@ from game.recipes import (
     character_card_fingerprint,
     load_case_recipe,
     resolve_case_recipe,
+    resolve_materialized_case_recipe,
 )
 from game.validator import validate_case
 
@@ -408,3 +409,30 @@ def test_materializer_rejects_a_forged_slot_to_card_mapping(tmp_path: Path) -> N
 
     with pytest.raises(RecipeValidationError):
         _materialize_cast(tmp_path, forged)
+
+
+@pytest.mark.parametrize("selected_case_id", ["ashwick_sample", "ashwick_quiet_vow"])
+def test_materialized_production_prose_replaces_title_and_given_name_together(
+    selected_case_id: str,
+) -> None:
+    recipe = load_case_recipe("ashwick_manor_dual_spines")
+    manual_cast = [slot.candidate_card_ids[2] for slot in recipe.cast_slots]
+    seed = next(
+        candidate_seed
+        for candidate_seed in range(32)
+        if resolve_case_recipe(
+            "ashwick_manor_dual_spines", candidate_seed
+        ).selected_case_id
+        == selected_case_id
+    )
+
+    _, materialized = resolve_materialized_case_recipe(
+        "ashwick_manor_dual_spines",
+        seed,
+        selected_character_ids=manual_cast,
+    )
+    rendered = json.dumps(materialized.model_dump(mode="json"), ensure_ascii=False)
+
+    assert "Countess Beatrice" in rendered
+    assert "Lady Beatrice" not in rendered
+    assert "Lady Vivienne" not in rendered

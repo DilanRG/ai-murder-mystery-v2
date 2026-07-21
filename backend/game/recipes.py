@@ -300,6 +300,18 @@ def _name_replacements(
         replacements[source_given] = target_given
         if source_surname and target_surname:
             replacements[source_surname] = target_surname
+        if source_title and source_given and target_given:
+            titled_given = " ".join(
+                part for part in (target_title, target_given) if part
+            )
+            replacements[f"{source_title} {source_given}"] = titled_given
+            if source_title.lower().rstrip(".") == "dr":
+                replacements[f"Dr {source_given}"] = " ".join(
+                    part
+                    for part in (target_title.rstrip("."), target_given)
+                    if part
+                )
+                replacements[f"Dr. {source_given}"] = titled_given
         if source_title and source_surname and target_surname:
             replacements[f"{source_title} {source_surname}"] = " ".join(
                 part for part in (target_title, target_surname) if part

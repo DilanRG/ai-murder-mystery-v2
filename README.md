@@ -54,7 +54,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 .\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
 ```
 
-The 181-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
+The 192-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, every pooled card solved against both story spines, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
 
 ## Optional AI layer
 
