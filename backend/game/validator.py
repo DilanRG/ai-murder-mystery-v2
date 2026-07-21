@@ -192,6 +192,66 @@ def _scheduled_at_location(
     )
 
 
+def _prerequisite_cycle(evidence: dict) -> tuple[str, ...]:
+    """Return one deterministic evidence prerequisite cycle, if present."""
+
+    graph = {
+        evidence_id: tuple(
+            prerequisite_id
+            for prerequisite_id in item.prerequisite_evidence_ids
+            if prerequisite_id in evidence
+        )
+        for evidence_id, item in evidence.items()
+    }
+    state: dict[str, int] = {}
+    path: list[str] = []
+
+    def visit(evidence_id: str) -> tuple[str, ...]:
+        state[evidence_id] = 1
+        path.append(evidence_id)
+        for prerequisite_id in graph[evidence_id]:
+            if state.get(prerequisite_id, 0) == 0:
+                cycle = visit(prerequisite_id)
+                if cycle:
+                    return cycle
+            elif state.get(prerequisite_id) == 1:
+                start = path.index(prerequisite_id)
+                return tuple(path[start:] + [prerequisite_id])
+        path.pop()
+        state[evidence_id] = 2
+        return ()
+
+    for evidence_id in sorted(graph):
+        if state.get(evidence_id, 0) == 0:
+            cycle = visit(evidence_id)
+            if cycle:
+                return cycle
+    return ()
+
+
+def _is_player_resolvable_discovery_route(
+    case: CaseDefinition,
+    location: LocationPackage,
+    discovery_route: str,
+) -> bool:
+    """Whether the current player action model can execute a discovery route."""
+
+    try:
+        route_kind, target_id = discovery_route.split(":", 1)
+    except ValueError:
+        return False
+    if route_kind == "search":
+        return target_id in location.searchable_objects
+    if route_kind == "interview":
+        return (
+            target_id in case.character_ids
+            and target_id != case.murder.victim_id
+        )
+    if route_kind == "examine":
+        return target_id == "body"
+    return False
+
+
 def validate_case(case: CaseDefinition, location: LocationPackage) -> ValidationReport:
     """Validate a case against a location, accumulating every detected issue."""
     report = validate_location_package(location)
@@ -309,6 +369,19 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
             report.add("unknown_slot", f"{path}.initial_slot_id", "evidence initial slot must exist")
         elif evidence.initial_slot_id:
             slot_occupancy[evidence.initial_slot_id] += 1
+            object_id = location.evidence_slots[evidence.initial_slot_id].object_id
+            search_routes = {
+                route
+                for route in evidence.discoverable_via
+                if route.startswith("search:")
+            }
+            expected_search_route = f"search:{object_id}"
+            if search_routes != {expected_search_route}:
+                report.add(
+                    "slot_discovery_route_mismatch",
+                    f"{path}.discoverable_via",
+                    "slotted evidence may only use the containing object's search route",
+                )
         for fact_id in evidence.fact_ids:
             if fact_id not in facts:
                 report.add("unknown_fact", f"{path}.fact_ids", f"unknown fact {fact_id!r}")
@@ -321,20 +394,18 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
             if prerequisite_id not in evidence_ids or prerequisite_id == evidence_id:
                 report.add("invalid_evidence_prerequisite", f"{path}.prerequisite_evidence_ids", "prerequisite must be a different defined evidence item")
         for discovery_route in evidence.discoverable_via:
-            try:
-                route_kind, target_id = discovery_route.split(":", 1)
-            except ValueError:
-                report.add("invalid_discovery_route", f"{path}.discoverable_via", f"invalid route {discovery_route!r}")
-                continue
-            valid_route = (
-                route_kind == "search" and target_id in location.searchable_objects
-            ) or (
-                route_kind == "interview" and target_id in cast
-            ) or (
-                route_kind == "examine" and target_id in {"body", *cast}
-            )
-            if not valid_route:
+            if not _is_player_resolvable_discovery_route(
+                case, location, discovery_route
+            ):
                 report.add("invalid_discovery_route", f"{path}.discoverable_via", f"unresolvable route {discovery_route!r}")
+
+    prerequisite_cycle = _prerequisite_cycle(case.evidence)
+    if prerequisite_cycle:
+        report.add(
+            "cyclic_evidence_prerequisite",
+            "evidence",
+            f"evidence prerequisites form a cycle: {' -> '.join(prerequisite_cycle)}",
+        )
 
     for slot_id, occupancy in slot_occupancy.items():
         capacity = location.evidence_slots[slot_id].capacity
@@ -387,6 +458,18 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
 
     opening = case.opening
     survivors = cast - {murder.victim_id}
+    if opening.discovery_minute <= murder.minute:
+        report.add(
+            "invalid_murder_discovery_order",
+            "opening.discovery_minute",
+            "body discovery must occur after the murder",
+        )
+    if case.investigation_start_minute < opening.discovery_minute:
+        report.add(
+            "invalid_discovery_investigation_order",
+            "investigation_start_minute",
+            "the investigation cannot start before the body is discovered",
+        )
     if opening.discoverer_id not in survivors:
         report.add("invalid_discoverer", "opening.discoverer_id", "discoverer must be a living cast member")
     if opening.body_room_id != murder.room_id or opening.body_room_id not in set(location.body_discovery_room_ids):
@@ -411,17 +494,123 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
     for room_id in opening.post_meeting_room_ids.values():
         if room_id not in rooms:
             report.add("unknown_room", "opening.post_meeting_room_ids", f"unknown room {room_id!r}")
+    if (
+        opening.discoverer_id in survivors
+        and opening.body_room_id in rooms
+        and not _scheduled_at_location(
+            case,
+            opening.discoverer_id,
+            opening.discovery_minute,
+            opening.body_room_id,
+        )
+    ):
+        report.add(
+            "infeasible_discoverer_schedule",
+            f"overlays.{opening.discoverer_id}.schedule",
+            "the discoverer schedule must place them with the body at discovery time",
+        )
 
     solution = case.solution
     if solution.culprit_id != murder.murderer_id:
         report.add("solution_culprit_mismatch", "solution.culprit_id", "solution culprit must be the murderer")
+    for axis_name, values in (
+        ("method", solution.method_evidence_ids),
+        ("motive", solution.motive_evidence_ids),
+        ("opportunity", solution.opportunity_evidence_ids),
+        ("timeline", solution.timeline_fact_ids),
+    ):
+        if not values:
+            report.add(
+                "missing_solution_axis",
+                f"solution.{axis_name}",
+                f"solution {axis_name} support must not be empty",
+            )
     solution_evidence = set(solution.method_evidence_ids) | set(solution.motive_evidence_ids) | set(solution.opportunity_evidence_ids)
     for evidence_id in solution_evidence:
         if evidence_id not in evidence_ids:
             report.add("unknown_solution_evidence", "solution", f"unknown evidence {evidence_id!r}")
+        elif not any(
+            _is_player_resolvable_discovery_route(case, location, route)
+            for route in case.evidence[evidence_id].discoverable_via
+        ):
+            report.add(
+                "undiscoverable_solution_evidence",
+                f"evidence.{evidence_id}.discoverable_via",
+                "solution evidence must have at least one player discovery route",
+            )
+    reported_unreachable_prerequisites: set[str] = set()
+    for solution_evidence_id in solution_evidence:
+        pending = list(
+            case.evidence.get(solution_evidence_id).prerequisite_evidence_ids
+            if solution_evidence_id in case.evidence
+            else ()
+        )
+        visited: set[str] = set()
+        while pending:
+            prerequisite_id = pending.pop()
+            if prerequisite_id in visited:
+                continue
+            visited.add(prerequisite_id)
+            prerequisite = case.evidence.get(prerequisite_id)
+            if prerequisite is None:
+                continue
+            if not any(
+                _is_player_resolvable_discovery_route(case, location, route)
+                for route in prerequisite.discoverable_via
+            ) and prerequisite_id not in reported_unreachable_prerequisites:
+                report.add(
+                    "undiscoverable_solution_prerequisite",
+                    f"evidence.{prerequisite_id}.discoverable_via",
+                    f"solution evidence depends on unreachable prerequisite {prerequisite_id!r}",
+                )
+                reported_unreachable_prerequisites.add(prerequisite_id)
+            pending.extend(prerequisite.prerequisite_evidence_ids)
     for fact_id in solution.timeline_fact_ids:
         if fact_id not in facts:
             report.add("unknown_solution_fact", "solution.timeline_fact_ids", f"unknown fact {fact_id!r}")
+        elif case.facts[fact_id].category.value not in {
+            "timeline",
+            "opportunity",
+            "alibi",
+        }:
+            report.add(
+                "invalid_solution_timeline_fact",
+                "solution.timeline_fact_ids",
+                f"fact {fact_id!r} is not timeline, opportunity, or alibi evidence",
+            )
+    for axis, expected_categories, axis_evidence_ids in (
+        ("method", {"means"}, solution.method_evidence_ids),
+        ("motive", {"motive"}, solution.motive_evidence_ids),
+        ("opportunity", {"opportunity", "timeline"}, solution.opportunity_evidence_ids),
+    ):
+        for evidence_id in axis_evidence_ids:
+            evidence = case.evidence.get(evidence_id)
+            if evidence is None:
+                continue
+            categories = {
+                case.facts[fact_id].category.value
+                for fact_id in evidence.fact_ids
+                if fact_id in case.facts
+            }
+            if not (expected_categories & categories):
+                report.add(
+                    "solution_evidence_axis_mismatch",
+                    f"solution.{axis}_evidence_ids",
+                    f"evidence {evidence_id!r} does not support one of {sorted(expected_categories)!r}",
+                )
+                continue
+            reciprocal_categories = {
+                case.facts[fact_id].category.value
+                for fact_id in evidence.fact_ids
+                if fact_id in case.facts
+                and evidence_id in case.facts[fact_id].related_evidence_ids
+            }
+            if not (expected_categories & reciprocal_categories):
+                report.add(
+                    "nonreciprocal_solution_link",
+                    f"solution.{axis}_evidence_ids",
+                    f"evidence {evidence_id!r} is not reciprocally linked from a matching fact",
+                )
     groups = {case.evidence[evidence_id].redundancy_group for evidence_id in solution_evidence if evidence_id in case.evidence}
     required = solution.independent_evidence_groups_required
     if len(groups) < required:

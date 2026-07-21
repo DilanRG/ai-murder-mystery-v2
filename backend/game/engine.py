@@ -491,6 +491,15 @@ class GameEngine:
         for evidence_id, definition in self.case.evidence.items():
             if route not in definition.discoverable_via or definition.difficulty.value > state.search_count:
                 continue
+            evidence_state = self.runtime.evidence[evidence_id]
+            if definition.initial_slot_id is not None:
+                current_slot = (
+                    self.location.evidence_slots.get(evidence_state.current_slot_id)
+                    if evidence_state.current_slot_id is not None
+                    else None
+                )
+                if current_slot is None or current_slot.object_id != intent.object_id:
+                    continue
             found = self._discover_evidence(evidence_id)
             if found:
                 discoveries.append(self._evidence_view(evidence_id))
@@ -581,7 +590,10 @@ class GameEngine:
         discoveries: list[PublicEvidenceView] = []
         route = f"interview:{session.character_id}"
         for evidence_id, definition in self.case.evidence.items():
-            if route in definition.discoverable_via and self._discover_evidence(evidence_id):
+            if route in definition.discoverable_via and self._discover_evidence(
+                evidence_id,
+                required_room_id=self.runtime.player_room_id,
+            ):
                 discoveries.append(self._evidence_view(evidence_id))
                 break  # exactly one authored interview clue per exchange
         return self._accept(
@@ -682,7 +694,10 @@ class GameEngine:
             return self._reject("The body can only be examined at the preserved body scene.")
         discoveries: list[PublicEvidenceView] = []
         for evidence_id, definition in self.case.evidence.items():
-            if "examine:body" in definition.discoverable_via and self._discover_evidence(evidence_id):
+            if "examine:body" in definition.discoverable_via and self._discover_evidence(
+                evidence_id,
+                required_room_id=self.runtime.player_room_id,
+            ):
                 discoveries.append(self._evidence_view(evidence_id))
         narration = "You examine the body and preserve the visible scene." if not discoveries else (
             "You examine the body and preserve the scene: " + ", ".join(item.name for item in discoveries) + "."
@@ -1048,9 +1063,29 @@ class GameEngine:
         )
         return len(groups) >= self.case.solution.independent_evidence_groups_required and all(available & group for group in category_sets)
 
-    def _discover_evidence(self, evidence_id: str) -> bool:
+    def _discover_evidence(
+        self,
+        evidence_id: str,
+        *,
+        required_room_id: str | None = None,
+    ) -> bool:
         runtime = self.runtime.evidence[evidence_id]
         if runtime.discovered_by_player or runtime.condition in {EvidenceCondition.CONCEALED, EvidenceCondition.DESTROYED}:
+            return False
+        definition = self.case.evidence[evidence_id]
+        if required_room_id is not None and definition.initial_slot_id is not None:
+            current_slot = (
+                self.location.evidence_slots.get(runtime.current_slot_id)
+                if runtime.current_slot_id is not None
+                else None
+            )
+            if current_slot is None or current_slot.room_id != required_room_id:
+                return False
+        if any(
+            prerequisite_id not in self.runtime.evidence
+            or not self.runtime.evidence[prerequisite_id].discovered_by_player
+            for prerequisite_id in definition.prerequisite_evidence_ids
+        ):
             return False
         runtime.discovered_by_player = True
         runtime.discovered_by_character_ids.add(PLAYER_ID)
@@ -1058,7 +1093,7 @@ class GameEngine:
         runtime.condition = EvidenceCondition.COLLECTED
         runtime.current_slot_id = None
         self.runtime.player_knowledge.discovered_evidence_ids.add(evidence_id)
-        self.runtime.player_knowledge.known_fact_ids.update(self.case.evidence[evidence_id].fact_ids)
+        self.runtime.player_knowledge.known_fact_ids.update(definition.fact_ids)
         return True
 
     def _player_has_item(self, item_id: str) -> bool:

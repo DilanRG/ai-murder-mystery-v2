@@ -23,6 +23,7 @@ from game.actions import (
 )
 from game.content import load_case, load_location
 from game.engine import GameEngine
+from game.models import CaseDefinition
 
 
 def make_engine() -> GameEngine:
@@ -90,6 +91,57 @@ def test_body_examination_is_a_valid_typed_discovery_route() -> None:
         "ev_medical_assessment",
         "ev_library_clock",
     }
+
+
+def test_evidence_prerequisite_must_be_collected_before_discovery() -> None:
+    data = load_case("ashwick_sample").model_dump(mode="json")
+    data["evidence"]["ev_vivienne_memo"]["prerequisite_evidence_ids"] = [
+        "ev_library_poker"
+    ]
+    engine = GameEngine(
+        CaseDefinition.model_validate(data), load_location("ashwick_manor")
+    )
+    engine.apply(AdvanceOpeningIntent())
+    engine.apply(MoveIntent(room_id="library"))
+
+    engine.apply(SearchIntent(object_id="library_desk"))
+    blocked = engine.apply(SearchIntent(object_id="library_desk"))
+    assert "ev_vivienne_memo" not in {item.id for item in blocked.discoveries}
+    assert "ev_vivienne_memo" not in engine.runtime.player_knowledge.discovered_evidence_ids
+
+    engine.apply(ExamineBodyIntent())
+    admitted = engine.apply(SearchIntent(object_id="library_desk"))
+    assert "ev_vivienne_memo" in {item.id for item in admitted.discoveries}
+
+
+def test_search_cannot_collect_evidence_from_a_different_current_slot() -> None:
+    engine = make_engine()
+    engine.runtime.evidence["ev_vivienne_memo"].current_slot_id = "slot_study_desk"
+    engine.apply(AdvanceOpeningIntent())
+    engine.apply(MoveIntent(room_id="library"))
+
+    engine.apply(SearchIntent(object_id="library_desk"))
+    result = engine.apply(SearchIntent(object_id="library_desk"))
+
+    assert "ev_vivienne_memo" not in {item.id for item in result.discoveries}
+    assert "ev_vivienne_memo" not in engine.runtime.player_knowledge.discovered_evidence_ids
+
+
+def test_interview_cannot_teleport_slotted_evidence_from_another_room() -> None:
+    data = load_case("ashwick_sample").model_dump(mode="json")
+    data["evidence"]["ev_library_poker"]["discoverable_via"].append(
+        "interview:inspector_elena_hayes"
+    )
+    engine = GameEngine(
+        CaseDefinition.model_validate(data), load_location("ashwick_manor")
+    )
+    engine.apply(AdvanceOpeningIntent())
+    engine.apply(BeginInterviewIntent(character_id="inspector_elena_hayes"))
+
+    result = engine.apply(InterviewExchangeIntent(message="What did you find?"))
+
+    assert "ev_library_poker" not in {item.id for item in result.discoveries}
+    assert "ev_library_poker" not in engine.runtime.player_knowledge.discovered_evidence_ids
 
 
 def test_interview_has_three_free_exchanges_and_end_commits_once() -> None:

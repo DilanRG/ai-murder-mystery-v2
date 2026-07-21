@@ -534,7 +534,7 @@
       "exonerates_character_ids": [],
       "is_red_herring": false,
       "red_herring_explanation": "",
-      "discoverable_via": ["search:library_desk", "examine:edgar_blackwood"],
+      "discoverable_via": ["search:library_desk"],
       "difficulty": 2,
       "manipulable": true,
       "essential": false,

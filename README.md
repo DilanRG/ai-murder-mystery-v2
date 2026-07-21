@@ -56,7 +56,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 .\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
 ```
 
-The automated suite contains 193 Python tests plus six dependency-free frontend boundary tests. It covers rules, transport-level truth redaction, full solve paths for both authored mysteries, every pooled card solved against both story spines, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
+The automated suite contains 206 Python tests plus six dependency-free frontend boundary tests. It covers rules, transport-level truth redaction, generated-case admission and repair, full solve paths for both authored dummy mysteries, every pooled card solved against both dummy spines, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
 
 ## Optional AI layer
 
