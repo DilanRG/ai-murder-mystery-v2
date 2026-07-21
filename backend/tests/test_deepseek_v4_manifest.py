@@ -22,7 +22,7 @@ from experiments.deepseek_v4_runner import (
 def _verified_preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 5,
+            "experiment_revision": 6,
             "model": slug,
             "actual_model": slug,
             "upstream_provider": "deepseek",
@@ -40,8 +40,8 @@ def _verified_preflights() -> dict[str, object]:
 def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     manifest = load_manifest()
 
-    assert manifest["manifest_revision"] == 5
-    assert manifest["git_checkpoint"] == "bf955f301f1707a1e400bf189080bfd2433d6d36"
+    assert manifest["manifest_revision"] == 6
+    assert manifest["git_checkpoint"] == "5a239f4c104e1be53658768fcdd47078e1963075"
     assert manifest["gateway"] == "deepseek_direct"
     assert manifest["model_fallbacks"] == []
     assert manifest["runtime_settings"]["sampler_defaults"]["top_k"] is None
@@ -59,7 +59,10 @@ def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     assert manifest["runtime_settings"]["reasoning_effort"] == "high"
     assert manifest["runtime_settings"]["generation_attempt_limit"] == 3
     assert manifest["runtime_settings"]["roles"] == {
-        "case_generation": {"max_tokens": 32_768, "temperature": 0.55, "json_mode": True},
+        "case_generation_core": {"max_tokens": 20_000, "temperature": 0.55, "json_mode": True},
+        "case_generation_evidence": {"max_tokens": 20_000, "temperature": 0.55, "json_mode": True},
+        "case_generation_overlays": {"max_tokens": 24_000, "temperature": 0.55, "json_mode": True},
+        "case_generation_presentation": {"max_tokens": 8_000, "temperature": 0.2, "json_mode": True},
         "private_npc_action": {"max_tokens": 80, "temperature": 0.0, "json_mode": True},
         "private_interview_selection": {"max_tokens": 80, "temperature": 0.0, "json_mode": True},
         "portrayal": {"max_tokens": 220, "temperature": 0.2, "json_mode": True},
@@ -89,7 +92,7 @@ def test_dry_run_is_sanitized_and_makes_no_provider_calls() -> None:
 
 def test_execution_refuses_unverified_or_non_opted_in_traffic() -> None:
     manifest = load_manifest()
-    request = build_request(manifest, "pro", task_role="case_generation")
+    request = build_request(manifest, "pro", task_role="case_generation_core")
     called = False
 
     def provider_call(_request: object) -> None:

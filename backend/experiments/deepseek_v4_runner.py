@@ -25,12 +25,15 @@ EXPECTED_MODELS = {
     "flash": "deepseek-v4-flash",
 }
 EXPECTED_RESOLVED_MODELS = dict(EXPECTED_MODELS)
-EXPECTED_MANIFEST_REVISION = 5
-EXPECTED_GIT_CHECKPOINT = "bf955f301f1707a1e400bf189080bfd2433d6d36"
+EXPECTED_MANIFEST_REVISION = 6
+EXPECTED_GIT_CHECKPOINT = "5a239f4c104e1be53658768fcdd47078e1963075"
 EXPECTED_GATEWAY = "deepseek_direct"
 EXPECTED_ROUTING = None
 EXPECTED_ROLE_MAX_TOKENS = {
-    "case_generation": 32_768,
+    "case_generation_core": 20_000,
+    "case_generation_evidence": 20_000,
+    "case_generation_overlays": 24_000,
+    "case_generation_presentation": 8_000,
     "private_npc_action": 80,
     "private_interview_selection": 80,
     "portrayal": 220,
@@ -71,15 +74,15 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Reject changes that would make the paired measurement unfair or unsafe."""
 
     if manifest.get("manifest_revision") != EXPECTED_MANIFEST_REVISION:
-        raise ExperimentSafetyError("Only frozen manifest revision 5 is accepted.")
+        raise ExperimentSafetyError("Only frozen manifest revision 6 is accepted.")
     if manifest.get("git_checkpoint") != EXPECTED_GIT_CHECKPOINT:
         raise ExperimentSafetyError("Manifest must retain the revision-4 direct-provider checkpoint.")
     if (
-        manifest.get("supersedes_revision") != 4
+        manifest.get("supersedes_revision") != 5
         or manifest.get("gateway") != EXPECTED_GATEWAY
         or manifest.get("model_fallbacks") != []
     ):
-        raise ExperimentSafetyError("Manifest revision 5 must require direct DeepSeek without fallback.")
+        raise ExperimentSafetyError("Manifest revision 6 must require direct DeepSeek without fallback.")
     if manifest.get("models") != EXPECTED_MODELS:
         raise ExperimentSafetyError("Manifest model slugs must be the exact DeepSeek V4 pair.")
     if manifest.get("resolved_models") != EXPECTED_RESOLVED_MODELS:
@@ -95,7 +98,10 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     if dict(settings.get("sampler_defaults", {})) != {"top_p": 0.95, "top_k": None}:
         raise ExperimentSafetyError("Identical sampler defaults are required.")
     expected_roles = {
-        "case_generation": (EXPECTED_ROLE_MAX_TOKENS["case_generation"], 0.55),
+        "case_generation_core": (EXPECTED_ROLE_MAX_TOKENS["case_generation_core"], 0.55),
+        "case_generation_evidence": (EXPECTED_ROLE_MAX_TOKENS["case_generation_evidence"], 0.55),
+        "case_generation_overlays": (EXPECTED_ROLE_MAX_TOKENS["case_generation_overlays"], 0.55),
+        "case_generation_presentation": (EXPECTED_ROLE_MAX_TOKENS["case_generation_presentation"], 0.2),
         "private_npc_action": (EXPECTED_ROLE_MAX_TOKENS["private_npc_action"], 0.0),
         "private_interview_selection": (EXPECTED_ROLE_MAX_TOKENS["private_interview_selection"], 0.0),
         "portrayal": (EXPECTED_ROLE_MAX_TOKENS["portrayal"], 0.2),

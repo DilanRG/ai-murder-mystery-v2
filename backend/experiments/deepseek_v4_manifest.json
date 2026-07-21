@@ -1,10 +1,10 @@
 {
   "experiment_id": "deepseek-v4-phase1",
-  "manifest_revision": 5,
+  "manifest_revision": 6,
   "frozen_at": "2026-07-22",
-  "git_checkpoint": "bf955f301f1707a1e400bf189080bfd2433d6d36",
-  "supersedes_revision": 4,
-  "revision_reason": "Raise the shared case-generation output budget so high reasoning cannot consume the entire allowance before emitting the required JSON; preserve identical limits for Pro and Flash.",
+  "git_checkpoint": "5a239f4c104e1be53658768fcdd47078e1963075",
+  "supersedes_revision": 5,
+  "revision_reason": "Replace the repeatedly rejected one-shot case document with four schema-validated stages sharing a cache-stable prefix; preserve identical stage limits for Pro and Flash.",
   "invalidated_preflight_attempts": [
     {
       "revision": 1,
@@ -29,11 +29,17 @@
       "count": 2,
       "provider_generation_ids_returned": 2,
       "reason": "Both direct preflights passed, but their 16384-token case-generation configuration was superseded after Pro used the entire allowance for reasoning and emitted no final JSON."
+    },
+    {
+      "revision": 5,
+      "count": 2,
+      "provider_generation_ids_returned": 2,
+      "reason": "Both direct preflights passed, but the one-shot generation contract was superseded after Flash produced three candidates that all failed admission."
     }
   ],
   "location_package_id": "ashwick_manor",
-  "prompt_revision": "procedural-case-generation-v1",
-  "schema_revision": "procedural-case-schema-v1",
+  "prompt_revision": "procedural-case-generation-staged-v2",
+  "schema_revision": "procedural-case-schema-staged-v2",
   "models": {
     "pro": "deepseek-v4-pro",
     "flash": "deepseek-v4-flash"
@@ -52,14 +58,17 @@
       "top_k": null
     },
     "roles": {
-      "case_generation": {"max_tokens": 32768, "temperature": 0.55, "json_mode": true},
+      "case_generation_core": {"max_tokens": 20000, "temperature": 0.55, "json_mode": true},
+      "case_generation_evidence": {"max_tokens": 20000, "temperature": 0.55, "json_mode": true},
+      "case_generation_overlays": {"max_tokens": 24000, "temperature": 0.55, "json_mode": true},
+      "case_generation_presentation": {"max_tokens": 8000, "temperature": 0.2, "json_mode": true},
       "private_npc_action": {"max_tokens": 80, "temperature": 0.0, "json_mode": true},
       "private_interview_selection": {"max_tokens": 80, "temperature": 0.0, "json_mode": true},
       "portrayal": {"max_tokens": 220, "temperature": 0.2, "json_mode": true}
     },
     "generation_attempt_limit": 3,
     "concurrency": 1,
-    "retry_policy_revision": "bounded-generation-retry-v1"
+    "retry_policy_revision": "bounded-stage-retry-v2"
   },
   "budget": {
     "currency": "USD",

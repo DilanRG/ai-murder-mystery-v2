@@ -82,6 +82,7 @@ def _persist_candidate_attempts(
                 "model": EXPECTED_MODELS[model_key],
                 "prompt_revision": manifest["prompt_revision"],
                 "schema_revision": manifest["schema_revision"],
+                "stage": diagnostic.get("stage"),
                 "attempt": diagnostic["attempt"],
                 "admission_result": diagnostic["result"],
                 "failure_category": diagnostic.get("failure_category"),
@@ -177,7 +178,11 @@ async def run_generation_matrix(
     for pair in selected_pairs:
         pair_id = str(pair["pair_id"])
         for model_key in pair["model_order"]:
-            request = build_request(manifest, str(model_key), task_role="case_generation")
+            request = build_request(
+                manifest,
+                str(model_key),
+                task_role="case_generation_core",
+            )
             run_id = f"generation-{pair_id}-{model_key}"
             observer = DeepSeekRequestObserver(
                 ledger=ledger,

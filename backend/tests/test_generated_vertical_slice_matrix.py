@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from conftest import make_dummy_generated_document
+from conftest import generated_stage_response, make_dummy_generated_document
 from game.case_generation import select_generation_cast
 from game.content import (
     CHARACTER_CARDS_DIR,
@@ -28,7 +28,7 @@ AUTO_SEEDS = (0, 120, 3, 42)
 
 
 class ProjectedScenarioProvider:
-    """One local scenario response; later ID-selection calls may safely fall back."""
+    """Deterministic four-stage scenario provider; other calls fail closed."""
 
     def __init__(self, document: dict[str, object]) -> None:
         self.document = document
@@ -45,7 +45,9 @@ class ProjectedScenarioProvider:
             self.scenario_cast = tuple(
                 request["generation_context"]["selected_character_ids"]
             )
-            return SimpleNamespace(content=json.dumps(self.document))
+            return SimpleNamespace(
+                content=json.dumps(generated_stage_response(self.document, kwargs["task_role"]))
+            )
         # Every non-scenario provider boundary is independently fail-closed.
         return SimpleNamespace(content="{}")
 
@@ -102,7 +104,7 @@ def _start_generated(
     )
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert provider.scenario_calls == 1
+    assert provider.scenario_calls == 4
     assert provider.scenario_cast == selected
     public_cast = {
         payload["game"]["opening"]["victim_id"]:
@@ -145,7 +147,7 @@ def test_normal_generation_accepts_an_arbitrary_exact_manual_cast(tmp_path) -> N
         )
 
     assert payload["generation"]["cast_mode"] == "manual"
-    assert provider.scenario_calls == 1
+    assert provider.scenario_calls == 4
 
 
 @pytest.mark.parametrize("seed", AUTO_SEEDS)
@@ -214,7 +216,7 @@ def test_authored_projection_can_save_reload_after_turn_six_and_win(
         main._session.llm = None
         loaded = client.post(f"/api/game/saves/v1/generated-{seed}.json/load")
         assert loaded.status_code == 200
-        assert provider.scenario_calls == 1 and provider.calls == calls_before_reload
+        assert provider.scenario_calls == 4 and provider.calls == calls_before_reload
 
         accusation = client.post(
             "/api/game/action",
@@ -261,4 +263,4 @@ def test_authored_projection_timeout_is_an_unsolved_debrief(tmp_path) -> None:
         debrief = client.get("/api/game/debrief")
         assert debrief.status_code == 200
         assert debrief.json()["outcome"] == game["result"]
-        assert provider.scenario_calls == 1
+        assert provider.scenario_calls == 4

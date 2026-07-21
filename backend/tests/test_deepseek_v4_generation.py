@@ -25,7 +25,7 @@ GIT_SHA = "b" * 40
 def _preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 5,
+            "experiment_revision": 6,
             "git_sha": GIT_SHA,
             "model": model,
             "actual_model": model,
@@ -49,7 +49,12 @@ class _OfflineMeasuredClient:
         self.calls = 0
 
     async def generate(self, messages, **kwargs) -> LLMResponse:
-        assert kwargs["task_role"] == "case_generation"
+        assert kwargs["task_role"] in {
+            "case_generation_core",
+            "case_generation_evidence",
+            "case_generation_overlays",
+            "case_generation_presentation",
+        }
         self.calls += 1
         transport_request_id = uuid.uuid4().hex
         event = {
@@ -63,7 +68,7 @@ class _OfflineMeasuredClient:
             "transport": "deepseek_direct",
         }
         await self.observer("pre_call", event)
-        content = self.content_factory(messages)
+        content = self.content_factory(messages, kwargs["task_role"])
         if not isinstance(content, str):
             content = json.dumps(content)
         response = LLMResponse(
@@ -90,6 +95,35 @@ class _OfflineMeasuredClient:
         return response
 
 
+def _stage_document(document: dict[str, object], role: str) -> dict[str, object]:
+    case = document["case"]
+    assert isinstance(case, dict)
+    if role == "case_generation_core":
+        return {
+            "schema_version": 1,
+            **{
+                key: case[key]
+                for key in (
+                    "title",
+                    "investigation_start_minute",
+                    "murder",
+                    "facts",
+                    "timeline",
+                    "opening",
+                )
+            },
+        }
+    if role == "case_generation_evidence":
+        return {
+            "schema_version": 1,
+            "evidence": case["evidence"],
+            "solution": case["solution"],
+        }
+    if role == "case_generation_overlays":
+        return {"schema_version": 1, "overlays": case["overlays"]}
+    return {"schema_version": 1, "presentation": document["presentation"]}
+
+
 def test_generation_matrix_uses_production_admission_and_private_snapshots(
     tmp_path: Path,
 ) -> None:
@@ -99,8 +133,10 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
     def client_builder(*, api_key, model, observer):
         assert api_key == "test-gateway-credential"
 
-        def content_factory(_messages):
-            return make_dummy_generated_document(character_ids=tuple(pair["cast_ids"]))
+        document = make_dummy_generated_document(character_ids=tuple(pair["cast_ids"]))
+
+        def content_factory(_messages, role):
+            return _stage_document(document, role)
 
         return _OfflineMeasuredClient(
             model=model,
@@ -123,21 +159,26 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
 
     assert [outcome["model_key"] for outcome in outcomes] == pair["model_order"]
     assert all(outcome["admitted"] is True for outcome in outcomes)
-    assert all(outcome["attempts"] == 1 for outcome in outcomes)
+    assert all(outcome["attempts"] == 4 for outcome in outcomes)
     assert all(len(outcome["case_fingerprint"]) == 64 for outcome in outcomes)
     assert all((tmp_path / outcome["canonical_artifact"]).is_file() for outcome in outcomes)
     progress = json.loads((tmp_path / "generation_results.json").read_text(encoding="utf-8"))
     assert len(progress["outcomes"]) == 2
     request_records = (tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(request_records) == 2
-    assert all(json.loads(record)["task_role"] == "case_generation" for record in request_records)
+    assert len(request_records) == 8
+    assert {json.loads(record)["task_role"] for record in request_records} == {
+        "case_generation_core",
+        "case_generation_evidence",
+        "case_generation_overlays",
+        "case_generation_presentation",
+    }
     attempts = [
         json.loads(record)
         for record in (tmp_path / "generation_attempts.jsonl")
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    assert len(attempts) == 2
+    assert len(attempts) == 8
     assert all(record["admission_result"] == "admitted" for record in attempts)
     assert all(record["request_id"] and record["generation_id"] for record in attempts)
 
@@ -153,7 +194,7 @@ def test_generation_matrix_counts_three_rejected_candidates_without_outer_retry(
         return _OfflineMeasuredClient(
             model=model,
             observer=observer,
-            content_factory=lambda _messages: "{not-json",
+            content_factory=lambda _messages, _role: "{not-json",
         )
 
     outcomes = asyncio.run(

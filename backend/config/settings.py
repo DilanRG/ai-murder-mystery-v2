@@ -67,7 +67,6 @@ DEFAULT_TEMPERATURE = 0.8
 DEFAULT_TOP_P = 0.95
 DEFAULT_TOP_K = 40
 DEFAULT_MAX_TOKENS = 1024
-DEFAULT_CONTEXT_TOKENS = 8192
 
 # ── Game ─────────────────────────────────────────────────────────────────────
 CAST_SIZE = 8              # Total characters per game (1 killer + 1 victim + 6 innocents)

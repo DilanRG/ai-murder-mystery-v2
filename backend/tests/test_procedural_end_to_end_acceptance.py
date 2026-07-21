@@ -14,6 +14,7 @@ from procedural_acceptance_fixture import (
     MURDERER_ID,
     independent_generated_document,
 )
+from conftest import generated_stage_response
 
 
 class _AcceptanceProvider:
@@ -21,10 +22,11 @@ class _AcceptanceProvider:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.document: dict[str, object] | None = None
 
     async def generate(self, messages, **kwargs):
         self.calls += 1
-        if self.calls == 1:
+        if self.document is None:
             document = deepcopy(independent_generated_document())
             document["case"]["overlays"][MURDERER_ID]["lies"] = [  # type: ignore[index]
                 {
@@ -36,8 +38,12 @@ class _AcceptanceProvider:
                     "reason": "The claim conceals the stopped-clock timeline.",
                 }
             ]
+            self.document = document
+        if kwargs.get("task_role", "").startswith("case_generation_"):
             return SimpleNamespace(
-                content=json.dumps(document)
+                content=json.dumps(
+                    generated_stage_response(self.document, kwargs["task_role"])
+                )
             )
         return SimpleNamespace(content="minus beer")
 
@@ -193,6 +199,6 @@ def test_generated_case_remains_solvable_after_autonomous_activity_and_replays(
         assert loaded.status_code == 200, loaded.text
         assert loaded.json()["game"] == accused["game"]
 
-    # One call generated the scenario; subsequent calls were deliberately
+    # Four staged calls generated the scenario; subsequent calls were deliberately
     # malformed local planner responses.  No external provider credit is used.
     assert provider.calls > 1

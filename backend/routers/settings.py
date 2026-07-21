@@ -24,7 +24,6 @@ class SettingsUpdateRequest(BaseModel):
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
     top_k: int | None = Field(default=None, ge=0, le=1_000)
     max_tokens: int | None = Field(default=None, ge=1, le=65_536)
-    context_tokens: int | None = Field(default=None, ge=1, le=2_000_000)
     autonomy: Literal["low", "high"] | None = None
     timer_mode: Literal["none", "realtime", "event"] | None = None
     timer_minutes: int | None = Field(default=None, ge=1, le=1_440)

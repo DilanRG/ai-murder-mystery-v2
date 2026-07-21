@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from conftest import make_dummy_generated_document
+from conftest import generated_stage_response, make_dummy_generated_document
 from game.actions import AdvanceOpeningIntent, MoveIntent
 from game.case_generation import compile_generated_scenario
 from game.content import load_case, load_location
@@ -68,7 +68,13 @@ class _ScenarioThenAgentsProvider:
         system = messages[0].content
         if "canonical scenario architect" in system:
             self.scenario_calls += 1
-            return SimpleNamespace(content=json.dumps(make_dummy_generated_document()))
+            return SimpleNamespace(
+                content=json.dumps(
+                    generated_stage_response(
+                        make_dummy_generated_document(), kwargs["task_role"]
+                    )
+                )
+            )
         request = json.loads(messages[-1].content)
         self.agent_requests.append(request)
         return SimpleNamespace(
@@ -85,7 +91,11 @@ class _ScenarioOnlyProvider:
     async def generate(self, messages, **kwargs):
         self.calls += 1
         assert "canonical scenario architect" in messages[0].content
-        return SimpleNamespace(content=json.dumps(make_dummy_generated_document()))
+        return SimpleNamespace(
+            content=json.dumps(
+                generated_stage_response(make_dummy_generated_document(), kwargs["task_role"])
+            )
+        )
 
 
 class _NpcOnlyProvider:
@@ -120,7 +130,7 @@ def test_generated_committed_turn_runs_seven_isolated_agent_calls(
         result = await service.action(MoveIntent(room_id=destination))
 
         assert result["accepted"] and result["committed"]
-        assert provider.scenario_calls == 1
+        assert provider.scenario_calls == 4
         assert len(provider.agent_requests) == 7
         assert len({request["actor_id"] for request in provider.agent_requests}) == 7
         assert all(
@@ -162,7 +172,7 @@ def test_generated_case_and_runtime_can_use_distinct_role_clients(
         result = await service.action(MoveIntent(room_id=destination))
 
         assert result["accepted"] and result["committed"]
-        assert scenario_provider.calls == 1
+        assert scenario_provider.calls == 4
         assert len(npc_provider.requests) == 7
         assert len({request["actor_id"] for request in npc_provider.requests}) == 7
         diagnostics = service.runtime_diagnostics()

@@ -10,7 +10,7 @@ from typing import Any
 from config.settings import (
     USER_CONFIG_FILE,
     DEFAULT_MODEL, DEFAULT_TEMPERATURE, DEFAULT_TOP_P,
-    DEFAULT_TOP_K, DEFAULT_MAX_TOKENS, DEFAULT_CONTEXT_TOKENS,
+    DEFAULT_TOP_K, DEFAULT_MAX_TOKENS,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,6 @@ DEFAULTS: dict[str, Any] = {
     "top_p": DEFAULT_TOP_P,
     "top_k": DEFAULT_TOP_K,
     "max_tokens": DEFAULT_MAX_TOKENS,
-    "context_tokens": DEFAULT_CONTEXT_TOKENS,
     "autonomy": "high",        # "low" | "high"
     "timer_mode": "event",     # "none" | "realtime" | "event"
     "timer_minutes": 30,       # only used in "realtime" mode
@@ -41,7 +40,10 @@ def load_user_config() -> dict[str, Any]:
         try:
             with open(USER_CONFIG_FILE, "r", encoding="utf-8") as f:
                 saved = json.load(f)
-            _config.update(saved)
+            if isinstance(saved, dict):
+                _config.update(
+                    {key: value for key, value in saved.items() if key in DEFAULTS}
+                )
             logger.info("Loaded user config from %s", USER_CONFIG_FILE)
         except Exception as e:
             logger.warning("Failed to load user config: %s — using defaults", e)

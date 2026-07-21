@@ -36,7 +36,7 @@ def _observer(tmp_path: Path) -> DeepSeekRequestObserver:
     return DeepSeekRequestObserver(
         ledger=DeepSeekExperimentLedger(tmp_path / "ledger.jsonl"),
         metrics_path=tmp_path / "requests.jsonl",
-        context=RunContext(5, "sha", "run", "preflight"),
+        context=RunContext(6, "sha", "run", "preflight"),
     )
 
 
@@ -95,7 +95,10 @@ def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
         observer=observer,
     )
     assert client.sampler["top_k"] is None
-    assert client.task_max_tokens["case_generation"] == 32_768
+    assert client.task_max_tokens["case_generation_core"] == 20_000
+    assert client.task_max_tokens["case_generation_evidence"] == 20_000
+    assert client.task_max_tokens["case_generation_overlays"] == 24_000
+    assert client.task_max_tokens["case_generation_presentation"] == 8_000
 
     async def fake_post(_payload) -> LLMResponse:
         return LLMResponse(

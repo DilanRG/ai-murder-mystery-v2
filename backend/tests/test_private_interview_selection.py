@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from conftest import make_dummy_generated_document
+from conftest import generated_stage_response, make_dummy_generated_document
 from game.actions import AdvanceOpeningIntent, BeginInterviewIntent, InterviewExchangeIntent
 from game.case_generation import compile_generated_scenario
 from game.content import load_case, load_location
@@ -503,7 +503,11 @@ class _ScenarioInterviewAndPortrayalProvider:
         system = messages[0].content
         if "canonical scenario architect" in system:
             return SimpleNamespace(
-                content=json.dumps(make_dummy_generated_document())
+                content=json.dumps(
+                    generated_stage_response(
+                        make_dummy_generated_document(), kwargs["task_role"]
+                    )
+                )
             )
         if "interviewed NPC" in system:
             request = json.loads(messages[-1].content)

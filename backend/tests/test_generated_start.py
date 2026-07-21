@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import main
-from conftest import make_dummy_generated_document
+from conftest import generated_stage_response, make_dummy_generated_document
 from game.case_generation import select_generation_cast
 from game.content import CHARACTER_CARDS_DIR, list_content_ids, load_case
 from game.models import CaseDefinition
@@ -21,12 +21,23 @@ class DummyScenarioProvider:
     def __init__(self, outputs: list[dict[str, object] | Exception]) -> None:
         self.outputs = list(outputs)
         self.calls = 0
+        self.document: dict[str, object] | None = None
 
     async def generate(self, messages, **kwargs):
         self.calls += 1
-        output = self.outputs.pop(0) if self.outputs else {}
+        if self.document is not None and kwargs.get("task_role", "").startswith(
+            "case_generation_"
+        ):
+            output: dict[str, object] | Exception = generated_stage_response(
+                self.document, kwargs["task_role"]
+            )
+        else:
+            output = self.outputs.pop(0) if self.outputs else {}
         if isinstance(output, Exception):
             raise output
+        if "case" in output and "presentation" in output:
+            self.document = output
+            output = generated_stage_response(output, kwargs["task_role"])
         return SimpleNamespace(content=json.dumps(output))
 
 
@@ -78,7 +89,7 @@ def test_normal_new_story_admits_dummy_provider_case_with_exact_manual_cast(tmp_
         "story_source": "openrouter",
         "story_status": "ready",
     }
-    assert provider.calls == 1
+    assert provider.calls == 4
     assert set(main._session.engine.case.character_ids) == set(source.character_ids)
 
 
@@ -220,7 +231,7 @@ def test_generated_case_save_load_embeds_validated_truth_without_provider_key(tm
     assert loaded.status_code == 200, loaded.text
     assert main._session.engine.case.id == generated_case_id
     assert main._session.engine.case.id.startswith("generated_")
-    assert provider.calls == 1
+    assert provider.calls == 4
 
 
 def test_generated_case_save_rejects_embedded_truth_tampering(tmp_path) -> None:

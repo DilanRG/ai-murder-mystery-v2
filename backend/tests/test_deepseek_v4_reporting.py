@@ -15,7 +15,7 @@ from llm.experiment import PRO_MODEL_SLUG
 def _record(cost: float, latency: float) -> dict[str, object]:
     return {
         "schema_version": 1,
-        "experiment_revision": 5,
+        "experiment_revision": 6,
         "git_sha": "e" * 40,
         "run_id": "generation-P1-pro",
         "phase": "generation",

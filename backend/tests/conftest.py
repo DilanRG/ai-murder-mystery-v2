@@ -240,6 +240,48 @@ def make_dummy_generated_document(
     }
 
 
+def generated_stage_response(
+    document: dict[str, object],
+    task_role: str,
+) -> dict[str, object]:
+    """Return the provider payload for one bounded scenario-generation stage.
+
+    Test providers keep a complete deterministic document as their fixture data,
+    while the production boundary now asks for four independently validated
+    slices.  Keeping the projection here prevents the fixtures from silently
+    exercising the retired one-shot protocol.
+    """
+
+    case = document["case"]
+    assert isinstance(case, dict)
+    if task_role == "case_generation_core":
+        return {
+            "schema_version": 1,
+            **{
+                key: case[key]
+                for key in (
+                    "title",
+                    "investigation_start_minute",
+                    "murder",
+                    "facts",
+                    "timeline",
+                    "opening",
+                )
+            },
+        }
+    if task_role == "case_generation_evidence":
+        return {
+            "schema_version": 1,
+            "evidence": case["evidence"],
+            "solution": case["solution"],
+        }
+    if task_role == "case_generation_overlays":
+        return {"schema_version": 1, "overlays": case["overlays"]}
+    if task_role == "case_generation_presentation":
+        return {"schema_version": 1, "presentation": document["presentation"]}
+    raise AssertionError(f"unexpected scenario stage: {task_role}")
+
+
 def make_location(id: str, name: str, connected_to: list[str] | None = None) -> LocationDef:
     return LocationDef(
         id=id,

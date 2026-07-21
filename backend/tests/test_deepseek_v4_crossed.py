@@ -28,7 +28,7 @@ GIT_SHA = "d" * 40
 def _preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 5,
+            "experiment_revision": 6,
             "git_sha": GIT_SHA,
             "model": model,
             "actual_model": model,

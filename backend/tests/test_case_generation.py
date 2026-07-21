@@ -239,7 +239,43 @@ def test_generation_context_contains_selected_cards_and_location_but_no_card_pro
 @pytest.mark.asyncio
 async def test_invalid_generation_retries_with_feedback_then_accepts_dummy_case() -> None:
     source = load_case("ashwick_sample")
-    llm = DummyScenarioLLM(["{not json", json.dumps(_dummy_document())])
+    document = _dummy_document()
+    case = document["case"]
+    llm = DummyScenarioLLM(
+        [
+            "{not json",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    **{
+                        key: case[key]
+                        for key in (
+                            "title",
+                            "investigation_start_minute",
+                            "murder",
+                            "facts",
+                            "timeline",
+                            "opening",
+                        )
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "evidence": case["evidence"],
+                    "solution": case["solution"],
+                }
+            ),
+            json.dumps({"schema_version": 1, "overlays": case["overlays"]}),
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "presentation": document["presentation"],
+                }
+            ),
+        ]
+    )
 
     result = await generate_validated_scenario(
         llm,
@@ -250,8 +286,8 @@ async def test_invalid_generation_retries_with_feedback_then_accepts_dummy_case(
     )
 
     assert result.case.seed == 295
-    assert len(llm.calls) == 2
-    assert "previous attempt was rejected" in llm.calls[1]["messages"][1].content.lower()  # type: ignore[index]
+    assert len(llm.calls) == 5
+    assert "previous attempt was rejected" in llm.calls[1]["messages"][2].content.lower()  # type: ignore[index]
     assert "inert story data" in llm.calls[0]["messages"][0].content.lower()  # type: ignore[index]
     assert all(call["json_mode"] is True for call in llm.calls)
 
