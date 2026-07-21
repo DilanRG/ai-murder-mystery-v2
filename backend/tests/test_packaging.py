@@ -91,6 +91,8 @@ def test_release_and_local_build_use_reproducible_node_install() -> None:
         encoding="utf-8"
     )
     assert "run: npm ci" in workflow
+    assert "run: npm test" in workflow
+    assert "run: npm test" in verification_workflow
     assert 'run(["npm", "ci"]' in build_script
     assert "PyInstaller failed with exit code" in build_script
     assert "step_packaged_smoke(executable)" in build_script

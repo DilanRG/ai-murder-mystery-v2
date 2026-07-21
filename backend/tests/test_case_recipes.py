@@ -17,6 +17,10 @@ from game.recipes import (
     resolve_case_recipe,
     resolve_materialized_case_recipe,
 )
+
+
+def test_recipe_seed_contract_is_exact_in_the_browser_json_transport() -> None:
+    assert MAX_RECIPE_SEED == (1 << 53) - 1
 from game.validator import validate_case
 
 

@@ -15,7 +15,7 @@
 - Bounded notebooks, accusation payloads, conversation memories, and action histories, with rejected actions leaving time and history unchanged.
 - Frozen builds bundle all authored content and write config, saves, and card drafts to durable per-user storage. The build fails closed and smoke-tests the real artifact across automatic casting, an exact manual cast, both fixed cases, and v2 save/load.
 - The package-verification matrix builds and launches the distributable successfully on Windows, Ubuntu, and macOS; the latest three-run matrix completed without annotations.
-- 192 automated unit, contract, adversarial, persistence, AI-boundary, concurrency, packaging, cast-reachability, and solve tests. The deterministic soak matrix solves every pooled card against both mystery spines; desktop/mobile browser playthroughs cover both mysteries and the card editor.
+- 199 automated unit, contract, adversarial, persistence, AI-boundary, concurrency, packaging, cast-reachability, frontend-boundary, and solve tests (193 Python plus six Node tests). The deterministic soak matrix solves every pooled card against both mystery spines; desktop/mobile browser playthroughs cover both mysteries and the card editor.
 
 ## Still to build
 

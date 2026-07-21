@@ -3,6 +3,7 @@ import { showScreen } from './screens.js';
 import { startGame, resumeGame, bindGameControls, openSaveLoad } from './game.js';
 import { initSettings } from './settings.js';
 import { initCardEditor } from './cards.js';
+import { parseRecipeSeed } from './seed.js';
 
 let catalog = null;
 const $ = id => document.getElementById(id);
@@ -30,8 +31,7 @@ async function begin(){
     const start=$('start-case');start.disabled=true;start.textContent='Casting and directing story…';message('Selecting the ensemble, directing the evening, and validating the case…');
     const [mode,id]=$('case-mode').value.split(':',2);let payload;
     if(mode==='recipe'){
-      const raw=$('case-seed').value.trim(),seed=raw===''?randomSeed():Number(raw);
-      if(!Number.isSafeInteger(seed)||seed<0||seed>2147483647)throw new Error('Case seed must be a whole number from 0 to 2147483647.');
+      const seed=parseRecipeSeed($('case-seed').value,randomSeed);
       $('case-seed').value=String(seed);payload={recipe_id:id,seed};
       if($('cast-mode').value==='manual'){const choices=Array.from(document.querySelectorAll('#cast-picker input:checked')).map(input=>input.value);if(choices.length!==8)throw new Error('Choose one character from each of the eight ensemble groups.');payload.character_ids=choices;}
     }else payload={case_id:id,location_id:catalog.default_location_id};

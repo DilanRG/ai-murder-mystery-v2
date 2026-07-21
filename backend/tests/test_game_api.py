@@ -110,7 +110,7 @@ def test_seeded_recipe_start_is_reproducible_and_does_not_leak_selection_metadat
 
 def test_recipe_seed_boundary_and_conflicting_inputs_are_rejected(tmp_path):
     with _client(tmp_path) as client:
-        for seed in (0, 1_000_000, (1 << 63) - 1):
+        for seed in (0, 1_000_000, 2_147_483_648, (1 << 53) - 1):
             response = client.post(
                 "/api/game/new",
                 json={"recipe_id": "ashwick_manor_dual_spines", "seed": seed},
@@ -121,7 +121,7 @@ def test_recipe_seed_boundary_and_conflicting_inputs_are_rejected(tmp_path):
             {"recipe_id": "ashwick_manor_dual_spines"},
             {"seed": 0},
             {"recipe_id": "ashwick_manor_dual_spines", "seed": -1},
-            {"recipe_id": "ashwick_manor_dual_spines", "seed": 1 << 63},
+            {"recipe_id": "ashwick_manor_dual_spines", "seed": 1 << 53},
             {"recipe_id": "ashwick_manor_dual_spines", "seed": True},
             {"recipe_id": "ashwick_manor_dual_spines", "seed": "42"},
             {

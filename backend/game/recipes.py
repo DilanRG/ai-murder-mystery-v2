@@ -22,7 +22,9 @@ from game.validator import validate_case, validate_location_package
 
 
 ASSEMBLIES_DIR = CONTENT_DIR / "assemblies"
-MAX_RECIPE_SEED = (1 << 63) - 1
+# Recipe seeds cross the browser JSON boundary as numbers, so keep every
+# accepted value exactly representable in both Python and JavaScript.
+MAX_RECIPE_SEED = (1 << 53) - 1
 _CONTENT_ID = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
 
