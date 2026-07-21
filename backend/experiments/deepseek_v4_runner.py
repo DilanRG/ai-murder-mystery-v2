@@ -24,10 +24,15 @@ EXPECTED_MODELS = {
     "pro": "deepseek/deepseek-v4-pro",
     "flash": "deepseek/deepseek-v4-flash",
 }
-EXPECTED_MANIFEST_REVISION = 2
-EXPECTED_GIT_CHECKPOINT = "f03d14e48a38bf3bbf7f6a5bb24d84fdcf75dc2c"
+EXPECTED_RESOLVED_MODELS = {
+    "pro": "deepseek/deepseek-v4-pro-20260423",
+    "flash": "deepseek/deepseek-v4-flash-20260423",
+}
+EXPECTED_MANIFEST_REVISION = 3
+EXPECTED_GIT_CHECKPOINT = "7aee11513c70eee562a0b606731afb2ae24ccaac"
 EXPECTED_ROUTING = {
-    "allow_fallbacks": True,
+    "only": ["deepseek"],
+    "allow_fallbacks": False,
     "require_parameters": True,
 }
 
@@ -66,17 +71,19 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Reject changes that would make the paired measurement unfair or unsafe."""
 
     if manifest.get("manifest_revision") != EXPECTED_MANIFEST_REVISION:
-        raise ExperimentSafetyError("Only frozen manifest revision 2 is accepted.")
+        raise ExperimentSafetyError("Only frozen manifest revision 3 is accepted.")
     if manifest.get("git_checkpoint") != EXPECTED_GIT_CHECKPOINT:
         raise ExperimentSafetyError("Manifest must retain the revision-2 evaluator checkpoint.")
     if (
-        manifest.get("supersedes_revision") != 1
+        manifest.get("supersedes_revision") != 2
         or manifest.get("gateway") != "openrouter"
         or manifest.get("model_fallbacks") != []
     ):
-        raise ExperimentSafetyError("Manifest revision 2 must retain OpenRouter routing provenance.")
+        raise ExperimentSafetyError("Manifest revision 3 must retain OpenRouter/DeepSeek routing provenance.")
     if manifest.get("models") != EXPECTED_MODELS:
         raise ExperimentSafetyError("Manifest model slugs must be the exact DeepSeek V4 pair.")
+    if manifest.get("resolved_models") != EXPECTED_RESOLVED_MODELS:
+        raise ExperimentSafetyError("Manifest must freeze OpenRouter's dated model resolutions.")
     if manifest.get("provider_routing") != EXPECTED_ROUTING:
         raise ExperimentSafetyError("Provider routing must match the frozen OpenRouter policy.")
 
@@ -85,7 +92,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         raise ExperimentSafetyError("Both model cells require reasoning_effort=high.")
     if settings.get("generation_attempt_limit") != 3 or settings.get("concurrency") != 1:
         raise ExperimentSafetyError("Generation is limited to three attempts and sequential calls.")
-    if not isinstance(settings.get("sampler_defaults"), Mapping):
+    if dict(settings.get("sampler_defaults", {})) != {"top_p": 0.95, "top_k": None}:
         raise ExperimentSafetyError("Identical sampler defaults are required.")
     expected_roles = {
         "case_generation": (16_384, 0.55),
@@ -191,12 +198,14 @@ def verify_preflights(
             raise ExperimentSafetyError("Both model preflights must be recorded before execution.")
         if record.get("experiment_revision") != EXPECTED_MANIFEST_REVISION:
             raise ExperimentSafetyError("Preflight belongs to a superseded experiment revision.")
-        if record.get("model") != slug or not str(record.get("upstream_provider", "")):
-            raise ExperimentSafetyError("Preflight did not verify the exact model through OpenRouter.")
-        if record.get("fallback_used") is not False:
-            raise ExperimentSafetyError("Preflight used a fallback model.")
-        if record.get("accounting_mode") not in {"openrouter", "byok"}:
-            raise ExperimentSafetyError("Preflight did not verify OpenRouter accounting.")
+        if record.get("model") != slug or not model_resolution_matches(
+            slug, str(record.get("actual_model", ""))
+        ) or str(record.get("upstream_provider", "")).casefold() != "deepseek":
+            raise ExperimentSafetyError("Preflight did not verify the exact DeepSeek upstream model.")
+        if record.get("is_byok") is not True or record.get("fallback_used") is not False:
+            raise ExperimentSafetyError("Preflight did not verify DeepSeek BYOK without fallback.")
+        if record.get("accounting_mode") != "byok":
+            raise ExperimentSafetyError("Preflight did not verify BYOK accounting.")
         if not str(record.get("generation_id", "")):
             raise ExperimentSafetyError("Preflight did not retain a generation ID.")
         total_cost = record.get("total_external_cost_usd")
@@ -204,6 +213,15 @@ def verify_preflights(
             raise ExperimentSafetyError("Preflight did not retain trusted external cost.")
         if expected_git_sha is not None and record.get("git_sha") != expected_git_sha:
             raise ExperimentSafetyError("Preflight evidence belongs to a different code revision.")
+
+
+def model_resolution_matches(requested_model: str, actual_model: str) -> bool:
+    """Accept only an exact alias or its frozen dated OpenRouter resolution."""
+
+    if requested_model not in EXPECTED_MODELS.values():
+        return False
+    model_key = next(key for key, value in EXPECTED_MODELS.items() if value == requested_model)
+    return actual_model in {requested_model, EXPECTED_RESOLVED_MODELS[model_key]}
 
 
 def load_private_preflights(path: Path) -> dict[str, Any]:

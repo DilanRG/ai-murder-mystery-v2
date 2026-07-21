@@ -65,6 +65,21 @@ def test_experiment_options_add_exact_openrouter_payload_without_affecting_legac
     assert "reasoning" not in legacy_payload
 
 
+def test_explicit_none_omits_top_k_without_changing_legacy_default() -> None:
+    client = LLMClient(api_key="test", model="test/model", top_k=None)
+    captured: dict[str, object] = {}
+
+    async def fake_post(payload: dict[str, object]) -> LLMResponse:
+        captured.update(payload)
+        return LLMResponse(content="{}")
+
+    client._post = fake_post  # type: ignore[method-assign]
+    asyncio.run(client.generate([LLMMessage(role="user", content="plan")]))
+
+    assert "top_k" not in captured
+    assert LLMClient(api_key="test", model="test/model").sampler["top_k"] == 40
+
+
 def test_response_parses_provider_accounting_and_finish_details(monkeypatch: pytest.MonkeyPatch) -> None:
     response_body = {
         "id": "gen-123",

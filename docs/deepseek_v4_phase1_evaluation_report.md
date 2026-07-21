@@ -1,6 +1,6 @@
 # DeepSeek V4 Phase 1 Evaluation Report
 
-**Status:** Incomplete — OpenRouter experiment revision 2 awaiting preflight
+**Status:** Incomplete — direct-DeepSeek experiment revision 3 awaiting preflight
 **Experiment date:** 2026-07-21 to 2026-07-22
 **Product:** AI Murder Mystery Game
 **Frozen input manifest:** [`backend/experiments/deepseek_v4_manifest.json`](../backend/experiments/deepseek_v4_manifest.json)
@@ -9,24 +9,24 @@ This is a live evidence report, not a Phase 1 or MVP completion claim. The exper
 
 ## Current provider result
 
-Three revision-1 requests to `deepseek/deepseek-v4-flash` were rejected by OpenRouter with HTTP 404 before a generation ID. The Pro preflight was therefore not attempted. No generation, NPC, interview, portrayal, intended-play, or adversarial provider traffic followed.
+Three revision-1 requests to `deepseek/deepseek-v4-flash` were rejected before generation. One revision-2 routing diagnostic completed through WandB and is invalidated because it did not use the required DeepSeek upstream. The Pro preflight was not attempted. No case generation, NPC, interview, portrayal, intended-play, or adversarial provider traffic followed.
 
-Tag `v2.0.0` confirmed that the previously working game used the OpenRouter endpoint with an exact model slug and no direct-provider restriction. Revision 1 added a direct-DeepSeek-only BYOK route, which created the incompatibility. Revision 2 restores OpenRouter provider routing, accepts provider failover between compatible endpoints, and still rejects any returned model other than the exact requested Pro or Flash slug.
+Official OpenRouter documentation confirms that `provider.only`, `allow_fallbacks=false`, and `require_parameters=true` are the correct controls, while “Always use for this provider” prevents a prioritized BYOK key from falling back to shared capacity. Authenticated endpoint metadata confirms the exact provider tag is `deepseek`. It also isolates the revision-1 defect: the direct V4 endpoints support every measured control except `top_k`, so that parameter left no eligible endpoint. Revision 3 omits it only in the measured adapter and retains all strict routing controls.
 
-OpenRouter key checks reported zero BYOK usage and zero gateway usage, for an observed delta of USD 0.00. The local fail-closed ledger nevertheless retains USD 0.00016230 in worst-case reservations because no trusted generation accounting exists for the three rejected revision-1 requests.
+The WandB diagnostic cost USD 0.00000490 and is settled in the private ledger. The ledger conservatively retains USD 0.00016230 for the three revision-1 requests because they produced no trusted generation accounting. The extra owner-authorized endpoint-diagnostic allowance remains effectively unused.
 
-The owner supplied and dashboard-tested a fresh OpenRouter credential. Revision 2 must still prove the exact returned model, serving provider, token data, and inclusive OpenRouter charge through the production adapter before substantive traffic begins.
+The owner supplied and dashboard-tested a fresh DeepSeek BYOK key through OpenRouter. Revision 3 must still prove the dated model resolution, upstream provider, BYOK flag, token data, upstream cost, and OpenRouter fee through the production adapter before substantive traffic begins.
 
 ## Frozen comparison design
 
 - Exact models: `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash`.
-- Gateway route: OpenRouter selects a compatible serving provider; provider failover is recorded, all requested parameters are required, and no fallback model is configured or accepted.
+- Gateway route: OpenRouter with only the `deepseek` provider allowed; shared/provider/model fallback disabled; all sent parameters required; `top_k` deliberately omitted for both models.
 - Reasoning effort: high for both models.
 - Three predeclared paired seeds and casts, alternating Flash/Pro order.
 - One predeclared balanced reserve pair, usable only under its manifest rule.
 - Maximum three production admission attempts per model/case cell.
 - Soft stop USD 8.50; hard operational stop USD 9.50; USD 0.50 uncertainty reserve.
-- Reservation ceilings are USD 5/M input and USD 10/M output for both models. On 2026-07-22 the maximum advertised OpenRouter endpoint prices were USD 0.239/M input and USD 0.379/M output for Flash, and USD 1.74/M input and USD 3.48/M output for Pro.
+- Reservation ceilings are USD 5/M input and USD 10/M output for both models. On 2026-07-22 the direct DeepSeek endpoint advertised USD 0.14/M input and USD 0.28/M output for Flash, and USD 0.435/M input and USD 0.87/M output for Pro.
 - Crossed runtime cells select the first admitted Pro case and first admitted Flash case in manifest order, never subjective favourites.
 
 ## Prepared evidence controls
@@ -43,7 +43,7 @@ The owner supplied and dashboard-tested a fresh OpenRouter credential. Revision 
 
 | Evidence area | Pro | Flash |
 |---|---:|---:|
-| Confirmed OpenRouter exact-model preflight | Not run | Revision 1 failed before generation |
+| Confirmed DeepSeek BYOK preflight | Not run | Revision 1 failed; revision-2 WandB diagnostic invalidated |
 | Paired generation cells attempted | 0 / 3 | 0 / 3 |
 | Admitted cases | 0 | 0 |
 | Crossed intended-play cells | 0 / 2 | 0 / 2 |
@@ -69,7 +69,7 @@ Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
 ## Remaining work
 
-1. Commit revision 2 and rerun both tiny OpenRouter preflights.
+1. Commit revision 3 and rerun both tiny DeepSeek-upstream preflights.
 2. Attempt all six frozen paired generation cells, retaining all rejections.
 3. Select first admitted Pro/Flash cases and run crossed cells A–D with independent blind player agents.
 4. Freeze Phase A transcripts and reports, then inspect post-game audits and determine whether Phase A passes.

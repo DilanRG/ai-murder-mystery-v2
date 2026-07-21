@@ -44,7 +44,7 @@ def test_verified_response_is_settled_and_sanitized(tmp_path: Path) -> None:
 
     async def stats(_generation_id: str) -> dict[str, object]:
         return {
-            "model": PRO_MODEL_SLUG,
+            "model": "deepseek/deepseek-v4-pro-20260423",
             "provider_name": "DeepSeek",
             "is_byok": True,
             "total_cost": 0.001,
@@ -80,7 +80,7 @@ def test_verified_response_is_settled_and_sanitized(tmp_path: Path) -> None:
     assert observer.ledger.snapshot()["settled_usd"] > 0
 
 
-def test_standard_openrouter_response_settles_inclusive_charge(tmp_path: Path) -> None:
+def test_non_byok_response_stops_and_retains_reservation(tmp_path: Path) -> None:
     observer = _observer(tmp_path)
 
     async def stats(_generation_id: str) -> dict[str, object]:
@@ -98,17 +98,16 @@ def test_standard_openrouter_response_settles_inclusive_charge(tmp_path: Path) -
     async def run() -> None:
         base = _event_base()
         await observer("pre_call", dict(base))
-        await observer(
-            "response",
-            dict(base) | {"response": response, "error": None, "cancelled": False},
-        )
+        with pytest.raises(ExperimentSafetyError, match="BYOK"):
+            await observer(
+                "response",
+                dict(base) | {"response": response, "error": None, "cancelled": False},
+            )
 
     asyncio.run(run())
     assert observer.last_record is not None
-    assert observer.last_record["result"] == "success"
-    assert observer.last_record["accounting_mode"] == "openrouter"
-    assert observer.last_record["openrouter_charge_usd"] == 0.003
-    assert observer.ledger.snapshot()["open_reservations"] == 0
+    assert observer.last_record["result"] == "byok_verification_failed"
+    assert observer.ledger.snapshot()["open_reservations"] == 1
 
 
 def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
@@ -121,6 +120,7 @@ def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
         model=PRO_MODEL_SLUG,
         observer=observer,
     )
+    assert client.sampler["top_k"] is None
 
     async def substituted_model_stats(_generation_id: str) -> dict[str, object]:
         return {
@@ -144,7 +144,62 @@ def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
         assert caught.value.retryable is False
 
     asyncio.run(run())
-    assert observer.records[-1]["result"] == "model_verification_failed"
+    assert observer.records[-1]["result"] == "byok_verification_failed"
+
+
+def test_generation_stats_404_is_retried_with_a_fixed_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observer = _observer(tmp_path)
+    calls = 0
+
+    async def eventually_available(_generation_id: str) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise LLMProviderError(
+                "not ingested",
+                code="provider_rejected_request",
+                status_code=404,
+                retryable=False,
+            )
+        return {
+            "model": "deepseek/deepseek-v4-pro-20260423",
+            "provider_name": "DeepSeek",
+            "is_byok": True,
+            "total_cost": 0.001,
+            "upstream_inference_cost": 0.002,
+            "provider_responses": [],
+        }
+
+    observer.stats_lookup = eventually_available
+    monkeypatch.setattr(
+        "experiments.deepseek_v4_runtime.STATS_LOOKUP_RETRY_DELAYS_SECONDS",
+        (0.0, 0.0, 0.0),
+    )
+    response = LLMResponse(
+        content="OK",
+        id="gen-eventual",
+        model=PRO_MODEL_SLUG,
+        provider="DeepSeek",
+        is_byok=True,
+        cost=0.001,
+        cost_details={"upstream_inference_cost": 0.002},
+    )
+
+    async def run() -> None:
+        base = _event_base()
+        await observer("pre_call", dict(base))
+        await observer(
+            "response",
+            dict(base) | {"response": response, "error": None, "cancelled": False},
+        )
+
+    asyncio.run(run())
+    assert calls == 3
+    assert observer.last_record is not None
+    assert observer.last_record["result"] == "success"
 
 
 def test_sequential_measured_client_serializes_and_latches_provider_failure() -> None:

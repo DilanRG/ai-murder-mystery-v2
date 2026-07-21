@@ -23,10 +23,12 @@ from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
     EXPECTED_ROUTING,
     ExperimentSafetyError,
+    model_resolution_matches,
 )
 
 
 StatsLookup = Callable[[str], Awaitable[dict[str, Any]]]
+STATS_LOOKUP_RETRY_DELAYS_SECONDS = (0.0, 0.5, 1.0, 2.0, 4.0)
 
 
 @dataclass(frozen=True)
@@ -77,13 +79,13 @@ class DeepSeekRequestObserver:
         if data.get("reasoning_effort") != "high":
             raise ExperimentSafetyError("Measured request did not use high reasoning effort.")
         reservation = self.ledger.reserve(
-            provider="openrouter",
+            provider="deepseek",
             model=model,  # type: ignore[arg-type]
             prompt_tokens_upper_bound=int(data.get("prompt_tokens_upper_bound", 0)),
             max_output_tokens=int(data.get("max_tokens", 0)),
             parameters=dict(routing),
             reasoning="high",
-            allow_fallbacks=True,
+            allow_fallbacks=False,
         )
         self._reservations[request_id] = reservation
 
@@ -112,7 +114,21 @@ class DeepSeekRequestObserver:
             )
             raise ExperimentSafetyError("Generation ID or statistics lookup is unavailable.")
 
-        stats = await self.stats_lookup(response.id)
+        try:
+            stats = await self._query_stats_with_bounded_retry(response.id)
+        except LLMProviderError as error:
+            self._append_record(
+                self._base_record(data, reservation)
+                | {
+                    "generation_id": response.id,
+                    "result": "accounting_lookup_failed",
+                    "error_type": error.code,
+                    "accounting_status": "reservation_retained",
+                }
+            )
+            raise ExperimentSafetyError(
+                "OpenRouter generation accounting did not become available in time."
+            ) from error
         provider = str(stats.get("provider_name") or response.provider).casefold()
         actual_model = str(stats.get("model") or response.model)
         is_byok = stats.get("is_byok") if stats.get("is_byok") is not None else response.is_byok
@@ -122,9 +138,17 @@ class DeepSeekRequestObserver:
             for item in provider_responses
             if isinstance(item, Mapping) and str(item.get("provider_name", "")).strip()
         }
-        provider_failover_used = len(provider_attempts) > 1
-        fallback_used = actual_model != reservation.model
-        if fallback_used or not provider:
+        provider_failover_used = (
+            len(provider_attempts) > 1
+            or any(name != "deepseek" for name in provider_attempts)
+        )
+        fallback_used = not model_resolution_matches(reservation.model, actual_model)
+        if (
+            fallback_used
+            or provider != "deepseek"
+            or is_byok is not True
+            or provider_failover_used
+        ):
             self._append_record(
                 self._base_record(data, reservation)
                 | {
@@ -134,11 +158,11 @@ class DeepSeekRequestObserver:
                     "is_byok": is_byok,
                     "fallback_used": fallback_used,
                     "provider_failover_used": provider_failover_used,
-                    "result": "model_verification_failed",
+                    "result": "byok_verification_failed",
                     "accounting_status": "reservation_retained",
                 }
             )
-            raise ExperimentSafetyError("OpenRouter exact-model verification failed.")
+            raise ExperimentSafetyError("DeepSeek BYOK endpoint verification failed.")
 
         upstream_cost = response.cost_details.get("upstream_inference_cost")
         upstream_prompt_cost = response.cost_details.get(
@@ -261,6 +285,23 @@ class DeepSeekRequestObserver:
             return None
         return parsed if math.isfinite(parsed) and parsed >= 0 else None
 
+    async def _query_stats_with_bounded_retry(self, generation_id: str) -> dict[str, Any]:
+        if self.stats_lookup is None:
+            raise ExperimentSafetyError("Generation statistics lookup is unavailable.")
+        last_error: LLMProviderError | None = None
+        for delay in STATS_LOOKUP_RETRY_DELAYS_SECONDS:
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                return await self.stats_lookup(generation_id)
+            except LLMProviderError as error:
+                if error.status_code != 404:
+                    raise
+                last_error = error
+        if last_error is None:  # Defensive: the retry schedule is non-empty.
+            raise ExperimentSafetyError("Generation statistics retry schedule is empty.")
+        raise last_error
+
     def _append_record(self, record: dict[str, Any]) -> None:
         self.metrics_path.parent.mkdir(parents=True, exist_ok=True)
         encoded = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
@@ -353,7 +394,7 @@ def build_measured_client(
         reasoning_effort="high",
         temperature=0.8,
         top_p=0.95,
-        top_k=40,
+        top_k=None,
         max_tokens=1024,
         request_observer=fail_closed_observer,
     )

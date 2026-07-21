@@ -26,13 +26,14 @@ GIT_SHA = "b" * 40
 def _preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 2,
+            "experiment_revision": 3,
             "git_sha": GIT_SHA,
             "model": model,
-            "upstream_provider": "openrouter-provider",
-            "is_byok": False,
+            "actual_model": model,
+            "upstream_provider": "deepseek",
+            "is_byok": True,
             "fallback_used": False,
-            "accounting_mode": "openrouter",
+            "accounting_mode": "byok",
             "generation_id": f"preflight-{key}",
             "total_external_cost_usd": 0.001,
         }

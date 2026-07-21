@@ -87,7 +87,8 @@ async def main() -> int:
         evidence[model_key] = {
             "experiment_revision": int(manifest["manifest_revision"]),
             "git_sha": git_sha,
-            "model": record["actual_model"],
+            "model": record["requested_model"],
+            "actual_model": record["actual_model"],
             "upstream_provider": record["upstream_provider"],
             "is_byok": record["is_byok"],
             "fallback_used": record["fallback_used"],

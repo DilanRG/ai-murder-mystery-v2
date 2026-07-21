@@ -1,15 +1,24 @@
 {
   "experiment_id": "deepseek-v4-phase1",
-  "manifest_revision": 2,
+  "manifest_revision": 3,
   "frozen_at": "2026-07-22",
-  "git_checkpoint": "f03d14e48a38bf3bbf7f6a5bb24d84fdcf75dc2c",
-  "supersedes_revision": 1,
-  "revision_reason": "Use the proven legacy-v2 OpenRouter routing path instead of requiring a direct DeepSeek BYOK endpoint.",
-  "invalidated_preflight_attempts": {
-    "count": 3,
-    "provider_generation_ids_returned": 0,
-    "reason": "Revision 1's direct-provider restriction returned HTTP 404 before generation."
-  },
+  "git_checkpoint": "7aee11513c70eee562a0b606731afb2ae24ccaac",
+  "supersedes_revision": 2,
+  "revision_reason": "Force the DeepSeek upstream through OpenRouter, omit unsupported top_k, bound statistics polling, and recognize each dated model resolution.",
+  "invalidated_preflight_attempts": [
+    {
+      "revision": 1,
+      "count": 3,
+      "provider_generation_ids_returned": 0,
+      "reason": "The direct-provider restriction returned HTTP 404 before generation."
+    },
+    {
+      "revision": 2,
+      "count": 1,
+      "provider_generation_ids_returned": 1,
+      "reason": "The model call succeeded, but immediate statistics lookup raced OpenRouter ingestion and the returned dated model resolution was not yet admitted by the verifier."
+    }
+  ],
   "location_package_id": "ashwick_manor",
   "prompt_revision": "procedural-case-generation-v1",
   "schema_revision": "procedural-case-schema-v1",
@@ -17,8 +26,13 @@
     "pro": "deepseek/deepseek-v4-pro",
     "flash": "deepseek/deepseek-v4-flash"
   },
+  "resolved_models": {
+    "pro": "deepseek/deepseek-v4-pro-20260423",
+    "flash": "deepseek/deepseek-v4-flash-20260423"
+  },
   "provider_routing": {
-    "allow_fallbacks": true,
+    "only": ["deepseek"],
+    "allow_fallbacks": false,
     "require_parameters": true
   },
   "gateway": "openrouter",
@@ -27,7 +41,7 @@
     "reasoning_effort": "high",
     "sampler_defaults": {
       "top_p": 0.95,
-      "top_k": 40
+      "top_k": null
     },
     "roles": {
       "case_generation": {"max_tokens": 16384, "temperature": 0.55, "json_mode": true},
@@ -51,9 +65,9 @@
     "pro": {"input": 5.0, "output": 10.0},
     "flash": {"input": 5.0, "output": 10.0}
   },
-  "observed_openrouter_endpoint_maxima_2026_07_22": {
-    "pro": {"input": 1.74, "output": 3.48},
-    "flash": {"input": 0.239, "output": 0.379}
+  "observed_direct_deepseek_pricing_2026_07_22": {
+    "pro": {"input": 0.435, "output": 0.87},
+    "flash": {"input": 0.14, "output": 0.28}
   },
   "generation_pairs": [
     {

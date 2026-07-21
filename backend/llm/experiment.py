@@ -83,23 +83,23 @@ DEFAULT_MODEL_PRICING: Mapping[AllowedModelSlug, ModelPricing] = {
 class ExperimentPolicy:
     """Non-negotiable constraints for the DeepSeek V4 evaluation."""
 
-    provider: str = "openrouter"
-    allow_fallbacks: bool = True
+    provider: str = "deepseek"
+    allow_fallbacks: bool = False
     require_parameters: bool = True
     reasoning: str = "high"
     soft_stop_usd: Decimal = Decimal("8.50")
     hard_stop_usd: Decimal = Decimal("9.50")
     uncertainty_reserve_usd: Decimal = Decimal("0.50")
-    openrouter_fee_rate: Decimal = Decimal("0")
+    openrouter_fee_rate: Decimal = Decimal("0.05")
     pricing: Mapping[AllowedModelSlug, ModelPricing] = field(
         default_factory=lambda: DEFAULT_MODEL_PRICING
     )
 
     def __post_init__(self) -> None:
-        if self.provider != "openrouter":
-            raise ValueError("the experiment gateway must be exactly 'openrouter'")
-        if not self.allow_fallbacks:
-            raise ValueError("OpenRouter endpoint failover must match the frozen routing mode")
+        if self.provider != "deepseek":
+            raise ValueError("the experiment upstream provider must be exactly 'deepseek'")
+        if self.allow_fallbacks:
+            raise ValueError("DeepSeek upstream fallbacks must stay disabled")
         if not self.require_parameters:
             raise ValueError("DeepSeek experiment parameters must be required")
         if self.reasoning != "high":
@@ -123,11 +123,11 @@ class ExperimentPolicy:
         reasoning: str,
     ) -> None:
         if provider != self.provider:
-            raise ExperimentPolicyError("only the OpenRouter gateway is permitted")
+            raise ExperimentPolicyError("only the DeepSeek upstream provider is permitted")
         if model not in _ALLOWED_MODELS:
             raise ExperimentPolicyError("model must be an exact approved DeepSeek V4 slug")
-        if allow_fallbacks != self.allow_fallbacks:
-            raise ExperimentPolicyError("provider failover differs from the frozen OpenRouter route")
+        if allow_fallbacks:
+            raise ExperimentPolicyError("provider fallbacks are forbidden")
         if self.require_parameters and not parameters:
             raise ExperimentPolicyError("explicit provider parameters are required")
         if reasoning != self.reasoning:
@@ -208,7 +208,7 @@ class DeepSeekExperimentLedger:
         max_output_tokens: int,
         parameters: Mapping[str, Any] | None,
         reasoning: str = "high",
-        allow_fallbacks: bool = True,
+        allow_fallbacks: bool = False,
     ) -> Reservation:
         """Persist a worst-case reservation before the caller contacts a provider."""
 

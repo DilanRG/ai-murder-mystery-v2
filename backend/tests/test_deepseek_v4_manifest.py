@@ -22,12 +22,13 @@ from experiments.deepseek_v4_runner import (
 def _verified_preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 2,
+            "experiment_revision": 3,
             "model": slug,
-            "upstream_provider": "openrouter-provider",
-            "is_byok": False,
+            "actual_model": slug,
+            "upstream_provider": "deepseek",
+            "is_byok": True,
             "fallback_used": False,
-            "accounting_mode": "openrouter",
+            "accounting_mode": "byok",
             "generation_id": f"preflight-{key}",
             "total_external_cost_usd": 0.001,
         }
@@ -38,10 +39,11 @@ def _verified_preflights() -> dict[str, object]:
 def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     manifest = load_manifest()
 
-    assert manifest["manifest_revision"] == 2
-    assert manifest["git_checkpoint"] == "f03d14e48a38bf3bbf7f6a5bb24d84fdcf75dc2c"
+    assert manifest["manifest_revision"] == 3
+    assert manifest["git_checkpoint"] == "7aee11513c70eee562a0b606731afb2ae24ccaac"
     assert manifest["gateway"] == "openrouter"
     assert manifest["model_fallbacks"] == []
+    assert manifest["runtime_settings"]["sampler_defaults"]["top_k"] is None
     assert manifest["reservation_pricing_ceiling_usd_per_million"]["pro"] == {
         "input": 5.0,
         "output": 10.0,

@@ -10,7 +10,11 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Iterable, Mapping
 
-from experiments.deepseek_v4_runner import EXPECTED_MODELS, ExperimentSafetyError
+from experiments.deepseek_v4_runner import (
+    EXPECTED_MODELS,
+    ExperimentSafetyError,
+    model_resolution_matches,
+)
 
 
 PUBLIC_REQUEST_FIELDS = (
@@ -80,12 +84,13 @@ def sanitize_request_records(records: Iterable[Mapping[str, Any]]) -> list[dict[
         if model not in EXPECTED_MODELS.values():
             raise ExperimentSafetyError("Metrics contain an unapproved requested model.")
         if record.get("result") == "success" and (
-            record.get("actual_model") != model
-            or not str(record.get("upstream_provider", ""))
+            not model_resolution_matches(str(model), str(record.get("actual_model", "")))
+            or str(record.get("upstream_provider", "")).casefold() != "deepseek"
+            or record.get("is_byok") is not True
             or record.get("fallback_used") is not False
-            or record.get("accounting_mode") not in {"openrouter", "byok"}
+            or record.get("accounting_mode") != "byok"
         ):
-            raise ExperimentSafetyError("Successful metrics do not prove exact OpenRouter model routing.")
+            raise ExperimentSafetyError("Successful metrics do not prove exact DeepSeek BYOK routing.")
         sanitized.append(
             {
                 field: record.get(field)
