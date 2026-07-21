@@ -26,6 +26,12 @@ from game.npc_planning import (
     OpenRouterNpcIntentBatchAdapter,
 )
 from game.persistence import SaveValidationError, load_engine, write_save
+from game.recipes import (
+    ASSEMBLIES_DIR,
+    CaseRecipeSelection,
+    load_case_recipe,
+    resolve_case_recipe,
+)
 from game.portrayal import (
     ConstrainedPortrayalCoordinator,
     OpenRouterPortrayalAdapter,
@@ -38,6 +44,7 @@ from game.views import PlayerGameView, TurnResultView
 
 DEFAULT_CASE_ID = "ashwick_sample"
 DEFAULT_LOCATION_ID = "ashwick_manor"
+DEFAULT_RECIPE_ID = "ashwick_manor_dual_spines"
 
 
 class GameService:
@@ -57,13 +64,29 @@ class GameService:
         *,
         case_id: str = DEFAULT_CASE_ID,
         location_id: str = DEFAULT_LOCATION_ID,
+        recipe_selection: CaseRecipeSelection | None = None,
     ) -> PlayerGameView:
         case = load_case(case_id)
         location = load_location(location_id)
         if case.location_package_id != location.id:
             raise ValueError("case and location package are not compatible")
-        self.engine = GameEngine.create(case, location)
+        self.engine = GameEngine.create(
+            case,
+            location,
+            recipe_selection=recipe_selection,
+        )
         return self.engine.view()
+
+    def start_recipe(self, *, recipe_id: str, seed: int) -> PlayerGameView:
+        """Resolve a seed to one complete authored spine, then start it."""
+
+        selection = resolve_case_recipe(recipe_id, seed)
+        recipe = load_case_recipe(recipe_id)
+        return self.start(
+            case_id=selection.selected_case_id,
+            location_id=recipe.location_package_id,
+            recipe_selection=selection,
+        )
 
     async def start_async(
         self,
@@ -75,6 +98,12 @@ class GameService:
 
         async with self._action_lock:
             return self.start(case_id=case_id, location_id=location_id)
+
+    async def start_recipe_async(self, *, recipe_id: str, seed: int) -> PlayerGameView:
+        """Replace the session with a reproducible recipe selection under the lock."""
+
+        async with self._action_lock:
+            return self.start_recipe(recipe_id=recipe_id, seed=seed)
 
     def state(self) -> PlayerGameView:
         return self._require_engine().view()
@@ -190,12 +219,28 @@ class GameService:
             return self.load(filename)
 
     def catalog(self) -> dict[str, object]:
-        """Return public, fixed content only; case truth is intentionally absent."""
+        """Return public content choices; canonical case truth stays absent."""
 
         location = load_location(DEFAULT_LOCATION_ID)
+        recipes = []
+        for recipe_id in list_content_ids(ASSEMBLIES_DIR):
+            recipe = load_case_recipe(recipe_id)
+            recipes.append(
+                {
+                    "id": recipe.id,
+                    "name": "Fresh authored Ashwick mystery",
+                    "description": (
+                        f"A seed selects one of {len(recipe.case_ids)} complete, validated mysteries."
+                    ),
+                    "location_package_id": recipe.location_package_id,
+                    "variation_count": len(recipe.case_ids),
+                }
+            )
         return {
             "default_case_id": DEFAULT_CASE_ID,
             "default_location_id": DEFAULT_LOCATION_ID,
+            "default_recipe_id": DEFAULT_RECIPE_ID,
+            "recipes": recipes,
             "locations": [self._location_summary(location)],
             "characters": [
                 self._character_summary(character_id)
@@ -204,7 +249,23 @@ class GameService:
         }
 
     def bootstrap(self) -> dict[str, object]:
-        return {"catalog": self.catalog(), "game": self.engine.view() if self.engine else None}
+        return {
+            "catalog": self.catalog(),
+            "game": self.engine.view() if self.engine else None,
+            "recipe": self.recipe_metadata(),
+        }
+
+    def recipe_metadata(self) -> dict[str, object] | None:
+        """Return reproducibility metadata without exposing the selected spine."""
+
+        if self.engine is None or self.engine.recipe_selection is None:
+            return None
+        selection = self.engine.recipe_selection
+        return {
+            "recipe_id": selection.recipe_id,
+            "schema_version": selection.schema_version,
+            "seed": selection.seed,
+        }
 
     def debrief(self) -> dict[str, object]:
         """Construct a deliberate post-game reveal after the case has ended."""
@@ -343,4 +404,10 @@ class GameService:
         }
 
 
-__all__ = ["DEFAULT_CASE_ID", "DEFAULT_LOCATION_ID", "GameService", "SaveValidationError"]
+__all__ = [
+    "DEFAULT_CASE_ID",
+    "DEFAULT_LOCATION_ID",
+    "DEFAULT_RECIPE_ID",
+    "GameService",
+    "SaveValidationError",
+]

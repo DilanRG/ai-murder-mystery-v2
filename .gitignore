@@ -8,6 +8,7 @@ venv/
 .venv/
 user_config.json
 saves/
+card_drafts/
 
 # Environment
 .env

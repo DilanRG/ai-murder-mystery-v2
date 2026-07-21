@@ -6,7 +6,8 @@ The current build is a complete playable vertical slice. It needs no API key and
 
 ## What is playable
 
-- A hand-authored Ashwick Manor case with eight Character Card V3 characters.
+- Two complete, hand-authored Ashwick Manor crime spines selected reproducibly from a player-visible seed.
+- Eight Character Card V3 characters plus a local JSON import, validation, draft, and export editor.
 - Discovery, room-to-room investigation, body examination, searches, evidence review, and limited interviews.
 - A sourced notebook with facts, notes, timeline entries, contradictions, and suspects.
 - Ten-minute deterministic turns with NPC activity resolved from one immutable turn-start snapshot.
@@ -43,7 +44,7 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 .\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
 ```
 
-The suite includes rules tests, transport-level truth-redaction tests, a full black-box API solve, persistence and tamper checks, constrained-AI boundary tests, and adversarial input/state-atomicity cases.
+The 124-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, recipe reproducibility, persistence and tamper checks, constrained-AI boundaries, concurrent cancellation, and adversarial input/state-atomicity cases.
 
 ## Optional AI layer
 
@@ -54,12 +55,12 @@ The core game is deterministic. In Settings, an OpenRouter key and model can opt
 
 Provider output is schema-validated, dialogue fact references and action IDs are allow-listed, timeouts and malformed output fall back locally, and generated output cannot mutate world state. The provider receives neither an arbitrary state-patch interface nor authority to invent rooms, evidence, facts, or tools.
 
-The key is stored locally in `backend/user_config.json`. Save games are stored in `backend/saves/`; both paths are ignored by Git.
+The key is stored locally in `backend/user_config.json`. Save games are stored in `backend/saves/`, and imported card drafts in `backend/card_drafts/`; all three paths are ignored by Git.
 
 ## Project map
 
-- `backend/game/` — canonical models, content loading, turn engine, public projections, saves, and portrayal boundary.
-- `backend/content/` — the Ashwick case, manor, and CCv3 cards.
+- `backend/game/` — canonical models, seeded recipes, turn engine, public projections, saves, card library, and portrayal boundary.
+- `backend/content/` — two Ashwick cases, their assembly recipe, the manor, and CCv3 cards.
 - `backend/routers/` — FastAPI transport.
 - `frontend/` — vanilla JavaScript/Vite interface.
 - `backend/tests/` — unit, contract, adversarial, and playthrough coverage.

@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, model_validator
 
 from game.actions import InterviewExchangeIntent, parse_player_intent
 from game.persistence import SaveValidationError
+from game.recipes import MAX_RECIPE_SEED
 from game.service import DEFAULT_CASE_ID, DEFAULT_LOCATION_ID
 
 
@@ -16,10 +17,25 @@ router = APIRouter(prefix="/api/game")
 
 
 class StartGameRequest(BaseModel):
-    """The vertical slice is fixed content, but IDs remain explicit for saves."""
+    """Choose either explicit authored content or one seeded case recipe."""
 
-    case_id: str = DEFAULT_CASE_ID
-    location_id: str = DEFAULT_LOCATION_ID
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str | None = Field(default=None, min_length=1, max_length=64)
+    location_id: str | None = Field(default=None, min_length=1, max_length=64)
+    recipe_id: str | None = Field(default=None, min_length=1, max_length=64)
+    seed: StrictInt | None = Field(default=None, ge=0, le=MAX_RECIPE_SEED)
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> "StartGameRequest":
+        if self.recipe_id is not None:
+            if self.seed is None:
+                raise ValueError("a recipe start requires a seed")
+            if self.case_id is not None or self.location_id is not None:
+                raise ValueError("recipe and fixed-content fields cannot be combined")
+        elif self.seed is not None:
+            raise ValueError("a seed requires a recipe_id")
+        return self
 
 
 class SaveRequest(BaseModel):
@@ -57,16 +73,28 @@ async def bootstrap() -> dict[str, object]:
 
 @router.post("/new")
 async def new_game(request: StartGameRequest) -> dict[str, object]:
-    """Start Ashwick deterministically; an API key is never required."""
+    """Start fixed or seeded Ashwick content; an API key is never required."""
 
     try:
-        game = await _service().start_async(
-            case_id=request.case_id,
-            location_id=request.location_id,
-        )
+        if request.recipe_id is not None:
+            assert request.seed is not None
+            game = await _service().start_recipe_async(
+                recipe_id=request.recipe_id,
+                seed=request.seed,
+            )
+        else:
+            game = await _service().start_async(
+                case_id=request.case_id or DEFAULT_CASE_ID,
+                location_id=request.location_id or DEFAULT_LOCATION_ID,
+            )
     except (FileNotFoundError, ValueError) as error:
         raise _not_found_or_bad_request(error) from error
-    return {"status": "ok", "game": game.model_dump(mode="json"), "catalog": _service().catalog()}
+    return {
+        "status": "ok",
+        "game": game.model_dump(mode="json"),
+        "catalog": _service().catalog(),
+        "recipe": _service().recipe_metadata(),
+    }
 
 
 @router.get("/state")
@@ -89,10 +117,10 @@ async def action(payload: dict[str, Any]) -> dict[str, object]:
         # excluded as well so a rejected megabyte-scale payload is not echoed
         # back to the client.
         detail = error.errors(include_url=False, include_context=False, include_input=False)
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail) from error
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from error
     if isinstance(intent, InterviewExchangeIntent) and not (1 <= len(intent.message.strip()) <= 1_200):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Interview questions must contain 1 to 1200 non-whitespace characters.",
         )
     try:
@@ -122,7 +150,12 @@ async def load_game(filename: str) -> dict[str, object]:
         game = await _service().load_async(filename)
     except (SaveValidationError, ValueError, FileNotFoundError) as error:
         raise _not_found_or_bad_request(error) from error
-    return {"schema_version": 1, "status": "loaded", "game": game.model_dump(mode="json")}
+    return {
+        "schema_version": 1,
+        "status": "loaded",
+        "game": game.model_dump(mode="json"),
+        "recipe": _service().recipe_metadata(),
+    }
 
 
 @router.get("/debrief")

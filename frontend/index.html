@@ -34,7 +34,14 @@
         <p class="eyebrow">Case file</p><h2 id="setup-title">Prepare for Ashwick</h2>
         <p>Designed for deterministic play. An AI provider may enrich portrayals later, but is never required to solve this case.</p>
         <dl id="case-summary" class="case-summary"></dl>
-        <div class="setup-actions"><button id="start-case" class="primary">Open the case</button><button id="setup-settings" class="secondary">Optional AI settings</button></div>
+        <div class="case-options">
+          <label for="case-mode">Mystery</label>
+          <select id="case-mode"></select>
+          <label for="case-seed">Case seed <span class="muted">(leave blank for random)</span></label>
+          <input id="case-seed" type="number" min="0" max="2147483647" step="1" inputmode="numeric" placeholder="Random seed">
+          <p id="case-seed-note" class="field-note">The same seed always selects the same complete authored mystery.</p>
+        </div>
+        <div class="setup-actions"><button id="start-case" class="primary">Open the case</button><button id="card-editor" class="secondary">Character card editor</button><button id="setup-settings" class="secondary">Optional AI settings</button></div>
       </div>
     </section>
 

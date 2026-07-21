@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "ashwick_manor_dual_spines",
+  "location_package_id": "ashwick_manor",
+  "case_ids": [
+    "ashwick_sample",
+    "ashwick_quiet_vow"
+  ],
+  "case_fingerprints": {
+    "ashwick_sample": "9944db9a598d38906ae5a808355da226e9e6ef22c1595a3d71ef0aac14af24fc",
+    "ashwick_quiet_vow": "d7e07d59898eba23146c4ec93cfb688f9358eb7d8f29a152a760d4c1c133bcd1"
+  }
+}

@@ -16,6 +16,7 @@ from typing import Any, Callable, Literal, Mapping
 
 from pydantic import ValidationError
 
+from game.accusation import evaluate_accusation_support
 from game.models import (
     CaseDefinition,
     EvidenceCondition,
@@ -23,6 +24,12 @@ from game.models import (
     LocationPackage,
     StrictModel,
     WorldRuntimeState,
+)
+from game.recipes import (
+    CaseRecipeSelection,
+    RecipeValidationError,
+    case_content_fingerprint,
+    resolve_case_recipe,
 )
 
 
@@ -40,6 +47,7 @@ class SaveEnvelope(StrictModel):
     schema_version: Literal[1] = SAVE_SCHEMA_VERSION
     case_id: str
     location_id: str
+    case_recipe: CaseRecipeSelection | None = None
     runtime: WorldRuntimeState
 
 
@@ -229,20 +237,13 @@ def validate_runtime_state(
         _require_subset("selected result evidence", result.selected_evidence_ids, knowledge.discovered_evidence_ids)
         _require_subset("selected result timeline facts", result.selected_timeline_fact_ids, knowledge.known_fact_ids)
         _require_subset("selected result timeline facts", result.selected_timeline_fact_ids, set(case.solution.timeline_fact_ids))
-        selected = set(result.selected_evidence_ids)
-        normalise = lambda value: "".join(char for char in value.casefold() if char.isalnum())
-        method_claim_ok = bool(result.submitted_method) and normalise(result.submitted_method) in {
-            normalise(case.murder.method), normalise(case.murder.means)
-        }
-        motive_claim_ok = bool(result.submitted_motive) and normalise(result.submitted_motive) == normalise(case.murder.motive)
-        timeline_claim_ok = bool(result.submitted_timeline) and normalise(result.submitted_timeline) in {
-            normalise(case.murder.opportunity),
-            *(normalise(case.facts[fact_id].statement) for fact_id in case.solution.timeline_fact_ids),
-        }
-        expected_supports = (
-            bool(selected & set(case.solution.method_evidence_ids)) and method_claim_ok,
-            bool(selected & set(case.solution.motive_evidence_ids)) and motive_claim_ok,
-            bool(selected & set(case.solution.opportunity_evidence_ids)) and timeline_claim_ok,
+        expected_supports = evaluate_accusation_support(
+            case,
+            known_fact_ids=knowledge.known_fact_ids,
+            selected_evidence_ids=result.selected_evidence_ids,
+            method=result.submitted_method,
+            motive=result.submitted_motive,
+            timeline=result.submitted_timeline,
         )
         if (result.method_supported, result.motive_supported, result.timeline_supported) != expected_supports:
             _fail("result support flags conflict with selected evidence and claims")
@@ -277,6 +278,18 @@ def validate_save_envelope(
         _fail("save references different authored content")
     if case.location_package_id != location.id:
         _fail("provided case and location are not compatible")
+    if envelope.case_recipe is not None:
+        selection = envelope.case_recipe
+        if selection.selected_case_id != envelope.case_id:
+            _fail("saved recipe selection does not match the selected case")
+        if selection.content_fingerprint != case_content_fingerprint(case):
+            _fail("saved recipe content fingerprint does not match authored content")
+        try:
+            resolved = resolve_case_recipe(selection.recipe_id, selection.seed)
+        except RecipeValidationError as error:
+            raise SaveValidationError("saved recipe can no longer be resolved") from error
+        if resolved != selection:
+            _fail("saved recipe selection is not reproducible")
     validate_runtime_state(envelope.runtime, case, location)
     return envelope
 
@@ -287,6 +300,7 @@ def snapshot_engine(engine: Any) -> SaveEnvelope:
     envelope = SaveEnvelope(
         case_id=engine.case.id,
         location_id=engine.location.id,
+        case_recipe=engine.recipe_selection,
         runtime=engine.runtime.model_copy(deep=True),
     )
     return validate_save_envelope(envelope, engine.case, engine.location)
@@ -303,7 +317,7 @@ def restore_engine(
     # Local import avoids coupling the engine module to persistence at startup.
     from game.engine import GameEngine
 
-    engine = GameEngine(case, location)
+    engine = GameEngine(case, location, recipe_selection=envelope.case_recipe)
     engine.runtime = envelope.runtime.model_copy(deep=True)
     return engine
 

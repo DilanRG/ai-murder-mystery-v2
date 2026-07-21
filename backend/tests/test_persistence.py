@@ -19,6 +19,7 @@ from game.persistence import (
     snapshot_engine,
     write_save,
 )
+from game.recipes import resolve_case_recipe
 
 
 def make_engine() -> GameEngine:
@@ -33,7 +34,8 @@ def test_save_round_trip_restores_runtime_without_embedded_truth(tmp_path: Path)
 
     written = write_save(engine, tmp_path, "ashwick-slot.json")
     payload = json.loads(written.read_text(encoding="utf-8"))
-    assert set(payload) == {"schema_version", "case_id", "location_id", "runtime"}
+    assert set(payload) == {"schema_version", "case_id", "location_id", "case_recipe", "runtime"}
+    assert payload["case_recipe"] is None
     # Runtime may legitimately contain opaque fact IDs, but never a copied
     # authored solution object or an authored murder-truth field.
     assert "murder" not in payload["runtime"]
@@ -51,6 +53,46 @@ def test_snapshot_and_restore_accept_a_valid_in_memory_round_trip() -> None:
     envelope = snapshot_engine(engine)
     restored = restore_engine(envelope.model_dump(mode="json"), engine.case, engine.location)
     assert restored.runtime == engine.runtime
+
+
+def test_seeded_recipe_round_trip_is_reproducible_and_old_v1_save_still_loads() -> None:
+    selection = resolve_case_recipe("ashwick_manor_dual_spines", 42)
+    case = load_case(selection.selected_case_id)
+    location = load_location("ashwick_manor")
+    engine = GameEngine.create(case, location, recipe_selection=selection)
+
+    envelope = snapshot_engine(engine)
+    restored = restore_engine(envelope, case, location)
+    assert restored.recipe_selection == selection
+    assert restored.runtime == engine.runtime
+
+    legacy_payload = envelope.model_dump(mode="json")
+    legacy_payload.pop("case_recipe")
+    legacy = restore_engine(legacy_payload, case, location)
+    assert legacy.recipe_selection is None
+
+
+def test_tampered_recipe_selection_is_rejected() -> None:
+    selection = resolve_case_recipe("ashwick_manor_dual_spines", 0)
+    case = load_case(selection.selected_case_id)
+    location = load_location("ashwick_manor")
+    engine = GameEngine.create(case, location, recipe_selection=selection)
+
+    forged = snapshot_engine(engine).model_dump(mode="json")
+    forged["case_recipe"]["content_fingerprint"] = "0" * 64
+    with pytest.raises(SaveValidationError, match="fingerprint"):
+        restore_engine(forged, case, location)
+
+    opposite_seed = next(
+        seed
+        for seed in range(1, 100)
+        if resolve_case_recipe("ashwick_manor_dual_spines", seed).selected_case_id
+        != selection.selected_case_id
+    )
+    forged = snapshot_engine(engine).model_dump(mode="json")
+    forged["case_recipe"]["seed"] = opposite_seed
+    with pytest.raises(SaveValidationError, match="reproducible"):
+        restore_engine(forged, case, location)
 
 
 @pytest.mark.parametrize("filename", ["../outside.json", "nested/slot.json", "slot.txt", "", "."])

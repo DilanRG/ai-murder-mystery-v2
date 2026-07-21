@@ -23,6 +23,7 @@ from game.actions import (
     SearchIntent,
     parse_player_intent,
 )
+from game.accusation import evaluate_accusation_support
 from game.models import (
     CaseDefinition,
     CharacterRuntimeState,
@@ -49,6 +50,7 @@ from game.npc_planning import (
 )
 from game.validator import validate_case
 from game.public_assets import portrait_url
+from game.recipes import CaseRecipeSelection
 from game.views import (
     PlayerGameView,
     PublicCharacterView,
@@ -89,17 +91,30 @@ class EngineActionPreview:
 class GameEngine:
     """Owns mutable runtime state while retaining immutable authored truth."""
 
-    def __init__(self, case: CaseDefinition, location: LocationPackage) -> None:
+    def __init__(
+        self,
+        case: CaseDefinition,
+        location: LocationPackage,
+        *,
+        recipe_selection: CaseRecipeSelection | None = None,
+    ) -> None:
         report = validate_case(case, location)
         if not report.valid:
             raise ValueError(f"cannot start invalid case: {report.issues!r}")
         self.case = case
         self.location = location
+        self.recipe_selection = recipe_selection
         self.runtime = self._initial_runtime()
 
     @classmethod
-    def create(cls, case: CaseDefinition, location: LocationPackage) -> "GameEngine":
-        return cls(case, location)
+    def create(
+        cls,
+        case: CaseDefinition,
+        location: LocationPackage,
+        *,
+        recipe_selection: CaseRecipeSelection | None = None,
+    ) -> "GameEngine":
+        return cls(case, location, recipe_selection=recipe_selection)
 
     def _initial_runtime(self) -> WorldRuntimeState:
         characters = {
@@ -287,6 +302,7 @@ class GameEngine:
         clone = object.__new__(GameEngine)
         clone.case = self.case
         clone.location = self.location
+        clone.recipe_selection = self.recipe_selection
         clone.runtime = self.runtime.model_copy(deep=True)
         result = clone._apply(intent, npc_action_ids=None, defer_npc_phase=True)
         request = clone._build_npc_planning_request() if result.accepted and result.committed else None
@@ -610,32 +626,18 @@ class GameEngine:
         selected = submitted_evidence if submitted_evidence else set(self.runtime.player_knowledge.discovered_evidence_ids)
         selected &= self.runtime.player_knowledge.discovered_evidence_ids
         solution = self.case.solution
-        method_claim_ok = self._claim_matches_known_fact(
-            intent.method,
-            candidate_fact_ids=self._known_facts_linked_to(
-                solution.method_evidence_ids,
-                category="means",
-            ),
-        )
-        motive_claim_ok = self._claim_matches_known_fact(
-            intent.motive,
-            candidate_fact_ids=self._known_facts_linked_to(
-                solution.motive_evidence_ids,
-                category="motive",
-            ),
-        )
-        timeline_claim_ok = self._claim_matches_known_fact(
-            intent.timeline,
-            candidate_fact_ids=set(solution.timeline_fact_ids) & self.runtime.player_knowledge.known_fact_ids,
+        support_flags = evaluate_accusation_support(
+            self.case,
+            known_fact_ids=self.runtime.player_knowledge.known_fact_ids,
+            selected_evidence_ids=selected,
+            method=intent.method,
+            motive=intent.motive,
+            timeline=intent.timeline,
         )
         # Evidence is the authoritative support.  The explicit method, motive,
         # and timeline inputs are checked when supplied, so an evidence-backed
         # but internally inconsistent accusation cannot receive that component.
-        support_score = sum((
-            bool(selected & set(solution.method_evidence_ids)) and method_claim_ok,
-            bool(selected & set(solution.motive_evidence_ids)) and motive_claim_ok,
-            bool(selected & set(solution.opportunity_evidence_ids)) and timeline_claim_ok,
-        ))
+        support_score = sum(support_flags)
         correct = intent.character_id == solution.culprit_id
         solved = correct and support_score >= 2
         selected_timeline_facts = sorted(
@@ -651,9 +653,9 @@ class GameEngine:
             submitted_method=intent.method,
             submitted_motive=intent.motive,
             submitted_timeline=intent.timeline,
-            method_supported=bool(selected & set(solution.method_evidence_ids)) and method_claim_ok,
-            motive_supported=bool(selected & set(solution.motive_evidence_ids)) and motive_claim_ok,
-            timeline_supported=bool(selected & set(solution.opportunity_evidence_ids)) and timeline_claim_ok,
+            method_supported=support_flags[0],
+            motive_supported=support_flags[1],
+            timeline_supported=support_flags[2],
             solved=solved,
             selected_evidence_ids=sorted(selected),
             selected_timeline_fact_ids=selected_timeline_facts,
@@ -978,31 +980,6 @@ class GameEngine:
             | {statement.id for statement in self.runtime.player_knowledge.statements}
         )
 
-    def _known_facts_linked_to(
-        self,
-        solution_evidence_ids: Iterable[str],
-        *,
-        category: str,
-    ) -> set[str]:
-        solution_evidence = set(solution_evidence_ids)
-        return {
-            fact_id
-            for fact_id in self.runtime.player_knowledge.known_fact_ids
-            if fact_id in self.case.facts
-            and self.case.facts[fact_id].category.value == category
-            and set(self.case.facts[fact_id].related_evidence_ids) & solution_evidence
-        }
-
-    def _claim_matches_known_fact(self, claim: str, *, candidate_fact_ids: Iterable[str]) -> bool:
-        if not claim.strip():
-            return False
-        expected = {
-            self._normalise(self.case.facts[fact_id].statement)
-            for fact_id in candidate_fact_ids
-            if fact_id in self.case.facts
-        }
-        return self._normalise(claim) in expected
-
     def _result_view(self) -> PublicResultView | None:
         result = self.runtime.result
         if result is None:
@@ -1024,10 +1001,6 @@ class GameEngine:
     @staticmethod
     def _time_label(minute: int) -> str:
         return f"{(minute // 60) % 24:02d}:{minute % 60:02d}"
-
-    @staticmethod
-    def _normalise(value: str) -> str:
-        return "".join(character for character in value.casefold() if character.isalnum())
 
     def _accept(
         self,

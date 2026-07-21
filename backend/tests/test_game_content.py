@@ -240,6 +240,6 @@ def test_deterministic_case_fixture_references_resolve() -> None:
     assert len(groups) >= case.solution.independent_evidence_groups_required
 
 
-def test_content_catalog_has_one_location_and_one_deterministic_case() -> None:
+def test_content_catalog_has_one_location_and_two_deterministic_cases() -> None:
     assert list_content_ids(LOCATIONS_DIR) == ["ashwick_manor"]
-    assert list_content_ids(CASES_DIR) == ["ashwick_sample"]
+    assert list_content_ids(CASES_DIR) == ["ashwick_quiet_vow", "ashwick_sample"]

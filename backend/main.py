@@ -17,6 +17,7 @@ from config.user_settings import get_user_config, load_user_config
 from game.service import GameService
 from llm.client import LLMClient
 from routers import game as game_router
+from routers import cards as cards_router
 from routers import settings as settings_router
 from routers import ws as ws_router
 
@@ -77,6 +78,7 @@ if STATIC_DIR.exists():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
 app.include_router(game_router.router)
+app.include_router(cards_router.router)
 app.include_router(ws_router.router)
 app.include_router(settings_router.router)
 

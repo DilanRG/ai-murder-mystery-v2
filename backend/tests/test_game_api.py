@@ -32,6 +32,12 @@ def test_no_key_start_catalog_opening_and_safe_state(tmp_path):
         assert catalog.status_code == 200
         payload = catalog.json()
         assert payload["default_case_id"] == "ashwick_sample"
+        assert payload["default_recipe_id"] == "ashwick_manor_dual_spines"
+        assert payload["recipes"][0]["variation_count"] == 2
+        serialized_recipes = json.dumps(payload["recipes"]).lower()
+        assert "culprit" not in serialized_recipes
+        assert "fingerprint" not in serialized_recipes
+        assert "case_ids" not in serialized_recipes
         assert len(payload["locations"][0]["rooms"]) >= 8
         assert len(payload["characters"]) == 8
         assert "role" not in json.dumps(payload).lower()
@@ -58,6 +64,80 @@ def test_no_key_start_catalog_opening_and_safe_state(tmp_path):
         assert "cover_story" not in serialized
         for character in state.json()["present_characters"]:
             assert character["portrait_url"].startswith("/assets/characters/")
+
+
+def test_seeded_recipe_start_is_reproducible_and_does_not_leak_selection_metadata(tmp_path):
+    with _client(tmp_path) as client:
+        titles_by_seed = {}
+        for seed in range(32):
+            response = client.post(
+                "/api/game/new",
+                json={"recipe_id": "ashwick_manor_dual_spines", "seed": seed},
+            )
+            assert response.status_code == 200
+            payload = response.json()
+            assert payload["recipe"] == {
+                "recipe_id": "ashwick_manor_dual_spines",
+                "schema_version": 1,
+                "seed": seed,
+            }
+            assert "selected_case_id" not in json.dumps(payload["recipe"])
+            titles_by_seed[seed] = payload["game"]["case_title"]
+
+        assert len(set(titles_by_seed.values())) == 2
+        repeated_seed = next(iter(titles_by_seed))
+        repeated = client.post(
+            "/api/game/new",
+            json={"recipe_id": "ashwick_manor_dual_spines", "seed": repeated_seed},
+        ).json()
+        assert repeated["game"]["case_title"] == titles_by_seed[repeated_seed]
+
+
+def test_recipe_seed_boundary_and_conflicting_inputs_are_rejected(tmp_path):
+    with _client(tmp_path) as client:
+        for seed in (0, 1_000_000, (1 << 63) - 1):
+            response = client.post(
+                "/api/game/new",
+                json={"recipe_id": "ashwick_manor_dual_spines", "seed": seed},
+            )
+            assert response.status_code == 200
+
+        invalid_payloads = (
+            {"recipe_id": "ashwick_manor_dual_spines"},
+            {"seed": 0},
+            {"recipe_id": "ashwick_manor_dual_spines", "seed": -1},
+            {"recipe_id": "ashwick_manor_dual_spines", "seed": 1 << 63},
+            {"recipe_id": "ashwick_manor_dual_spines", "seed": True},
+            {"recipe_id": "ashwick_manor_dual_spines", "seed": "42"},
+            {
+                "recipe_id": "ashwick_manor_dual_spines",
+                "seed": 42,
+                "case_id": "ashwick_sample",
+            },
+            {"unexpected": "field"},
+        )
+        for payload in invalid_payloads:
+            assert client.post("/api/game/new", json=payload).status_code == 422
+
+
+def test_recipe_selection_survives_save_load_without_public_spine_id(tmp_path):
+    with _client(tmp_path) as client:
+        started = client.post(
+            "/api/game/new",
+            json={"recipe_id": "ashwick_manor_dual_spines", "seed": 42},
+        ).json()
+        title = started["game"]["case_title"]
+        assert client.post("/api/game/saves/v1", json={"filename": "seeded"}).status_code == 200
+
+        client.post("/api/game/new", json={})
+        loaded = client.post("/api/game/saves/v1/seeded.json/load")
+        assert loaded.status_code == 200
+        assert loaded.json()["game"]["case_title"] == title
+        assert loaded.json()["recipe"] == {
+            "recipe_id": "ashwick_manor_dual_spines",
+            "schema_version": 1,
+            "seed": 42,
+        }
 
 
 def test_action_validation_and_opening_progression(tmp_path):
