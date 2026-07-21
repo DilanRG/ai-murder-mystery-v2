@@ -115,7 +115,25 @@ def test_malformed_provider_has_exact_deterministic_fallback_parity(tmp_path: Pa
 
     assert direct_result.accepted and service_result["accepted"]
     assert service.llm.calls == 1
-    assert service.engine.runtime == direct.runtime
+    # The authoritative world result is identical.  Audit provenance remains
+    # intentionally distinct so a malformed-provider fallback is not confused
+    # with running the engine directly without a provider.
+    assert service.engine.runtime.model_copy(
+        update={"npc_action_audit": []}
+    ) == direct.runtime.model_copy(update={"npc_action_audit": []})
+    assert {
+        (entry.actor_id, entry.resolved_action_id, entry.action_kind)
+        for entry in service.engine.runtime.npc_action_audit
+    } == {
+        (entry.actor_id, entry.resolved_action_id, entry.action_kind)
+        for entry in direct.runtime.npc_action_audit
+    }
+    assert {entry.source for entry in service.engine.runtime.npc_action_audit} == {
+        "fallback"
+    }
+    assert {entry.source for entry in direct.runtime.npc_action_audit} == {
+        "engine_fallback"
+    }
 
 
 def test_same_turn_discovery_cannot_be_selected_for_manipulation(tmp_path: Path) -> None:

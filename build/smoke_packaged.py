@@ -112,7 +112,7 @@ def smoke(executable: Path) -> None:
     if not executable.is_file():
         raise FileNotFoundError(f"packaged executable was not found: {executable}")
 
-    data_dir = Path(tempfile.mkdtemp(prefix="ashwick-packaged-smoke-"))
+    data_dir = Path(tempfile.mkdtemp(prefix="murder-mystery-packaged-smoke-"))
     try:
         port = _free_port()
         base_url = f"http://127.0.0.1:{port}"
@@ -199,8 +199,8 @@ def smoke(executable: Path) -> None:
                     "/api/game/saves/v2",
                     {"filename": "packaged-smoke.json"},
                 )
-                if saved.get("schema_version") != 4:
-                    raise RuntimeError("packaged game did not write a v4 save")
+                if saved.get("schema_version") != 5:
+                    raise RuntimeError("packaged game did not write a v5 save")
                 save_path = data_dir / "saves" / "packaged-smoke.json"
                 if not save_path.is_file():
                     raise RuntimeError("packaged save was not written to user data")
@@ -210,7 +210,7 @@ def smoke(executable: Path) -> None:
                     {},
                 )
                 if loaded.get("status") != "loaded":
-                    raise RuntimeError("packaged v4 save did not reload")
+                    raise RuntimeError("packaged v5 save did not reload")
             finally:
                 if sys.platform == "win32" and process.poll() is None:
                     subprocess.run(

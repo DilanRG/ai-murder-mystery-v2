@@ -17,7 +17,10 @@ from typing import Any, Callable, Literal, Mapping
 
 from pydantic import Field, ValidationError, model_validator
 
-from game.accusation import evaluate_accusation_support
+from game.accusation import (
+    evaluate_accusation_support,
+    selected_evidence_supports_complete_route,
+)
 from game.models import (
     ActionHistoryEntry,
     CaseDefinition,
@@ -38,7 +41,8 @@ from game.story_director import StoryPresentationPatch, validate_story_presentat
 from game.validator import location_event_turn, validate_case
 
 
-SAVE_SCHEMA_VERSION = 4
+SAVE_SCHEMA_VERSION = 5
+PRE_NPC_AUDIT_SAVE_SCHEMA_VERSION = 4
 PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION = 3
 PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION = 2
 LEGACY_SAVE_SCHEMA_VERSION = 1
@@ -54,7 +58,7 @@ class SaveValidationError(ValueError):
 class SaveEnvelope(StrictModel):
     """Portable runtime plus either authored IDs or fingerprinted generated truth."""
 
-    schema_version: Literal[1, 2, 3, 4] = SAVE_SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3, 4, 5] = SAVE_SCHEMA_VERSION
     case_id: str
     location_id: str
     case_recipe: CaseRecipeSelection | None = None
@@ -79,6 +83,7 @@ class SaveEnvelope(StrictModel):
             in {
                 PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION,
                 PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION,
+                PRE_NPC_AUDIT_SAVE_SCHEMA_VERSION,
                 SAVE_SCHEMA_VERSION,
             }
             and self.action_history is None
@@ -86,7 +91,11 @@ class SaveEnvelope(StrictModel):
             raise ValueError("replay-verified saves require action history")
         if (
             self.schema_version
-            in {PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION, SAVE_SCHEMA_VERSION}
+            in {
+                PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION,
+                PRE_NPC_AUDIT_SAVE_SCHEMA_VERSION,
+                SAVE_SCHEMA_VERSION,
+            }
             and self.action_history is not None
         ):
             if any(
@@ -102,10 +111,13 @@ class SaveEnvelope(StrictModel):
                 entry.location_event_rules_version
                 for entry in self.action_history
             ]
-            if self.schema_version == SAVE_SCHEMA_VERSION:
+            if self.schema_version in {
+                PRE_NPC_AUDIT_SAVE_SCHEMA_VERSION,
+                SAVE_SCHEMA_VERSION,
+            }:
                 if any(version is None for version in event_versions):
                     raise ValueError(
-                        "save schema v4 requires location-event rules metadata"
+                        "save schema v4+ requires location-event rules metadata"
                     )
                 if event_versions != sorted(event_versions):
                     raise ValueError(
@@ -114,6 +126,23 @@ class SaveEnvelope(StrictModel):
             elif any(version is not None for version in event_versions):
                 raise ValueError(
                     "pre-v4 saves cannot contain location-event rules metadata"
+                )
+            npc_rule_versions = [
+                entry.npc_action_rules_version
+                for entry in self.action_history
+            ]
+            if self.schema_version == SAVE_SCHEMA_VERSION:
+                if any(version is None for version in npc_rule_versions):
+                    raise ValueError(
+                        "save schema v5 requires NPC action-rules metadata"
+                    )
+                if npc_rule_versions != sorted(npc_rule_versions):
+                    raise ValueError(
+                        "legacy NPC action rules may only form a history prefix"
+                    )
+            elif any(version is not None for version in npc_rule_versions):
+                raise ValueError(
+                    "pre-v5 saves cannot contain NPC action-rules metadata"
                 )
         if (self.generated_case is None) != (self.generated_case_fingerprint is None):
             raise ValueError("generated case and fingerprint must appear together")
@@ -146,6 +175,8 @@ def validate_runtime_state(
     runtime: WorldRuntimeState,
     case: CaseDefinition,
     location: LocationPackage,
+    *,
+    require_complete_npc_audit: bool = True,
 ) -> None:
     """Reject a runtime snapshot that cannot have come from this engine.
 
@@ -368,6 +399,89 @@ def validate_runtime_state(
         ):
             _fail("event log entry does not match its authored schedule")
 
+    audit_ids: set[str] = set()
+    audit_actors_by_turn: dict[int, set[str]] = {}
+    for entry in runtime.npc_action_audit:
+        if entry.id in audit_ids or entry.actor_id not in cast_ids - {victim_id}:
+            _fail("NPC action audit has a duplicate ID or invalid actor")
+        audit_ids.add(entry.id)
+        if entry.turn < 1 or entry.turn > runtime.turn:
+            _fail("NPC action audit turn is outside the saved runtime")
+        if entry.room_before_id not in room_ids or entry.room_after_id not in room_ids:
+            _fail("NPC action audit references an invalid room")
+        if (
+            entry.target_character_id is not None
+            and entry.target_character_id not in cast_ids | {PLAYER_ID}
+        ):
+            _fail("NPC action audit references an invalid target")
+        if entry.evidence_id is not None and entry.evidence_id not in evidence_ids:
+            _fail("NPC action audit references unknown evidence")
+        if entry.event_id is not None and entry.event_id not in event_ids:
+            _fail("NPC action audit references an unknown world event")
+        _require_subset("NPC audit learned facts", entry.learned_fact_ids, fact_ids)
+        _require_subset("NPC audit disclosed facts", entry.disclosed_fact_ids, fact_ids)
+        _require_subset(
+            "NPC audit learned evidence",
+            entry.learned_evidence_ids,
+            evidence_ids,
+        )
+        participant_ids: set[str] = set()
+        for delta in entry.participant_knowledge_deltas:
+            if (
+                delta.participant_id in participant_ids
+                or delta.participant_id not in cast_ids | {PLAYER_ID}
+            ):
+                _fail("NPC audit has a duplicate or invalid knowledge participant")
+            participant_ids.add(delta.participant_id)
+            _require_subset(
+                "NPC audit participant gained facts",
+                delta.fact_ids_gained,
+                fact_ids,
+            )
+            _require_subset(
+                "NPC audit participant shared facts",
+                delta.fact_ids_shared,
+                fact_ids,
+            )
+            _require_subset(
+                "NPC audit participant gained evidence",
+                delta.evidence_ids_gained,
+                evidence_ids,
+            )
+            _require_subset(
+                "NPC audit participant heard statements",
+                delta.statement_ids_heard,
+                statement_ids,
+            )
+        actor_delta = next(
+            (
+                delta
+                for delta in entry.participant_knowledge_deltas
+                if delta.participant_id == entry.actor_id
+            ),
+            None,
+        )
+        if (
+            set(entry.learned_fact_ids)
+            != set(actor_delta.fact_ids_gained if actor_delta else ())
+            or set(entry.disclosed_fact_ids)
+            != set(actor_delta.fact_ids_shared if actor_delta else ())
+            or set(entry.learned_evidence_ids)
+            != set(actor_delta.evidence_ids_gained if actor_delta else ())
+        ):
+            _fail("NPC audit flat and participant knowledge deltas disagree")
+        turn_actors = audit_actors_by_turn.setdefault(entry.turn, set())
+        if entry.actor_id in turn_actors:
+            _fail("NPC action audit resolves an actor more than once per turn")
+        turn_actors.add(entry.actor_id)
+    if require_complete_npc_audit and case.solution.evidence_routes and runtime.turn:
+        expected_survivors = cast_ids - {victim_id}
+        if set(audit_actors_by_turn) != set(range(1, runtime.turn + 1)) or any(
+            actors != expected_survivors
+            for actors in audit_actors_by_turn.values()
+        ):
+            _fail("generated runtime lacks one audited NPC action per survivor turn")
+
     interview = runtime.active_interview
     if interview is not None:
         if runtime.phase != GamePhase.INVESTIGATION:
@@ -396,6 +510,7 @@ def validate_runtime_state(
             case,
             known_fact_ids=knowledge.known_fact_ids,
             selected_evidence_ids=result.selected_evidence_ids,
+            selected_timeline_fact_ids=result.selected_timeline_fact_ids,
             method=result.submitted_method,
             motive=result.submitted_motive,
             timeline=result.submitted_timeline,
@@ -404,7 +519,67 @@ def validate_runtime_state(
             _fail("result support flags conflict with selected evidence and claims")
         if result.support_score != sum(expected_supports):
             _fail("result support score conflicts with selected evidence and claims")
-        if result.solved != (result.correct_culprit and result.support_score >= 2):
+        uses_extended_evaluation = bool(
+            case.solution.evidence_routes
+            or result.evaluation_score
+            or result.selected_supporting_evidence_ids
+            or result.confirmed_contradiction_ids
+        )
+        if uses_extended_evaluation:
+            if result.selected_supporting_evidence_ids != sorted(
+                result.selected_evidence_ids
+            ):
+                _fail("result supporting evidence conflicts with its selected evidence")
+            expected_evidence_support = selected_evidence_supports_complete_route(
+                case,
+                result.selected_supporting_evidence_ids,
+            )
+            statements = {
+                statement.id: statement
+                for statement in knowledge.statements
+            }
+            contradictions = {
+                contradiction.id: contradiction
+                for contradiction in knowledge.contradictions
+            }
+            expected_contradiction_support = bool(
+                result.confirmed_contradiction_ids
+            ) and all(
+                contradiction_id in contradictions
+                and contradictions[contradiction_id].confirmed
+                and any(
+                    statements.get(statement_id) is not None
+                    and statements[statement_id].speaker_id
+                    == result.accused_character_id
+                    for statement_id in (
+                        contradictions[contradiction_id].left_statement_id,
+                        contradictions[contradiction_id].right_statement_id,
+                    )
+                )
+                for contradiction_id in result.confirmed_contradiction_ids
+            )
+            if result.evidence_supported != expected_evidence_support:
+                _fail("result evidence-route evaluation is inconsistent")
+            if result.contradictions_supported != expected_contradiction_support:
+                _fail("result contradiction evaluation is inconsistent")
+            expected_evaluation_score = sum(
+                (
+                    result.correct_culprit,
+                    *expected_supports,
+                    expected_evidence_support,
+                    expected_contradiction_support,
+                )
+            )
+            if result.evaluation_score != expected_evaluation_score:
+                _fail("result extended evaluation score is inconsistent")
+        expected_solved = (
+            result.correct_culprit
+            and result.support_score == 3
+            and result.evidence_supported
+            if case.solution.evidence_routes
+            else result.correct_culprit and result.support_score >= 2
+        )
+        if result.solved != expected_solved:
             _fail("result solved flag is inconsistent")
 
     if runtime.phase == GamePhase.DISCOVERY:
@@ -437,6 +612,7 @@ def validate_save_envelope(
         LEGACY_SAVE_SCHEMA_VERSION,
         PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION,
         PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION,
+        PRE_NPC_AUDIT_SAVE_SCHEMA_VERSION,
         SAVE_SCHEMA_VERSION,
     }:
         _fail("unsupported save schema version")
@@ -489,10 +665,31 @@ def validate_save_envelope(
             validate_story_presentation(envelope.story_presentation, case, location)
         except ValueError as error:
             raise SaveValidationError("saved story presentation is not valid") from error
-    validate_runtime_state(envelope.runtime, case, location)
+    # NPC action audit/provenance was introduced with v5. Older saves do not
+    # carry it. Validate/replay their historical
+    # world state without treating future audit metadata as legacy truth.
+    runtime_for_validation = (
+        envelope.runtime.model_copy(update={"npc_action_audit": []})
+        if envelope.schema_version != SAVE_SCHEMA_VERSION
+        else envelope.runtime
+    )
+    has_legacy_npc_history = (
+        envelope.schema_version != SAVE_SCHEMA_VERSION
+        or any(
+            entry.npc_action_rules_version == 1
+            for entry in envelope.action_history or ()
+        )
+    )
+    validate_runtime_state(
+        runtime_for_validation,
+        case,
+        location,
+        require_complete_npc_audit=not has_legacy_npc_history,
+    )
     if envelope.schema_version in {
         PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION,
         PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION,
+        PRE_NPC_AUDIT_SAVE_SCHEMA_VERSION,
         SAVE_SCHEMA_VERSION,
     }:
         assert envelope.action_history is not None
@@ -504,6 +701,16 @@ def validate_save_envelope(
             recipe_selection=envelope.case_recipe,
             story_presentation=envelope.story_presentation,
         )
+        uses_legacy_npc_initialization = (
+            envelope.schema_version != SAVE_SCHEMA_VERSION
+            or bool(
+                envelope.action_history
+                and envelope.action_history[0].npc_action_rules_version == 1
+            )
+        )
+        if uses_legacy_npc_initialization:
+            for state in replay.runtime.characters.values():
+                state.intentions = []
         for entry in envelope.action_history:
             interview_rules_version = entry.interview_rules_version
             if (
@@ -518,11 +725,22 @@ def validate_save_envelope(
                 result = replay.apply(
                     entry.intent,
                     npc_action_ids=entry.npc_action_ids,
+                    npc_action_sources=(
+                        entry.npc_action_sources
+                        if envelope.schema_version == SAVE_SCHEMA_VERSION
+                        else None
+                    ),
+                    npc_action_rules_version=(
+                        entry.npc_action_rules_version
+                        if envelope.schema_version == SAVE_SCHEMA_VERSION
+                        else 1
+                    ),
                     interview_response_id=entry.interview_response_id,
                     interview_rules_version=interview_rules_version,
                     location_event_rules_version=(
                         entry.location_event_rules_version
-                        if envelope.schema_version == SAVE_SCHEMA_VERSION
+                        if envelope.schema_version
+                        in {PRE_NPC_AUDIT_SAVE_SCHEMA_VERSION, SAVE_SCHEMA_VERSION}
                         else 0
                     ),
                 )
@@ -532,8 +750,18 @@ def validate_save_envelope(
                 ) from error
             if not result.accepted:
                 _fail("save action history contains a rejected command")
-        if replay.runtime != envelope.runtime:
+        replay_runtime = (
+            replay.runtime.model_copy(update={"npc_action_audit": []})
+            if envelope.schema_version != SAVE_SCHEMA_VERSION
+            else replay.runtime
+        )
+        if replay_runtime != runtime_for_validation:
             _fail("save runtime does not match its action history")
+        if (
+            envelope.schema_version == SAVE_SCHEMA_VERSION
+            and replay.action_history != envelope.action_history
+        ):
+            _fail("save NPC audit does not match its replayed action history")
     return envelope
 
 
@@ -590,27 +818,58 @@ def restore_engine(
         recipe_selection=envelope.case_recipe,
         story_presentation=envelope.story_presentation,
     )
-    engine.runtime = envelope.runtime.model_copy(deep=True)
+    uses_legacy_npc_initialization = (
+        envelope.schema_version != SAVE_SCHEMA_VERSION
+        or bool(
+            envelope.action_history
+            and envelope.action_history[0].npc_action_rules_version == 1
+        )
+    )
+    if uses_legacy_npc_initialization:
+        for state in engine.runtime.characters.values():
+            state.intentions = []
     if envelope.action_history is None:
+        engine.runtime = envelope.runtime.model_copy(deep=True)
         engine.action_history = None
     else:
-        engine.action_history = []
+        # Replay upgrades older saves by recording the exact legacy NPC rules
+        # on each history entry. Subsequent v5 saves remain byte-replayable
+        # without inventing audit records that never existed historically.
         for entry in envelope.action_history:
-            updates: dict[str, int] = {}
+            interview_rules_version = entry.interview_rules_version
             if (
                 envelope.schema_version
                 == PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION
                 and entry.intent.get("kind") == "interview_exchange"
-                and entry.interview_rules_version is None
+                and interview_rules_version is None
             ):
-                updates["interview_rules_version"] = (
+                interview_rules_version = (
                     2 if entry.interview_response_id is not None else 1
                 )
-            if envelope.schema_version != SAVE_SCHEMA_VERSION:
-                updates["location_event_rules_version"] = 0
-            engine.action_history.append(
-                entry.model_copy(deep=True, update=updates)
+            result = engine.apply(
+                entry.intent,
+                npc_action_ids=entry.npc_action_ids,
+                npc_action_sources=(
+                    entry.npc_action_sources
+                    if envelope.schema_version == SAVE_SCHEMA_VERSION
+                    else None
+                ),
+                npc_action_rules_version=(
+                    entry.npc_action_rules_version
+                    if envelope.schema_version == SAVE_SCHEMA_VERSION
+                    else 1
+                ),
+                interview_response_id=entry.interview_response_id,
+                interview_rules_version=interview_rules_version,
+                location_event_rules_version=(
+                    entry.location_event_rules_version
+                    if envelope.schema_version
+                    in {PRE_NPC_AUDIT_SAVE_SCHEMA_VERSION, SAVE_SCHEMA_VERSION}
+                    else 0
+                ),
             )
+            if not result.accepted:  # pragma: no cover - validation replay proved this
+                _fail("validated save failed while reconstructing its action history")
     return engine
 
 

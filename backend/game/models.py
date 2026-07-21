@@ -73,6 +73,7 @@ MAX_ACTION_ID_REFERENCES = 64
 MAX_ACTION_CLAIM_LENGTH = 2_000
 MAX_CONVERSATION_MEMORIES = 256
 MAX_RUNTIME_EVENTS = 256
+MAX_NPC_ACTION_AUDIT = 2_048
 BoundedNote = Annotated[str, Field(min_length=1, max_length=1_000)]
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=100)]
 
@@ -228,7 +229,7 @@ class CharacterCardData(FrozenModel):
     alternate_greetings: tuple[str, ...] = Field(default_factory=tuple)
     group_only_greetings: tuple[str, ...] = Field(default_factory=tuple)
     tags: tuple[str, ...] = Field(default_factory=tuple)
-    creator: str = "AI Murder Mystery"
+    creator: str = "AI Murder Mystery Game"
     character_version: str = "1.0"
     extensions: CardExtensions
     character_book: CharacterLorebook | None = None
@@ -491,6 +492,17 @@ class DiscoveryOpening(FrozenModel):
     post_meeting_room_ids: dict[str, str]
 
 
+class EvidenceRouteDefinition(FrozenModel):
+    """One independently complete canonical path to a supported accusation."""
+
+    id: str = Field(min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=160)
+    method_evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=10)
+    motive_evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=10)
+    opportunity_evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=10)
+    timeline_fact_ids: tuple[str, ...] = Field(min_length=1, max_length=16)
+
+
 class SolutionRequirements(FrozenModel):
     culprit_id: str
     method_evidence_ids: tuple[str, ...]
@@ -498,6 +510,10 @@ class SolutionRequirements(FrozenModel):
     opportunity_evidence_ids: tuple[str, ...]
     timeline_fact_ids: tuple[str, ...]
     independent_evidence_groups_required: int = Field(default=3, ge=1)
+    evidence_routes: tuple[EvidenceRouteDefinition, ...] = Field(
+        default_factory=tuple,
+        max_length=4,
+    )
 
 
 class CaseDefinition(FrozenModel):
@@ -675,10 +691,96 @@ class GameResult(StrictModel):
     method_supported: bool = False
     motive_supported: bool = False
     timeline_supported: bool = False
+    evidence_supported: bool = False
+    contradictions_supported: bool = False
+    evaluation_score: int = Field(default=0, ge=0, le=6)
     solved: bool
     selected_evidence_ids: list[str] = Field(max_length=MAX_ACTION_ID_REFERENCES)
+    selected_supporting_evidence_ids: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_ACTION_ID_REFERENCES,
+    )
     selected_timeline_fact_ids: list[str] = Field(max_length=MAX_ACTION_ID_REFERENCES)
+    confirmed_contradiction_ids: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_ACTION_ID_REFERENCES,
+    )
     summary: str = Field(max_length=500)
+
+
+class NpcActionAuditEntry(StrictModel):
+    """One host-resolved NPC proposal with explicit state and knowledge deltas."""
+
+    id: BoundedIdentifier
+    turn: int = Field(ge=0)
+    actor_id: BoundedIdentifier
+    proposed_action_id: BoundedIdentifier | None = None
+    resolved_action_id: BoundedIdentifier
+    action_kind: Literal[
+        "wait",
+        "move",
+        "investigate",
+        "approach_player",
+        "truthful_disclose",
+        "authorized_misdirect",
+        "private_social",
+        "conceal_evidence",
+        "react_world_event",
+    ]
+    source: Literal["provider", "fallback", "host_selection", "engine_fallback"]
+    outcome: Literal["committed", "no_op", "fallback"]
+    reason: str = Field(default="", max_length=500)
+    room_before_id: BoundedIdentifier
+    room_after_id: BoundedIdentifier
+    target_character_id: BoundedIdentifier | None = None
+    evidence_id: BoundedIdentifier | None = None
+    event_id: BoundedIdentifier | None = None
+    learned_fact_ids: list[BoundedIdentifier] = Field(default_factory=list, max_length=32)
+    disclosed_fact_ids: list[BoundedIdentifier] = Field(default_factory=list, max_length=32)
+    learned_evidence_ids: list[BoundedIdentifier] = Field(default_factory=list, max_length=16)
+    participant_knowledge_deltas: list["ParticipantKnowledgeDelta"] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    evidence_condition_before: EvidenceCondition | None = None
+    evidence_condition_after: EvidenceCondition | None = None
+
+
+class NpcKnowledgeDelta(StrictModel):
+    fact_ids_gained: list[BoundedIdentifier] = Field(default_factory=list, max_length=32)
+    fact_ids_shared: list[BoundedIdentifier] = Field(default_factory=list, max_length=32)
+    evidence_ids_gained: list[BoundedIdentifier] = Field(default_factory=list, max_length=16)
+    statement_ids_heard: list[BoundedIdentifier] = Field(default_factory=list, max_length=32)
+
+
+class ParticipantKnowledgeDelta(NpcKnowledgeDelta):
+    """Knowledge effects attributed to one actor or the player."""
+
+    participant_id: BoundedIdentifier
+
+
+class ResolvedNpcActionRecord(StrictModel):
+    actor_id: BoundedIdentifier
+    requested_action_id: BoundedIdentifier | None = None
+    resolved_action_id: BoundedIdentifier
+    kind: Literal[
+        "wait",
+        "move",
+        "investigate",
+        "approach_player",
+        "truthful_disclose",
+        "authorized_misdirect",
+        "private_social",
+        "conceal_evidence",
+        "react_world_event",
+    ]
+    outcome: Literal["committed", "no_op", "fallback"]
+    reason: str = Field(default="", max_length=500)
+    knowledge_delta: NpcKnowledgeDelta = Field(default_factory=NpcKnowledgeDelta)
+    participant_knowledge_deltas: list[ParticipantKnowledgeDelta] = Field(
+        default_factory=list,
+        max_length=8,
+    )
 
 
 class ActionHistoryEntry(StrictModel):
@@ -689,6 +791,15 @@ class ActionHistoryEntry(StrictModel):
         default=None,
         max_length=8,
     )
+    npc_action_sources: dict[
+        BoundedIdentifier,
+        Literal["provider", "fallback", "host_selection", "engine_fallback"],
+    ] | None = Field(default=None, max_length=8)
+    resolved_npc_actions: list[ResolvedNpcActionRecord] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    npc_action_rules_version: Literal[1, 2] | None = None
     interview_response_id: BoundedIdentifier | None = None
     interview_rules_version: Literal[1, 2] | None = None
     location_event_rules_version: Literal[0, 1] | None = None
@@ -707,6 +818,13 @@ class ActionHistoryEntry(StrictModel):
             )
         if self.interview_rules_version == 1 and self.interview_response_id is not None:
             raise ValueError("legacy interview history cannot contain a response ID")
+        if self.npc_action_sources is not None and self.npc_action_ids is None:
+            raise ValueError("NPC action sources require NPC action selections")
+        if (
+            self.npc_action_sources is not None
+            and set(self.npc_action_sources) != set(self.npc_action_ids or {})
+        ):
+            raise ValueError("NPC action sources must cover exactly the selected actors")
         return self
 
 
@@ -732,6 +850,10 @@ class WorldRuntimeState(StrictModel):
     event_log: list[RuntimeEvent] = Field(
         default_factory=list,
         max_length=MAX_RUNTIME_EVENTS,
+    )
+    npc_action_audit: list[NpcActionAuditEntry] = Field(
+        default_factory=list,
+        max_length=MAX_NPC_ACTION_AUDIT,
     )
     active_interview: InterviewSession | None = None
     result: GameResult | None = None

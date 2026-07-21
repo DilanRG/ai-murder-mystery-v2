@@ -101,9 +101,54 @@ function renderNotes(host) {
 }
 function sourceSelect(multi=false) { const select=document.createElement('select');select.multiple=multi;select.setAttribute('aria-label','Sources'); [...game.discovered_evidence,...game.known_facts,...game.statements].forEach(x=>{const o=el('option',x.name||x.statement||`${x.speaker_name}: ${x.text}`);o.value=x.id;select.append(o);});return select; }
 function evidenceSelect() { const select=document.createElement('select');select.multiple=true;select.setAttribute('aria-label','Supporting evidence');game.discovered_evidence.forEach(x=>{const o=el('option',x.name);o.value=x.id;select.append(o);});return select; }
+function contradictionSelect() { const select=document.createElement('select');select.multiple=true;select.setAttribute('aria-label','Confirmed contradictions');game.contradictions.filter(x=>x.confirmed).forEach(x=>{const o=el('option',x.note||x.id);o.value=x.id;select.append(o);});return select; }
 function statementSelect(){const s=document.createElement('select');game.statements.forEach(x=>{const o=el('option',`${x.speaker_name}: ${x.text}`);o.value=x.id;s.append(o);});return s;}
 function selectedValues(select){return Array.from(select.selectedOptions).map(x=>x.value);}
 function formatMinute(value){return `${String(Math.floor(value/60)%24).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`;}
+
+export function buildAccusationIntent({
+  characterId,
+  evidenceIds,
+  method,
+  motive,
+  timeline,
+  timelineFactId,
+  confirmedContradictionIds = []
+}) {
+  return {
+    kind: 'accuse',
+    character_id: characterId,
+    selected_supporting_evidence_ids: [...evidenceIds],
+    method,
+    motive,
+    timeline,
+    timeline_fact_ids: [timelineFactId],
+    confirmed_contradiction_ids: [...confirmedContradictionIds]
+  };
+}
+
+export async function submitAccusation(action, selections) {
+  return action(buildAccusationIntent(selections));
+}
+
+export function formatAccusationResult(result) {
+  const summary = result?.summary || 'The investigation has ended.';
+  if (result?.end_reason !== 'accusation') return summary;
+  const dimensions = [
+    ['culprit', result.correct_culprit],
+    ['method', result.method_supported],
+    ['motive', result.motive_supported],
+    ['timeline', result.timeline_supported],
+    ['evidence route', result.evidence_supported],
+    ['contradictions', result.contradictions_supported]
+  ].map(([label,supported])=>`${label}: ${supported?'supported':'unsupported'}`).join('; ');
+  return `${summary} Evaluation (${result.evaluation_score}/6): ${dimensions}.`;
+}
+
+export function formatResultTitle(result) {
+  if (result?.end_reason === 'timeout') return 'Time expired';
+  return result?.solved ? 'Case solved' : 'Case concluded';
+}
 
 function interviewModal(person) {
   const modal=openModal(`Question ${person.name}`), count=game.active_interview_exchanges_remaining ?? 0;
@@ -141,14 +186,14 @@ function interviewModal(person) {
   modal.footer.append(ask,button('Conclude interview',async()=>{modal.close();await act({kind:'end_interview'});},'secondary'));
 }
 export function openAccusation() {
-  const modal=openModal('Make a final accusation'); modal.body.append(el('p','Choose a living suspect and explicitly support the method, motive, and timeline. Filing the accusation ends this investigation.'));
+  const modal=openModal('Make a final accusation'); modal.body.append(el('p','Choose a living suspect and support the culprit, method, motive, timeline, evidence route, and any confirmed contradictions. Filing the accusation ends this investigation.'));
   const suspect=document.createElement('select');suspect.setAttribute('aria-label','Suspect');game.suspects.forEach(x=>{const o=el('option',x.name);o.value=x.id;suspect.append(o);});
-  const method=factSelect(['means','forensics'],'Method'),motive=factSelect(['motive'],'Motive'),timeline=factSelect(['timeline','opportunity'],'Timeline fact'),evidence=evidenceSelect(),status=el('p','Select all three facts and at least one evidence item.','muted'),submit=el('button','Review accusation','danger');status.setAttribute('aria-live','polite');submit.type='button';submit.disabled=true;modal.body.append(labelled('Suspect',suspect),labelled('Method fact',method),labelled('Motive fact',motive),labelled('Timeline fact',timeline),labelled('Supporting evidence',evidence),status);modal.footer.append(submit);
+  const method=factSelect(['means','forensics'],'Method'),motive=factSelect(['motive'],'Motive'),timeline=factSelect(['timeline','opportunity'],'Timeline fact'),evidence=evidenceSelect(),contradictions=contradictionSelect(),status=el('p','Select all three facts and at least one evidence item. Confirmed contradictions are optional but evaluated.','muted'),submit=el('button','Review accusation','danger');status.setAttribute('aria-live','polite');submit.type='button';submit.disabled=true;modal.body.append(labelled('Suspect',suspect),labelled('Method fact',method),labelled('Motive fact',motive),labelled('Timeline fact',timeline),labelled('Supporting evidence',evidence),labelled('Confirmed contradictions',contradictions),status);modal.footer.append(submit);
   let armed=false;
   const complete=()=>Boolean(suspect.value&&method.value&&motive.value&&timeline.value&&selectedValues(evidence).length);
   const refresh=()=>{armed=false;submit.textContent='Review accusation';submit.disabled=!complete();status.textContent=submit.disabled?'Select all three facts and at least one evidence item.':'Ready to review. No accusation has been filed yet.';};
-  [suspect,method,motive,timeline,evidence].forEach(control=>control.addEventListener('change',refresh));
-  submit.addEventListener('click',async()=>{if(!complete()){refresh();return;}if(!armed){armed=true;submit.textContent='Confirm and end investigation';status.textContent='Check every selection. Click confirm only when this is your final report.';return;}submit.disabled=true;status.textContent='Filing final accusation…';const result=await act({kind:'accuse',character_id:suspect.value,evidence_ids:selectedValues(evidence),method:method.selectedOptions[0]?.textContent||'',motive:motive.selectedOptions[0]?.textContent||'',timeline:timeline.selectedOptions[0]?.textContent||'',timeline_fact_ids:[timeline.value]});if(result?.accepted)modal.close();else refresh();});
+  [suspect,method,motive,timeline,evidence,contradictions].forEach(control=>control.addEventListener('change',refresh));
+  submit.addEventListener('click',async()=>{if(!complete()){refresh();return;}if(!armed){armed=true;submit.textContent='Confirm and end investigation';status.textContent='Check every selection. Click confirm only when this is your final report.';return;}submit.disabled=true;status.textContent='Filing final accusation…';const result=await submitAccusation(act,{characterId:suspect.value,evidenceIds:selectedValues(evidence),method:method.selectedOptions[0]?.textContent||'',motive:motive.selectedOptions[0]?.textContent||'',timeline:timeline.selectedOptions[0]?.textContent||'',timelineFactId:timeline.value,confirmedContradictionIds:selectedValues(contradictions)});if(result?.accepted)modal.close();else refresh();});
 }
 function factSelect(categories, placeholder){const s=document.createElement('select');s.setAttribute('aria-label',placeholder);s.append(el('option',`Select ${placeholder}`));s.options[0].value='';game.known_facts.filter(x=>categories.includes(x.category)).forEach(x=>{const o=el('option',x.statement);o.value=x.id;s.append(o);});return s;}
 function initials(name){return name.split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase();}
@@ -161,7 +206,7 @@ function portrait(person) {
   return image;
 }
 function labelled(title,input){const l=el('label',title);l.append(input);return l;}
-async function showResult(){ showScreen('result'); const result=game.result; $('result-title').textContent=result?.end_reason==='timeout'?'Time expired':result?.solved?'Case solved':'Case concluded';$('result-summary').textContent=result?.summary||'The investigation has ended.';$('debrief-content').replaceChildren();$('debrief-button').hidden=false; }
+async function showResult(){ showScreen('result'); const result=game.result; $('result-title').textContent=formatResultTitle(result);$('result-summary').textContent=formatAccusationResult(result);$('debrief-content').replaceChildren();$('debrief-button').hidden=false; }
 export async function revealDebrief(){try{const data=await api.debrief(),solution=data.solution,host=$('debrief-content');host.replaceChildren();host.append(el('h3',`The truth: ${solution.culprit_name}`),el('p',`Method: ${solution.method}`),el('p',`Motive: ${solution.motive}`),el('p',`Opportunity: ${solution.opportunity}`),el('p',solution.cover_story));const list=el('ul');solution.supporting_evidence.forEach(x=>list.append(el('li',`${x.name} — ${x.description}`)));host.append(el('h3','Supporting evidence'),list);$('debrief-button').hidden=true;}catch(error){toast(error.message,'error');}}
-export function openSaveLoad(loadOnly=false, publicCatalog=catalog){const modal=openModal(loadOnly?'Load investigation':'Save or load investigation'),name=document.createElement('input'),status=el('p','','muted');name.placeholder='Save name';status.setAttribute('aria-live','polite');if(!loadOnly)modal.body.append(labelled('Save current case',name));modal.body.append(el('p','Loading replaces the current local session.','muted'),status);const saves=el('div',undefined,'stack');modal.body.append(saves);api.saves().then(data=>{if(!data.saves.length)saves.append(el('p','No saves found.','muted'));data.saves.forEach(file=>{const load=button(`Load ${file}`,async()=>{load.disabled=true;status.textContent=`Loading ${file}…`;try{const result=await api.load(file);modal.close();resumeGame(result.game,publicCatalog);toast(`Loaded ${file}.`,'found');}catch(error){load.disabled=false;status.textContent=error.message;status.className='rejected';toast(error.message,'error');}},'secondary');saves.append(load);});}).catch(error=>{status.textContent=error.message;status.className='rejected';});if(!loadOnly)modal.footer.append(button('Save',async()=>{try{const result=await api.save(name.value.trim()||'ashwick-save');toast(`Saved as ${result.filename}.`,'found');modal.close();}catch(error){status.textContent=error.message;status.className='rejected';toast(error.message,'error');}},'primary'));}
+export function openSaveLoad(loadOnly=false, publicCatalog=catalog){const modal=openModal(loadOnly?'Load investigation':'Save or load investigation'),name=document.createElement('input'),status=el('p','','muted');name.placeholder='Save name';status.setAttribute('aria-live','polite');if(!loadOnly)modal.body.append(labelled('Save current case',name));modal.body.append(el('p','Loading replaces the current local session.','muted'),status);const saves=el('div',undefined,'stack');modal.body.append(saves);api.saves().then(data=>{if(!data.saves.length)saves.append(el('p','No saves found.','muted'));data.saves.forEach(file=>{const load=button(`Load ${file}`,async()=>{load.disabled=true;status.textContent=`Loading ${file}…`;try{const result=await api.load(file);modal.close();resumeGame(result.game,publicCatalog);toast(`Loaded ${file}.`,'found');}catch(error){load.disabled=false;status.textContent=error.message;status.className='rejected';toast(error.message,'error');}},'secondary');saves.append(load);});}).catch(error=>{status.textContent=error.message;status.className='rejected';});if(!loadOnly)modal.footer.append(button('Save',async()=>{try{const result=await api.save(name.value.trim()||'murder-mystery-save');toast(`Saved as ${result.filename}.`,'found');modal.close();}catch(error){status.textContent=error.message;status.className='rejected';toast(error.message,'error');}},'primary'));}
 export function bindGameControls(){const tabs=[...document.querySelectorAll('.tab')],activate=tab=>{selectedTab=tab.dataset.tab;renderNotebook();};tabs.forEach((tab,index)=>{tab.addEventListener('click',()=>activate(tab));tab.addEventListener('keydown',event=>{let target=null;if(event.key==='ArrowRight')target=tabs[(index+1)%tabs.length];else if(event.key==='ArrowLeft')target=tabs[(index-1+tabs.length)%tabs.length];else if(event.key==='Home')target=tabs[0];else if(event.key==='End')target=tabs[tabs.length-1];if(target){event.preventDefault();activate(target);target.focus();}});});$('accuse-button').addEventListener('click',openAccusation);$('save-button').addEventListener('click',()=>openSaveLoad());$('debrief-button').addEventListener('click',revealDebrief);}

@@ -372,8 +372,7 @@ def _hold_npc_selections(engine: GameEngine) -> dict[str, str]:
         character_id: next(
             option_id
             for option_id, intent in options
-            if intent.destination_room_id is None
-            and intent.manipulate_evidence_id is None
+            if intent.kind == "wait"
         )
         for character_id, options in engine._npc_candidate_sets(snapshot).items()
     }

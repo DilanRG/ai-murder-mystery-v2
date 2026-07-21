@@ -1,7 +1,7 @@
 {
   "name": "ai-murder-mystery-frontend",
   "version": "2.0.0",
-  "description": "AI Murder Mystery v2 — Vite frontend",
+  "description": "AI Murder Mystery Game - Vite frontend",
   "type": "module",
   "scripts": {
     "dev": "vite",

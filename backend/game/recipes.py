@@ -122,8 +122,14 @@ class CaseRecipeSelection(FrozenModel):
 def case_content_fingerprint(case: CaseDefinition) -> str:
     """Hash canonical validated case JSON, independent of file whitespace/order."""
 
+    document = case.model_dump(mode="json")
+    # Evidence routes were added after the authored foundation was tagged. Keep
+    # the legacy authored fingerprint byte-stable when that optional field is
+    # empty, while generated cases retain their proof routes in canonical truth.
+    if not document["solution"].get("evidence_routes"):
+        document["solution"].pop("evidence_routes", None)
     payload = json.dumps(
-        case.model_dump(mode="json"),
+        document,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

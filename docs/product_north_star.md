@@ -1,6 +1,6 @@
 # Product North Star
 
-The working Ashwick vertical slice is a preserved foundation and regression
+The working AI Murder Mystery Game vertical slice is a preserved foundation and regression
 fixture, not the final interpretation of the product. It must remain playable
 while the procedural system is developed alongside it.
 
@@ -16,7 +16,11 @@ approach the player, assist, misdirect, and react to world events. They may
 propose actions but never author world truth. The authoritative engine validates
 every action and judges the final evidence-supported accusation.
 
-## Next vertical milestone
+## Procedural vertical milestone
+
+Implemented and verified on 2026-07-21. The exact acceptance evidence, commands,
+seed, cast, routes, autonomous trace, verdict, replay result, and limitations are
+recorded in [procedural_acceptance_report.md](procedural_acceptance_report.md).
 
 1. Preserve and tag the current authored-case build.
 2. Add a structured procedural case schema and generation pipeline.
@@ -44,3 +48,7 @@ routes to the uniquely best-supported culprit.
 
 The two authored Ashwick cases and their cast-projection tests remain regression
 fixtures. Passing them does not satisfy this procedural acceptance criterion.
+
+This criterion is satisfied by the independent generated case documented in
+[procedural_acceptance_report.md](procedural_acceptance_report.md), not by either
+authored fixture.

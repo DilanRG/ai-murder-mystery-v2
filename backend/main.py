@@ -55,13 +55,13 @@ async def lifespan(app: FastAPI):
     load_user_config()
     _session.llm = _make_llm_client()
     _deps.init(session=_session, ws_pool=_ws_connections, llm_factory=_make_llm_client)
-    logger.info("AI Murder Mystery v2 deterministic backend started")
+    logger.info("AI Murder Mystery Game deterministic backend started")
     yield
     logger.info("Backend shut down")
 
 
 app = FastAPI(
-    title="AI Murder Mystery v2",
+    title="AI Murder Mystery Game",
     description="Local-first, deterministic turn-based murder mystery",
     version="2.0.0",
     lifespan=lifespan,

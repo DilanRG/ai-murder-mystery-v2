@@ -94,6 +94,7 @@ def test_dummy_generated_case_can_be_played_to_a_supported_solution() -> None:
             method=known_facts["fact_murder_method"],
             motive=known_facts["fact_financial_exposure"],
             timeline=known_facts["fact_murder_time"],
+            timeline_fact_ids=["fact_murder_time"],
         )
     )
 

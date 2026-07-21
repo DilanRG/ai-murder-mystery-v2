@@ -190,13 +190,13 @@ def test_save_load_and_debrief_gating(tmp_path):
 
         saved = client.post("/api/game/saves/v2", json={"filename": "ashwick.json"})
         assert saved.status_code == 200
-        assert saved.json()["schema_version"] == 4
+        assert saved.json()["schema_version"] == 5
         assert saved.json()["filename"] == "ashwick.json"
         friendly = client.post("/api/game/saves/v2", json={"filename": "second-slot"})
         assert friendly.status_code == 200
         assert friendly.json()["filename"] == "second-slot.json"
         assert client.get("/api/game/saves/v2").json()["saves"] == ["ashwick.json", "second-slot.json"]
-        assert client.get("/api/game/saves/v1").json()["schema_version"] == 4
+        assert client.get("/api/game/saves/v1").json()["schema_version"] == 5
 
         client.post("/api/game/action", json={"kind": "advance_opening"})
         loaded = client.post("/api/game/saves/v2/ashwick.json/load")

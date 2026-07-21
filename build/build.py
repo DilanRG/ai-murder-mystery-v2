@@ -1,5 +1,5 @@
 """
-Build script — Produces a single-file executable for AI Murder Mystery v2.
+Build script — Produces a single-file executable for AI Murder Mystery Game.
 
 Steps:
   1. Build the Vite frontend → backend/static/
@@ -131,14 +131,14 @@ def clean() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build AI Murder Mystery v2")
+    parser = argparse.ArgumentParser(description="Build AI Murder Mystery Game")
     parser.add_argument("--clean", action="store_true", help="Clean build artifacts before building")
     parser.add_argument("--skip-frontend", action="store_true", help="Skip Vite frontend build")
     parser.add_argument("--skip-smoke", action="store_true", help="Skip packaged executable smoke test")
     args = parser.parse_args()
 
     print("=" * 60)
-    print("  AI Murder Mystery v2 -- Build Script")
+    print("  AI Murder Mystery Game -- Build Script")
     print(f"  Platform: {platform.system()} {platform.machine()}")
     print(f"  Python:   {sys.version.split()[0]}")
     print("=" * 60)

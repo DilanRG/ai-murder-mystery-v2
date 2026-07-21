@@ -1,4 +1,4 @@
-"""Deterministic authoritative turn engine for the Ashwick vertical slice."""
+"""Deterministic authoritative turn engine for AI Murder Mystery Game."""
 
 from __future__ import annotations
 
@@ -25,7 +25,10 @@ from game.actions import (
     parse_player_intent,
 )
 from game.content import load_character_card
-from game.accusation import evaluate_accusation_support
+from game.accusation import (
+    evaluate_accusation_support,
+    selected_evidence_supports_complete_route,
+)
 from game.models import (
     ActionHistoryEntry,
     BeliefState,
@@ -43,10 +46,14 @@ from game.models import (
     LocationPackage,
     MAX_CONVERSATION_MEMORIES,
     MAX_NOTEBOOK_RECORDS,
+    NpcActionAuditEntry,
+    NpcKnowledgeDelta,
+    ParticipantKnowledgeDelta,
     SearchableObjectRuntimeState,
     StatementRecord,
     PlayerTimelineEntry,
     RuntimeEvent,
+    ResolvedNpcActionRecord,
     WeaponRuntimeState,
     WorldRuntimeState,
 )
@@ -113,6 +120,46 @@ class _NpcIntent:
     destination_room_id: str | None
     manipulate_evidence_id: str | None
     social: _NpcSocialIntent | None = None
+    investigate_evidence_id: str | None = None
+    approach_player: bool = False
+    player_interaction: _NpcPlayerInteraction | None = None
+    react_event_id: str | None = None
+
+    @property
+    def kind(self) -> str:
+        if self.approach_player:
+            return "approach_player"
+        if self.investigate_evidence_id:
+            return "investigate"
+        if self.manipulate_evidence_id:
+            return "conceal_evidence"
+        if self.player_interaction is not None:
+            return self.player_interaction.kind
+        if self.react_event_id:
+            return "react_world_event"
+        if self.social is not None:
+            return "private_social"
+        if self.destination_room_id:
+            return "move"
+        return "wait"
+
+    @property
+    def evidence_id(self) -> str | None:
+        return self.investigate_evidence_id or self.manipulate_evidence_id
+
+    @property
+    def target_room_id(self) -> str | None:
+        return self.destination_room_id
+
+    @property
+    def fact_id(self) -> str | None:
+        if self.player_interaction and len(self.player_interaction.referenced_fact_ids) == 1:
+            return self.player_interaction.referenced_fact_ids[0]
+        return None
+
+    @property
+    def event_id(self) -> str | None:
+        return self.react_event_id
 
 
 @dataclass(frozen=True)
@@ -124,6 +171,16 @@ class _NpcSocialIntent:
     claim: str
     referenced_fact_ids: tuple[str, ...] = ()
     transfers_facts: bool = False
+
+
+@dataclass(frozen=True)
+class _NpcPlayerInteraction:
+    """One host-authored voluntary statement to the co-located detective."""
+
+    kind: str
+    topic: str
+    claim: str
+    referenced_fact_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -160,6 +217,8 @@ class GameEngine:
         )
         self.action_history: list[ActionHistoryEntry] | None = []
         self._location_event_rules_version = 1
+        self._npc_action_rules_version = 2
+        self._pending_npc_action_sources: Mapping[str, str] | None = None
         self.runtime = self._initial_runtime()
 
     @classmethod
@@ -217,6 +276,7 @@ class GameEngine:
                     | set(self.case.overlays[character_id].hides_fact_ids)
                 ),
                 known_evidence_ids=set(self.case.overlays[character_id].supporting_evidence_ids),
+                intentions=list(self.case.overlays[character_id].goals),
             )
             for character_id in self.case.character_ids
         }
@@ -374,6 +434,8 @@ class GameEngine:
         intent: PlayerIntent | dict[str, object],
         *,
         npc_action_ids: Mapping[str, str] | None = None,
+        npc_action_sources: Mapping[str, str] | None = None,
+        npc_action_rules_version: int | None = None,
         interview_response_id: str | None = None,
         interview_rules_version: int | None = None,
         location_event_rules_version: int | None = None,
@@ -386,6 +448,31 @@ class GameEngine:
         """
 
         command = parse_player_intent(intent) if isinstance(intent, dict) else intent
+        living_npc_ids = {
+            character_id
+            for character_id, state in self.runtime.characters.items()
+            if state.alive
+        }
+        if npc_action_ids is not None and not set(npc_action_ids) <= living_npc_ids:
+            raise ValueError("NPC action selections contain an unknown or dead actor")
+        if npc_action_sources is not None:
+            if npc_action_ids is None or set(npc_action_sources) != set(npc_action_ids):
+                raise ValueError(
+                    "NPC action sources must cover exactly the selected actors"
+                )
+            if any(
+                source not in {
+                    "provider",
+                    "fallback",
+                    "host_selection",
+                    "engine_fallback",
+                }
+                for source in npc_action_sources.values()
+            ):
+                raise ValueError("NPC action source is not supported")
+        if npc_action_rules_version not in {None, 1, 2}:
+            raise ValueError("npc_action_rules_version must be 1 or 2")
+        resolved_npc_action_rules_version = npc_action_rules_version or 2
         if interview_rules_version not in {None, 1, 2}:
             raise ValueError("interview_rules_version must be 1 or 2")
         if location_event_rules_version not in {None, 0, 1}:
@@ -415,7 +502,11 @@ class GameEngine:
                     "legacy interview rules cannot contain a response ID"
                 )
         previous_location_event_rules_version = self._location_event_rules_version
+        previous_npc_action_rules_version = self._npc_action_rules_version
+        previous_npc_action_sources = self._pending_npc_action_sources
         self._location_event_rules_version = resolved_location_event_rules_version
+        self._npc_action_rules_version = resolved_npc_action_rules_version
+        self._pending_npc_action_sources = npc_action_sources
         try:
             result = self._apply(
                 command,
@@ -428,17 +519,52 @@ class GameEngine:
             self._location_event_rules_version = (
                 previous_location_event_rules_version
             )
+            self._npc_action_rules_version = previous_npc_action_rules_version
+            self._pending_npc_action_sources = previous_npc_action_sources
         if (
             result.accepted
             and not isinstance(command, ReviewNotebookIntent)
             and self.action_history is not None
         ):
+            resolved_npc_actions = (
+                [
+                    ResolvedNpcActionRecord(
+                        actor_id=entry.actor_id,
+                        requested_action_id=entry.proposed_action_id,
+                        resolved_action_id=entry.resolved_action_id,
+                        kind=entry.action_kind,
+                        outcome=entry.outcome,
+                        reason=entry.reason,
+                        knowledge_delta=NpcKnowledgeDelta(
+                            fact_ids_gained=list(entry.learned_fact_ids),
+                            fact_ids_shared=list(entry.disclosed_fact_ids),
+                            evidence_ids_gained=list(entry.learned_evidence_ids),
+                            statement_ids_heard=[],
+                        ),
+                        participant_knowledge_deltas=[
+                            delta.model_copy(deep=True)
+                            for delta in entry.participant_knowledge_deltas
+                        ],
+                    )
+                    for entry in self.runtime.npc_action_audit
+                    if entry.turn == self.runtime.turn
+                ]
+                if result.committed
+                else []
+            )
             self.action_history.append(
                 ActionHistoryEntry(
                     intent=command.model_dump(mode="json"),
                     npc_action_ids=(
                         dict(npc_action_ids) if npc_action_ids is not None else None
                     ),
+                    npc_action_sources=(
+                        dict(npc_action_sources)
+                        if npc_action_sources is not None
+                        else None
+                    ),
+                    resolved_npc_actions=resolved_npc_actions,
+                    npc_action_rules_version=resolved_npc_action_rules_version,
                     interview_response_id=interview_response_id,
                     interview_rules_version=resolved_interview_rules_version,
                     location_event_rules_version=(
@@ -468,6 +594,8 @@ class GameEngine:
             else None
         )
         clone._location_event_rules_version = 1
+        clone._npc_action_rules_version = 2
+        clone._pending_npc_action_sources = None
         clone.runtime = self.runtime.model_copy(deep=True)
         private_interview_request = (
             clone._build_private_interview_request(command)
@@ -962,14 +1090,83 @@ class GameEngine:
             or intent.right_statement_id not in known_statement_ids
         ):
             return self._reject("A contradiction must reference two different recorded statements.")
+        statements = {
+            statement.id: statement
+            for statement in self.runtime.player_knowledge.statements
+        }
         record = ContradictionRecord(
             id=f"contradiction_{len(self.runtime.player_knowledge.contradictions) + 1}",
             left_statement_id=intent.left_statement_id,
             right_statement_id=intent.right_statement_id,
             note=intent.note,
+            confirmed=self._statements_form_confirmed_contradiction(
+                statements[intent.left_statement_id],
+                statements[intent.right_statement_id],
+            ),
         )
         self.runtime.player_knowledge.contradictions.append(record)
-        return self._accept(False, "You mark the contradiction for later review.")
+        narration = (
+            "The recorded claims conflict with the facts you have established."
+            if record.confirmed
+            else "You mark the possible contradiction for later review."
+        )
+        return self._accept(False, narration)
+
+    def _statements_form_confirmed_contradiction(
+        self,
+        left: StatementRecord,
+        right: StatementRecord,
+    ) -> bool:
+        """Confirm only a case-authored lie opposed by a fact-bearing statement.
+
+        The comparison stays host-authoritative: model prose cannot declare
+        itself contradictory, and the player must already know the referenced
+        canonical fact before the notebook confirms the conflict.
+        """
+
+        known_facts = self.runtime.player_knowledge.known_fact_ids
+
+        def contradicted_fact_ids(statement: StatementRecord) -> set[str]:
+            overlay = self.case.overlays.get(statement.speaker_id)
+            if overlay is None:
+                return set()
+            authored_matches = {
+                fact_id
+                for lie in overlay.lies
+                if lie.claim == statement.claim
+                for fact_id in lie.contradicts_fact_ids
+            }
+            if authored_matches:
+                return authored_matches
+            if (
+                self.case.id.startswith("generated_")
+                and statement.speaker_id == self.case.murder.murderer_id
+            ):
+                return {
+                    fact_id
+                    for index, lie in enumerate(
+                        sorted(overlay.lies, key=lambda item: item.id)
+                    )
+                    if statement.claim
+                    == _GENERATED_MURDERER_LIES[
+                        index % len(_GENERATED_MURDERER_LIES)
+                    ]
+                    for fact_id in lie.contradicts_fact_ids
+                }
+            return set()
+
+        return bool(
+            (
+                contradicted_fact_ids(left)
+                & set(right.referenced_fact_ids)
+                & known_facts
+            )
+            or (
+                contradicted_fact_ids(right)
+                & set(left.referenced_fact_ids)
+                & known_facts
+            )
+        )
 
     def _end_interview(
         self,
@@ -1057,6 +1254,7 @@ class GameEngine:
             self.case,
             known_fact_ids=self.runtime.player_knowledge.known_fact_ids,
             selected_evidence_ids=selected,
+            selected_timeline_fact_ids=intent.timeline_fact_ids,
             method=intent.method,
             motive=intent.motive,
             timeline=intent.timeline,
@@ -1066,7 +1264,49 @@ class GameEngine:
         # but internally inconsistent accusation cannot receive that component.
         support_score = sum(support_flags)
         correct = intent.character_id == solution.culprit_id
-        solved = correct and support_score >= 2
+        evidence_supported = selected_evidence_supports_complete_route(
+            self.case,
+            selected,
+        )
+        solved = (
+            correct and support_score == 3 and evidence_supported
+            if solution.evidence_routes
+            else correct and support_score >= 2
+        )
+        statements = {
+            statement.id: statement
+            for statement in self.runtime.player_knowledge.statements
+        }
+        contradictions = {
+            contradiction.id: contradiction
+            for contradiction in self.runtime.player_knowledge.contradictions
+        }
+        requested_contradictions = set(intent.confirmed_contradiction_ids)
+        selected_contradictions = sorted(
+            contradiction_id
+            for contradiction_id in requested_contradictions
+            if contradiction_id in contradictions
+            and contradictions[contradiction_id].confirmed
+            and any(
+                statements.get(statement_id) is not None
+                and statements[statement_id].speaker_id == intent.character_id
+                for statement_id in (
+                    contradictions[contradiction_id].left_statement_id,
+                    contradictions[contradiction_id].right_statement_id,
+                )
+            )
+        )
+        contradictions_supported = bool(requested_contradictions) and (
+            set(selected_contradictions) == requested_contradictions
+        )
+        evaluation_score = sum(
+            (
+                correct,
+                *support_flags,
+                evidence_supported,
+                contradictions_supported,
+            )
+        )
         selected_timeline_facts = sorted(
             set(intent.timeline_fact_ids)
             & self.runtime.player_knowledge.known_fact_ids
@@ -1083,9 +1323,14 @@ class GameEngine:
             method_supported=support_flags[0],
             motive_supported=support_flags[1],
             timeline_supported=support_flags[2],
+            evidence_supported=evidence_supported,
+            contradictions_supported=contradictions_supported,
+            evaluation_score=evaluation_score,
             solved=solved,
             selected_evidence_ids=sorted(selected),
+            selected_supporting_evidence_ids=sorted(selected),
             selected_timeline_fact_ids=selected_timeline_facts,
+            confirmed_contradiction_ids=selected_contradictions,
             summary=("Your accusation is sufficiently supported." if solved else "Your accusation lacks sufficient support."),
         )
         # An accusation is a committed final action too: its result is visible
@@ -1114,7 +1359,15 @@ class GameEngine:
             else []
         )
         if not defer_npc_phase:
-            events.extend(self._run_npc_phase(npc_action_ids))
+            if self._npc_action_rules_version == 1:
+                events.extend(self._run_legacy_npc_phase(npc_action_ids))
+            else:
+                events.extend(
+                    self._run_npc_phase(
+                        npc_action_ids,
+                        self._pending_npc_action_sources,
+                    )
+                )
         if self.runtime.turn >= self.case.max_turns and self.runtime.phase != GamePhase.ENDED:
             self.runtime.phase = GamePhase.ENDED
             narration += " The investigation time has expired."
@@ -1334,11 +1587,17 @@ class GameEngine:
             requests.append(request)
         return tuple(requests)
 
-    def _run_npc_phase(self, selected_action_ids: Mapping[str, str] | None = None) -> list[str]:
-        """Resolve only engine-generated choices, with deterministic fallback."""
+    def _run_legacy_npc_phase(
+        self,
+        selected_action_ids: Mapping[str, str] | None = None,
+    ) -> list[str]:
+        """Replay the exact pre-v5 positional NPC rules without new audit state."""
 
-        snapshot = {character_id: state.current_room_id for character_id, state in self.runtime.characters.items()}
-        candidate_sets = self._npc_candidate_sets(
+        snapshot = {
+            character_id: state.current_room_id
+            for character_id, state in self.runtime.characters.items()
+        }
+        candidate_sets = self._legacy_npc_candidate_sets(
             snapshot,
             include_private_social=True,
         )
@@ -1346,12 +1605,17 @@ class GameEngine:
         selected_social: list[tuple[str, _NpcSocialIntent]] = []
         for character_id, actor_candidates in candidate_sets.items():
             by_id = dict(actor_candidates)
-            requested_id = selected_action_ids.get(character_id) if selected_action_ids else None
+            requested_id = (
+                selected_action_ids.get(character_id)
+                if selected_action_ids
+                else None
+            )
             intent = by_id.get(requested_id, actor_candidates[0][1])
             character = self.runtime.characters[character_id]
             if (
                 intent.destination_room_id
-                and intent.destination_room_id in set(self._unlocked_destinations(character.current_room_id))
+                and intent.destination_room_id
+                in set(self._unlocked_destinations(character.current_room_id))
             ):
                 character.current_room_id = intent.destination_room_id
                 character.current_activity = "moving"
@@ -1365,14 +1629,20 @@ class GameEngine:
             ):
                 evidence = self.runtime.evidence[intent.manipulate_evidence_id]
                 evidence.condition = (
-                    EvidenceCondition.DESTROYED if self.runtime.turn % 2 == 0 else EvidenceCondition.CONCEALED
+                    EvidenceCondition.DESTROYED
+                    if self.runtime.turn % 2 == 0
+                    else EvidenceCondition.CONCEALED
                 )
                 evidence.current_slot_id = None
             if intent.social is not None:
                 selected_social.append((character_id, intent.social))
             if character.current_room_id == self.runtime.player_room_id:
-                self.runtime.player_knowledge.observed_character_room_ids[intent.character_id] = character.current_room_id
-                public_events.append(f"{self._name(intent.character_id)} is now in the room.")
+                self.runtime.player_knowledge.observed_character_room_ids[
+                    character_id
+                ] = character.current_room_id
+                public_events.append(
+                    f"{self._name(character_id)} is now in the room."
+                )
         social_participants: set[str] = set()
         for character_id, social in selected_social:
             if (
@@ -1388,6 +1658,522 @@ class GameEngine:
             excluded_character_ids=social_participants
         )
         return public_events
+
+    def _legacy_npc_candidate_sets(
+        self,
+        snapshot: Mapping[str, str],
+        *,
+        include_private_social: bool = False,
+    ) -> dict[str, tuple[tuple[str, _NpcIntent], ...]]:
+        """Build the positional option IDs persisted by save schemas v2-v4."""
+
+        candidate_sets: dict[str, tuple[tuple[str, _NpcIntent], ...]] = {}
+        for character_id in sorted(snapshot):
+            if not self.runtime.characters[character_id].alive:
+                continue
+            intents = [
+                self._legacy_plan_npc(character_id, snapshot),
+                _NpcIntent(character_id, None, None),
+            ]
+            intents.extend(
+                _NpcIntent(character_id, destination, None)
+                for destination in sorted(
+                    self._unlocked_destinations(snapshot[character_id])
+                )
+            )
+            intents.extend(
+                _NpcIntent(character_id, None, evidence_id)
+                for evidence_id in sorted(self.runtime.evidence)
+                if self._npc_may_manipulate(character_id, evidence_id, snapshot)
+            )
+            unique: list[_NpcIntent] = []
+            seen: set[tuple[str | None, str | None]] = set()
+            for intent in intents:
+                identity = (
+                    intent.destination_room_id,
+                    intent.manipulate_evidence_id,
+                )
+                if identity not in seen:
+                    seen.add(identity)
+                    unique.append(intent)
+            choices: list[tuple[str, _NpcIntent]] = [
+                (f"option_{index:02d}", intent)
+                for index, intent in enumerate(unique)
+            ]
+            if include_private_social:
+                for social in self._private_social_intents(character_id, snapshot):
+                    if len(choices) >= MAX_CANDIDATES_PER_ACTOR:
+                        break
+                    choices.append(
+                        (
+                            self._private_social_action_id(social),
+                            _NpcIntent(character_id, None, None, social),
+                        )
+                    )
+            candidate_sets[character_id] = tuple(choices)
+        return candidate_sets
+
+    def _legacy_plan_npc(
+        self,
+        character_id: str,
+        snapshot: Mapping[str, str],
+    ) -> _NpcIntent:
+        """Exact deterministic planner used before semantic NPC action IDs."""
+
+        character = self.runtime.characters[character_id]
+        if not character.alive:
+            return _NpcIntent(character_id, None, None)
+        neighbours = sorted(self._unlocked_destinations(snapshot[character_id]))
+        destination = None
+        if neighbours:
+            offset = (
+                self.case.seed
+                + self.runtime.turn
+                + list(sorted(snapshot)).index(character_id)
+            ) % len(neighbours)
+            destination = neighbours[offset]
+        manipulate = None
+        if (
+            character_id == self.case.murder.murderer_id
+            and self.runtime.turn % 3 == 0
+        ):
+            for evidence_id, evidence in self.runtime.evidence.items():
+                definition = self.case.evidence[evidence_id]
+                if (
+                    definition.manipulable
+                    and not evidence.discovered_by_player
+                    and evidence.current_slot_id
+                    and self.location.evidence_slots[
+                        evidence.current_slot_id
+                    ].room_id
+                    == snapshot[character_id]
+                    and self.runtime.player_room_id != snapshot[character_id]
+                ):
+                    destination = None
+                    manipulate = (
+                        evidence_id
+                        if self._npc_may_manipulate(
+                            character_id,
+                            evidence_id,
+                            snapshot,
+                        )
+                        else None
+                    )
+                    break
+        return _NpcIntent(character_id, destination, manipulate)
+
+    def _run_npc_phase(
+        self,
+        selected_action_ids: Mapping[str, str] | None = None,
+        selected_action_sources: Mapping[str, str] | None = None,
+    ) -> list[str]:
+        """Validate and resolve one finite, auditable proposal per survivor."""
+
+        snapshot = {
+            character_id: state.current_room_id
+            for character_id, state in self.runtime.characters.items()
+        }
+        candidate_sets = self._npc_candidate_sets(
+            snapshot,
+            include_private_social=True,
+        )
+        public_events: list[str] = []
+        selected_social: list[tuple[str, _NpcSocialIntent, dict[str, object]]] = []
+        for character_id, actor_candidates in candidate_sets.items():
+            by_id = dict(actor_candidates)
+            requested_id = (
+                selected_action_ids.get(character_id)
+                if selected_action_ids
+                else None
+            )
+            fell_back = requested_id not in by_id
+            resolved_id, intent = (
+                actor_candidates[0]
+                if fell_back
+                else (requested_id, by_id[requested_id])
+            )
+            raw_source = (
+                selected_action_sources.get(character_id)
+                if selected_action_sources
+                else None
+            )
+            source = (
+                raw_source.value
+                if hasattr(raw_source, "value")
+                else raw_source
+            )
+            if source is None:
+                source = (
+                    "host_selection"
+                    if requested_id is not None and not fell_back
+                    else "engine_fallback"
+                )
+            character = self.runtime.characters[character_id]
+            room_before = character.current_room_id
+            known_facts_before = set(character.known_fact_ids)
+            known_evidence_before = set(character.known_evidence_ids)
+            participant_knowledge_before = self._participant_knowledge_snapshot()
+            evidence_id = (
+                intent.manipulate_evidence_id
+                or intent.investigate_evidence_id
+            )
+            evidence_condition_before = (
+                self.runtime.evidence[evidence_id].condition
+                if evidence_id in self.runtime.evidence
+                else None
+            )
+            outcome = "fallback" if fell_back else "committed"
+            reason = (
+                "proposal was absent or stale; the deterministic candidate resolved"
+                if fell_back
+                else ""
+            )
+            disclosed_fact_ids: tuple[str, ...] = ()
+
+            if intent.destination_room_id:
+                if intent.destination_room_id in set(
+                    self._unlocked_destinations(character.current_room_id)
+                ):
+                    character.current_room_id = intent.destination_room_id
+                    character.current_activity = (
+                        "approaching player"
+                        if intent.approach_player
+                        else "moving"
+                    )
+                else:
+                    outcome = "no_op"
+                    reason = "the proposed route was no longer available"
+            elif intent.investigate_evidence_id:
+                if not self._resolve_npc_investigation(
+                    character_id,
+                    intent.investigate_evidence_id,
+                    snapshot,
+                ):
+                    outcome = "no_op"
+                    reason = "the evidence was not available for this NPC to investigate"
+            elif intent.manipulate_evidence_id:
+                if self._npc_may_manipulate(
+                    character_id,
+                    intent.manipulate_evidence_id,
+                    snapshot,
+                ):
+                    evidence = self.runtime.evidence[intent.manipulate_evidence_id]
+                    evidence.condition = (
+                        EvidenceCondition.DESTROYED
+                        if self.runtime.turn % 2 == 0
+                        else EvidenceCondition.CONCEALED
+                    )
+                    evidence.current_slot_id = None
+                    character.current_activity = "concealing evidence"
+                else:
+                    outcome = "no_op"
+                    reason = "host solvability or provenance rules blocked counterplay"
+            elif intent.player_interaction is not None:
+                if self._resolve_npc_player_interaction(
+                    character_id,
+                    intent.player_interaction,
+                ):
+                    disclosed_fact_ids = intent.player_interaction.referenced_fact_ids
+                else:
+                    outcome = "no_op"
+                    reason = "the voluntary player interaction was no longer valid"
+            elif intent.react_event_id is not None:
+                if self._resolve_npc_reaction(character_id, intent.react_event_id):
+                    public_events.append(
+                        f"{self._name(character_id)} reacts to the disturbance."
+                    )
+                else:
+                    outcome = "no_op"
+                    reason = "the world event was unavailable or already handled"
+
+            audit_context: dict[str, object] = {
+                "proposed_action_id": requested_id,
+                "resolved_action_id": resolved_id,
+                "source": source,
+                "outcome": outcome,
+                "reason": reason,
+                "room_before_id": room_before,
+                "known_facts_before": known_facts_before,
+                "known_evidence_before": known_evidence_before,
+                "participant_knowledge_before": participant_knowledge_before,
+                "evidence_condition_before": evidence_condition_before,
+                "disclosed_fact_ids": disclosed_fact_ids,
+                "intent": intent,
+            }
+            if intent.social is not None:
+                selected_social.append((character_id, intent.social, audit_context))
+            else:
+                self._append_npc_action_audit(character_id, **audit_context)
+
+            if character.current_room_id == self.runtime.player_room_id:
+                self.runtime.player_knowledge.observed_character_room_ids[
+                    character_id
+                ] = character.current_room_id
+                if room_before != character.current_room_id:
+                    public_events.append(
+                        f"{self._name(character_id)} is now in the room."
+                    )
+
+        social_participants: set[str] = set()
+        for character_id, social, audit_context in selected_social:
+            actor = self.runtime.characters[character_id]
+            audit_context["known_facts_before"] = set(actor.known_fact_ids)
+            audit_context["known_evidence_before"] = set(
+                actor.known_evidence_ids
+            )
+            audit_context["participant_knowledge_before"] = (
+                self._participant_knowledge_snapshot()
+            )
+            resolved = False
+            if (
+                character_id not in social_participants
+                and social.target_character_id not in social_participants
+            ):
+                resolved = self._resolve_private_social_action(character_id, social)
+            if resolved:
+                social_participants.update(
+                    (character_id, social.target_character_id)
+                )
+                audit_context["disclosed_fact_ids"] = social.referenced_fact_ids
+            else:
+                audit_context["outcome"] = "no_op"
+                audit_context["reason"] = "private participants were no longer co-located and available"
+            self._append_npc_action_audit(character_id, **audit_context)
+        if not self.case.solution.evidence_routes:
+            self._resolve_private_exchanges(
+                excluded_character_ids=social_participants
+            )
+        return public_events
+
+    def _participant_knowledge_snapshot(
+        self,
+    ) -> dict[str, tuple[set[str], set[str], set[str]]]:
+        """Capture all knowledge stores an NPC action is permitted to change."""
+
+        snapshot = {
+            character_id: (
+                set(state.known_fact_ids),
+                set(state.known_evidence_ids),
+                set(state.statement_ids_heard),
+            )
+            for character_id, state in self.runtime.characters.items()
+        }
+        snapshot[PLAYER_ID] = (
+            set(self.runtime.player_knowledge.known_fact_ids),
+            set(self.runtime.player_knowledge.discovered_evidence_ids),
+            {
+                statement.id
+                for statement in self.runtime.player_knowledge.statements
+            },
+        )
+        return snapshot
+
+    def _append_npc_action_audit(
+        self,
+        character_id: str,
+        *,
+        proposed_action_id: object,
+        resolved_action_id: object,
+        source: object,
+        outcome: object,
+        reason: object,
+        room_before_id: object,
+        known_facts_before: object,
+        known_evidence_before: object,
+        participant_knowledge_before: object,
+        evidence_condition_before: object,
+        disclosed_fact_ids: object,
+        intent: object,
+    ) -> None:
+        actor = self.runtime.characters[character_id]
+        npc_intent = intent
+        assert isinstance(npc_intent, _NpcIntent)
+        evidence_id = (
+            npc_intent.manipulate_evidence_id
+            or npc_intent.investigate_evidence_id
+        )
+        before_by_participant = participant_knowledge_before
+        assert isinstance(before_by_participant, dict)
+        after_by_participant = self._participant_knowledge_snapshot()
+        participant_deltas: list[ParticipantKnowledgeDelta] = []
+        for participant_id in sorted(after_by_participant):
+            before_facts, before_evidence, before_statements = before_by_participant[
+                participant_id
+            ]
+            after_facts, after_evidence, after_statements = after_by_participant[
+                participant_id
+            ]
+            shared_fact_ids = (
+                sorted(set(disclosed_fact_ids))
+                if participant_id == character_id
+                else []
+            )
+            delta = ParticipantKnowledgeDelta(
+                participant_id=participant_id,
+                fact_ids_gained=sorted(after_facts - before_facts),
+                fact_ids_shared=shared_fact_ids,
+                evidence_ids_gained=sorted(after_evidence - before_evidence),
+                statement_ids_heard=sorted(after_statements - before_statements),
+            )
+            if (
+                delta.fact_ids_gained
+                or delta.fact_ids_shared
+                or delta.evidence_ids_gained
+                or delta.statement_ids_heard
+            ):
+                participant_deltas.append(delta)
+        material = "\x1f".join(
+            (
+                str(self.runtime.turn),
+                character_id,
+                str(resolved_action_id),
+                str(len(self.runtime.npc_action_audit)),
+            )
+        ).encode("utf-8")
+        self.runtime.npc_action_audit.append(
+            NpcActionAuditEntry(
+                id=f"npc_audit_{hashlib.sha256(material).hexdigest()[:20]}",
+                turn=self.runtime.turn,
+                actor_id=character_id,
+                proposed_action_id=(
+                    str(proposed_action_id)
+                    if proposed_action_id is not None
+                    else None
+                ),
+                resolved_action_id=str(resolved_action_id),
+                action_kind=self._npc_intent_kind(npc_intent),
+                source=str(source),
+                outcome=str(outcome),
+                reason=str(reason),
+                room_before_id=str(room_before_id),
+                room_after_id=actor.current_room_id,
+                target_character_id=(
+                    npc_intent.social.target_character_id
+                    if npc_intent.social is not None
+                    else PLAYER_ID
+                    if npc_intent.player_interaction is not None
+                    or npc_intent.approach_player
+                    else None
+                ),
+                evidence_id=evidence_id,
+                event_id=npc_intent.react_event_id,
+                learned_fact_ids=sorted(
+                    actor.known_fact_ids - set(known_facts_before)
+                ),
+                disclosed_fact_ids=sorted(set(disclosed_fact_ids)),
+                learned_evidence_ids=sorted(
+                    actor.known_evidence_ids - set(known_evidence_before)
+                ),
+                participant_knowledge_deltas=participant_deltas,
+                evidence_condition_before=evidence_condition_before,
+                evidence_condition_after=(
+                    self.runtime.evidence[evidence_id].condition
+                    if evidence_id in self.runtime.evidence
+                    else None
+                ),
+            )
+        )
+
+    def _resolve_npc_investigation(
+        self,
+        character_id: str,
+        evidence_id: str,
+        snapshot: Mapping[str, str],
+    ) -> bool:
+        if not self._npc_may_investigate(character_id, evidence_id, snapshot):
+            return False
+        character = self.runtime.characters[character_id]
+        evidence = self.runtime.evidence[evidence_id]
+        definition = self.case.evidence[evidence_id]
+        character.known_evidence_ids.add(evidence_id)
+        character.known_fact_ids.update(definition.fact_ids)
+        evidence.discovered_by_character_ids.add(character_id)
+        character.current_activity = "investigating"
+        return True
+
+    def _resolve_npc_player_interaction(
+        self,
+        character_id: str,
+        interaction: _NpcPlayerInteraction,
+    ) -> bool:
+        character = self.runtime.characters[character_id]
+        if (
+            not character.alive
+            or character.current_room_id != self.runtime.player_room_id
+            or len(self.runtime.player_knowledge.statements) >= MAX_NOTEBOOK_RECORDS
+            or any(
+                fact_id not in character.known_fact_ids
+                for fact_id in interaction.referenced_fact_ids
+            )
+        ):
+            return False
+        material = "\x1f".join(
+            (
+                str(self.runtime.turn),
+                character_id,
+                interaction.kind,
+                interaction.claim,
+            )
+        ).encode("utf-8")
+        statement_id = f"npc_statement_{hashlib.sha256(material).hexdigest()[:18]}"
+        if any(
+            statement.id == statement_id
+            for statement in self.runtime.player_knowledge.statements
+        ):
+            return False
+        statement = StatementRecord(
+            id=statement_id,
+            turn=self.runtime.turn,
+            minute=self.runtime.in_game_minute,
+            speaker_id=character_id,
+            audience_ids=[PLAYER_ID],
+            topic=interaction.topic,
+            claim=interaction.claim[:MAX_ACTION_CLAIM_LENGTH],
+            referenced_fact_ids=list(interaction.referenced_fact_ids),
+            source=f"npc_autonomous_{interaction.kind}",
+        )
+        self.runtime.player_knowledge.statements.append(statement)
+        if interaction.kind == "truthful_disclose":
+            self.runtime.player_knowledge.known_fact_ids.update(
+                interaction.referenced_fact_ids
+            )
+        if len(character.conversation_memory) < MAX_CONVERSATION_MEMORIES:
+            character.conversation_memory.append(
+                ConversationMemoryEntry(
+                    turn=self.runtime.turn,
+                    speaker_id=character_id,
+                    listener_ids=[PLAYER_ID],
+                    topic=interaction.topic,
+                    text=interaction.claim[:MAX_ACTION_CLAIM_LENGTH],
+                    referenced_fact_ids=list(interaction.referenced_fact_ids),
+                )
+            )
+        character.current_activity = (
+            "assisting the detective"
+            if interaction.kind == "truthful_disclose"
+            else "misdirecting the detective"
+        )
+        return True
+
+    def _resolve_npc_reaction(self, character_id: str, event_id: str) -> bool:
+        event = next(
+            (
+                item
+                for item in reversed(self.runtime.event_log)
+                if item.id == event_id
+                and character_id in item.visible_to_character_ids
+            ),
+            None,
+        )
+        if event is None or any(
+            entry.actor_id == character_id and entry.event_id == event_id
+            for entry in self.runtime.npc_action_audit
+        ):
+            return False
+        character = self.runtime.characters[character_id]
+        character.current_activity = f"reacted:{event_id}"
+        character.emotional_state = "alert"
+        return True
 
     def _resolve_private_social_action(
         self,
@@ -1520,40 +2306,95 @@ class GameEngine:
         *,
         include_private_social: bool = False,
     ) -> dict[str, tuple[tuple[str, _NpcIntent], ...]]:
-        """Return finite choices with the deterministic choice first."""
+        """Return semantic, host-authored choices with deterministic priority."""
 
         candidate_sets: dict[str, tuple[tuple[str, _NpcIntent], ...]] = {}
         for character_id in sorted(snapshot):
             if not self.runtime.characters[character_id].alive:
                 continue
-            intents = [self._plan_npc(character_id, snapshot)]
-            intents.append(_NpcIntent(character_id, None, None))
+            intents = [
+                self._plan_npc(character_id, snapshot),
+                _NpcIntent(character_id, None, None),
+            ]
+            reaction = self._npc_reaction_intent(character_id)
+            if reaction is not None:
+                intents.append(reaction)
             intents.extend(
-                _NpcIntent(character_id, destination, None)
-                for destination in sorted(self._unlocked_destinations(snapshot[character_id]))
+                _NpcIntent(
+                    character_id,
+                    None,
+                    None,
+                    investigate_evidence_id=evidence_id,
+                )
+                for evidence_id in [
+                    candidate_id
+                    for candidate_id in sorted(self.runtime.evidence)
+                    if self._npc_may_investigate(
+                        character_id,
+                        candidate_id,
+                        snapshot,
+                    )
+                ][:3]
             )
+            if (
+                self.runtime.player_room_id
+                in set(self._unlocked_destinations(snapshot[character_id]))
+                and snapshot[character_id] != self.runtime.player_room_id
+            ):
+                intents.append(
+                    _NpcIntent(
+                        character_id,
+                        self.runtime.player_room_id,
+                        None,
+                        approach_player=True,
+                    )
+                )
+            player_interaction = next(
+                iter(self._npc_player_interactions(character_id)),
+                None,
+            )
+            if player_interaction is not None:
+                intents.append(
+                    _NpcIntent(
+                        character_id,
+                        None,
+                        None,
+                        player_interaction=player_interaction,
+                    )
+                )
             intents.extend(
                 _NpcIntent(character_id, None, evidence_id)
                 for evidence_id in sorted(self.runtime.evidence)
                 if self._npc_may_manipulate(character_id, evidence_id, snapshot)
             )
+            intents.extend(
+                _NpcIntent(character_id, destination, None)
+                for destination in sorted(
+                    self._unlocked_destinations(snapshot[character_id])
+                )
+            )
             unique: list[_NpcIntent] = []
-            seen: set[tuple[str | None, str | None]] = set()
+            seen: set[str] = set()
             for intent in intents:
-                identity = (intent.destination_room_id, intent.manipulate_evidence_id)
+                identity = self._npc_action_id(intent)
                 if identity not in seen:
                     seen.add(identity)
                     unique.append(intent)
             choices: list[tuple[str, _NpcIntent]] = [
-                (f"option_{index:02d}", intent) for index, intent in enumerate(unique)
+                (self._npc_action_id(intent), intent)
+                for intent in unique[:MAX_CANDIDATES_PER_ACTOR]
             ]
             if include_private_social:
                 for social in self._private_social_intents(character_id, snapshot):
                     if len(choices) >= MAX_CANDIDATES_PER_ACTOR:
                         break
+                    action_id = self._private_social_action_id(social)
+                    if action_id in seen:
+                        continue
+                    seen.add(action_id)
                     choices.append(
                         (
-                            self._private_social_action_id(social),
+                            action_id,
                             _NpcIntent(character_id, None, None, social),
                         )
                     )
@@ -1561,10 +2402,20 @@ class GameEngine:
         return candidate_sets
 
     def _npc_candidate_summary(self, intent: _NpcIntent) -> str:
+        if intent.approach_player:
+            return "Approach the detective by one available route."
+        if intent.investigate_evidence_id:
+            return "Investigate one present evidence item without moving or altering it."
         if intent.destination_room_id:
             return f"Move by an available route to {self.location.rooms[intent.destination_room_id].name}."
         if intent.manipulate_evidence_id:
-            return "Perform a currently permitted local interaction."
+            return "Attempt bounded murderer counterplay against one local evidence item."
+        if intent.player_interaction is not None:
+            if intent.player_interaction.kind == "truthful_disclose":
+                return "Voluntarily disclose one personally known fact to assist the detective."
+            return "Make one pre-authorized misleading claim to the detective."
+        if intent.react_event_id:
+            return "React to the latest host-authored world event."
         if intent.social is not None:
             target_name = self._name(intent.social.target_character_id)
             if intent.social.topic == "private observation":
@@ -1575,6 +2426,168 @@ class GameEngine:
                 return f"Privately make an authorized claim to {target_name}."
             return f"Privately react guardedly to {target_name} without making a factual claim."
         return "Remain in place."
+
+    @staticmethod
+    def _npc_intent_kind(intent: _NpcIntent) -> str:
+        return intent.kind
+
+    def _npc_action_id(self, intent: _NpcIntent) -> str:
+        """Bind a stable opaque ID to one actor and exact action semantics."""
+
+        if intent.social is not None:
+            return self._private_social_action_id(intent.social)
+        interaction = intent.player_interaction
+        material = "\x1f".join(
+            (
+                intent.character_id,
+                intent.kind,
+                intent.destination_room_id or "",
+                intent.evidence_id or "",
+                intent.react_event_id or "",
+                interaction.kind if interaction else "",
+                interaction.claim if interaction else "",
+                ",".join(interaction.referenced_fact_ids) if interaction else "",
+            )
+        ).encode("utf-8")
+        return f"{intent.kind}_{hashlib.sha256(material).hexdigest()[:20]}"
+
+    def _npc_may_investigate(
+        self,
+        character_id: str,
+        evidence_id: str,
+        snapshot: Mapping[str, str],
+    ) -> bool:
+        character = self.runtime.characters.get(character_id)
+        evidence = self.runtime.evidence.get(evidence_id)
+        definition = self.case.evidence.get(evidence_id)
+        if (
+            character is None
+            or evidence is None
+            or definition is None
+            or not character.alive
+            or character_id not in snapshot
+            or evidence_id in character.known_evidence_ids
+            or evidence.condition
+            in {
+                EvidenceCondition.COLLECTED,
+                EvidenceCondition.CONCEALED,
+                EvidenceCondition.DESTROYED,
+            }
+            or evidence.current_slot_id is None
+            or not set(definition.prerequisite_evidence_ids)
+            <= character.known_evidence_ids
+        ):
+            return False
+        slot = self.location.evidence_slots.get(evidence.current_slot_id)
+        return bool(slot and slot.room_id == snapshot[character_id])
+
+    def _npc_player_interactions(
+        self,
+        character_id: str,
+    ) -> tuple[_NpcPlayerInteraction, ...]:
+        character = self.runtime.characters[character_id]
+        if (
+            not character.alive
+            or character.current_room_id != self.runtime.player_room_id
+        ):
+            return ()
+        overlay = self.case.overlays[character_id]
+        existing_claims = {
+            statement.claim
+            for statement in self.runtime.player_knowledge.statements
+            if statement.speaker_id == character_id
+        }
+        interactions: list[_NpcPlayerInteraction] = []
+        if character_id == self.case.murder.murderer_id:
+            generated_murderer = self.case.id.startswith("generated_")
+            lie = None
+            if generated_murderer:
+                # Provider prose never crosses this player-facing boundary.
+                # The number of authored lies may influence how many bounded
+                # denials exist, but not their wording or topic.
+                safe_claims = [
+                    _GENERATED_MURDERER_LIES[
+                        index % len(_GENERATED_MURDERER_LIES)
+                    ]
+                    for index, _item in enumerate(
+                        sorted(overlay.lies, key=lambda item: item.id)
+                    )
+                ]
+                safe_claims.append(_GENERATED_MURDERER_ALIBI)
+                claim = next(
+                    (
+                        candidate
+                        for candidate in safe_claims
+                        if candidate not in existing_claims
+                    ),
+                    "",
+                )
+                topic = "account"
+            else:
+                lie = next(
+                    (
+                        item
+                        for item in sorted(overlay.lies, key=lambda item: item.id)
+                        if item.claim not in existing_claims
+                    ),
+                    None,
+                )
+                claim = lie.claim if lie is not None else overlay.alibi_claim
+                topic = lie.topic if lie is not None else "alibi"
+            if claim and claim not in existing_claims:
+                interactions.append(
+                    _NpcPlayerInteraction(
+                        kind="authorized_misdirect",
+                        topic=topic,
+                        claim=claim,
+                    )
+                )
+        hidden = set(overlay.hides_fact_ids)
+        observation = next(
+            (
+                item
+                for item in sorted(overlay.observations, key=lambda item: item.id)
+                if set(item.fact_ids) <= character.known_fact_ids
+                and not (set(item.fact_ids) & hidden)
+                and not set(item.fact_ids)
+                <= self.runtime.player_knowledge.known_fact_ids
+                and item.summary not in existing_claims
+            ),
+            None,
+        )
+        if observation is not None:
+            interactions.append(
+                _NpcPlayerInteraction(
+                    kind="truthful_disclose",
+                    topic="voluntary observation",
+                    claim=observation.summary,
+                    referenced_fact_ids=observation.fact_ids,
+                )
+            )
+        return tuple(interactions)
+
+    def _npc_reaction_intent(self, character_id: str) -> _NpcIntent | None:
+        event = next(
+            (
+                item
+                for item in reversed(self.runtime.event_log)
+                if item.turn == self.runtime.turn
+                and character_id in item.visible_to_character_ids
+                and not any(
+                    audit.actor_id == character_id and audit.event_id == item.id
+                    for audit in self.runtime.npc_action_audit
+                )
+            ),
+            None,
+        )
+        if event is None:
+            return None
+        return _NpcIntent(
+            character_id,
+            None,
+            None,
+            react_event_id=event.id,
+        )
 
     def _private_social_intents(
         self,
@@ -1707,12 +2720,9 @@ class GameEngine:
         character = self.runtime.characters[character_id]
         if not character.alive:
             return _NpcIntent(character_id, None, None)
-        neighbours = sorted(self._unlocked_destinations(snapshot[character_id]))
-        destination = None
-        if neighbours:
-            offset = (self.case.seed + self.runtime.turn + list(sorted(snapshot)).index(character_id)) % len(neighbours)
-            destination = neighbours[offset]
-        manipulate = None
+        reaction = self._npc_reaction_intent(character_id)
+        if reaction is not None:
+            return reaction
         if (
             character_id == self.case.murder.murderer_id
             and self.runtime.turn % 3 == 0
@@ -1730,14 +2740,78 @@ class GameEngine:
                     # they cannot also leave and affect their former room.  If
                     # solvability now forbids it, the exact deterministic
                     # fallback behaviour is to hold rather than move.
-                    destination = None
-                    manipulate = (
-                        evidence_id
-                        if self._npc_may_manipulate(character_id, evidence_id, snapshot)
-                        else None
-                    )
-                    break
-        return _NpcIntent(character_id, destination, manipulate)
+                    if self._npc_may_manipulate(
+                        character_id,
+                        evidence_id,
+                        snapshot,
+                    ):
+                        return _NpcIntent(character_id, None, evidence_id)
+
+        player_interactions = self._npc_player_interactions(character_id)
+        if player_interactions:
+            return _NpcIntent(
+                character_id,
+                None,
+                None,
+                player_interaction=player_interactions[0],
+            )
+
+        investigation = next(
+            (
+                evidence_id
+                for evidence_id in sorted(self.runtime.evidence)
+                if self._npc_may_investigate(
+                    character_id,
+                    evidence_id,
+                    snapshot,
+                )
+            ),
+            None,
+        )
+        goal_material = "\x1f".join(
+            (
+                character_id,
+                *self.case.overlays[character_id].goals,
+                str(self.case.seed),
+                str(self.runtime.turn),
+            )
+        ).encode("utf-8")
+        goal_score = int.from_bytes(
+            hashlib.sha256(goal_material).digest()[:8],
+            "big",
+        )
+        if investigation is not None and goal_score % 3 != 0:
+            return _NpcIntent(
+                character_id,
+                None,
+                None,
+                investigate_evidence_id=investigation,
+            )
+
+        private_social = self._private_social_intents(character_id, snapshot)
+        if private_social and goal_score % 3 == 0:
+            return _NpcIntent(
+                character_id,
+                None,
+                None,
+                private_social[goal_score % len(private_social)],
+            )
+
+        neighbours = sorted(self._unlocked_destinations(snapshot[character_id]))
+        if not neighbours:
+            return _NpcIntent(character_id, None, None)
+        if self.runtime.player_room_id in neighbours and goal_score % 4 == 0:
+            return _NpcIntent(
+                character_id,
+                self.runtime.player_room_id,
+                None,
+                approach_player=True,
+            )
+        return _NpcIntent(
+            character_id,
+            neighbours[goal_score % len(neighbours)],
+            None,
+        )
 
     def _npc_may_manipulate(
         self,
@@ -1789,7 +2863,46 @@ class GameEngine:
             set(self.case.solution.motive_evidence_ids),
             set(self.case.solution.opportunity_evidence_ids),
         )
-        return len(groups) >= self.case.solution.independent_evidence_groups_required and all(available & group for group in category_sets)
+        globally_supported = (
+            len(groups)
+            >= self.case.solution.independent_evidence_groups_required
+            and all(available & group for group in category_sets)
+        )
+        if not globally_supported:
+            return False
+        routes = self.case.solution.evidence_routes
+        if not routes:
+            return True
+
+        def closure(evidence_ids: set[str]) -> set[str]:
+            result: set[str] = set()
+            pending = list(evidence_ids)
+            while pending:
+                candidate_id = pending.pop()
+                if candidate_id in result or candidate_id not in self.case.evidence:
+                    continue
+                result.add(candidate_id)
+                pending.extend(
+                    self.case.evidence[candidate_id].prerequisite_evidence_ids
+                )
+            return result
+
+        for route in routes:
+            route_ids = closure(
+                {
+                    *route.method_evidence_ids,
+                    *route.motive_evidence_ids,
+                    *route.opportunity_evidence_ids,
+                }
+            )
+            if all(
+                candidate_id != evidence_id
+                and self.runtime.evidence[candidate_id].condition
+                not in {EvidenceCondition.DESTROYED, EvidenceCondition.CONCEALED}
+                for candidate_id in route_ids
+            ):
+                return True
+        return False
 
     def _discover_evidence(
         self,
@@ -1952,6 +3065,15 @@ class GameEngine:
             method_supported=result.method_supported,
             motive_supported=result.motive_supported,
             timeline_supported=result.timeline_supported,
+            evidence_supported=result.evidence_supported,
+            contradictions_supported=result.contradictions_supported,
+            evaluation_score=result.evaluation_score,
+            selected_supporting_evidence_ids=list(
+                result.selected_supporting_evidence_ids
+            ),
+            confirmed_contradiction_ids=list(
+                result.confirmed_contradiction_ids
+            ),
             solved=result.solved,
             summary=result.summary,
         )

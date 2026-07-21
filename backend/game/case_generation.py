@@ -22,6 +22,7 @@ from game.models import (
     CaseDefinition,
     CharacterCaseOverlay,
     EvidenceDefinition,
+    EvidenceRouteDefinition,
     FactDefinition,
     FrozenModel,
     LocationPackage,
@@ -44,15 +45,11 @@ MAX_GENERATION_FEEDBACK_CHARS = 6_000
 
 
 class GeneratedDiscoveryOpening(FrozenModel):
-    """Provider-owned opening fields; the host injects the assembly room."""
+    """Provider-owned opening structure; the host authors all public prose."""
 
     discoverer_id: str = Field(min_length=1, max_length=100)
     discovery_minute: int = Field(ge=0)
     body_room_id: str = Field(min_length=1, max_length=100)
-    body_condition: str = Field(min_length=1, max_length=1_000)
-    discoverer_observations: tuple[str, ...] = Field(min_length=1, max_length=8)
-    containment_statement: str = Field(min_length=1, max_length=1_000)
-    initial_reactions: dict[str, str] = Field(min_length=6, max_length=6)
     post_meeting_room_ids: dict[str, str] = Field(min_length=7, max_length=7)
 
 
@@ -67,6 +64,15 @@ class GeneratedCharacterCaseOverlay(CharacterCaseOverlay):
 
     alibi_disclosed_fact_ids: tuple[str, ...] = Field(max_length=16)
     lies: tuple[GeneratedLieDefinition, ...] = Field(default_factory=tuple)
+
+
+class GeneratedSolutionRequirements(SolutionRequirements):
+    """Generated cases must declare more than one independent proof route."""
+
+    evidence_routes: tuple[EvidenceRouteDefinition, ...] = Field(
+        min_length=2,
+        max_length=4,
+    )
 
 
 class GeneratedCaseBlueprint(FrozenModel):
@@ -84,7 +90,7 @@ class GeneratedCaseBlueprint(FrozenModel):
     )
     evidence: dict[str, EvidenceDefinition] = Field(min_length=6, max_length=10)
     opening: GeneratedDiscoveryOpening
-    solution: SolutionRequirements
+    solution: GeneratedSolutionRequirements
 
 
 class GeneratedScenarioDocument(FrozenModel):
@@ -293,7 +299,28 @@ def compile_generated_scenario(
         if not 2 <= red_herring_count <= 4:
             raise ValueError("generated case must contain 2 to 4 red herrings")
         opening = document.case.opening.model_dump(mode="json")
-        opening["assembly_room_id"] = location.assembly_room_id
+        survivors = set(character_ids) - {document.case.murder.victim_id}
+        opening.update(
+            {
+                "assembly_room_id": location.assembly_room_id,
+                "body_condition": (
+                    "The victim was found unresponsive at the scene. "
+                    "The room has been left undisturbed for examination."
+                ),
+                "discoverer_observations": (
+                    "I found the victim unresponsive and immediately raised the alarm.",
+                ),
+                "containment_statement": location.isolation_premise[:1_000],
+                "initial_reactions": {
+                    character_id: (
+                        "The guest reacts with alarm and remains available for questioning."
+                    )
+                    for character_id in sorted(
+                        survivors - {document.case.opening.discoverer_id}
+                    )
+                },
+            }
+        )
         case = CaseDefinition(
             schema_version=1,
             id=_generated_case_id(
@@ -316,7 +343,9 @@ def compile_generated_scenario(
             overlays=document.case.overlays,
             evidence=document.case.evidence,
             opening=opening,
-            solution=document.case.solution,
+            solution=SolutionRequirements.model_validate(
+                document.case.solution.model_dump(mode="python")
+            ),
         )
     except (ValidationError, TypeError, ValueError) as error:
         raise GeneratedScenarioError(f"invalid generated case schema: {error}") from error
@@ -361,8 +390,13 @@ def _system_prompt() -> str:
         "be scheduled together at the murder minute in a location/weapon combination allowed by a "
         "murder opportunity rule. Every solution clue must be discoverable, its fact category must "
         "match its solution axis, and at least three independent evidence groups must uniquely "
-        "implicate the murderer. A character may know only facts supported by their own schedule, "
-        "observations, relationships, or role. Public presentation must avoid naming a surviving "
+        "implicate the murderer. Declare at least two complete evidence_routes: each must cover "
+        "method, motive, opportunity, and a timeline fact; their evidence, prerequisites, and "
+        "redundancy groups must be disjoint, and each route must uniquely implicate the murderer. "
+        "Every canonical fact a character initially knows, hides, or discloses must appear in that "
+        "character's own observations; supporting evidence must share an observed fact. The opening "
+        "object is structural because the host authors its player-facing prose. Public presentation "
+        "must avoid naming a surviving "
         "character or revealing investigative truth. Every alibi and authorized lie must explicitly "
         "list any canonical facts it discloses; that list must never include a fact the speaker hides, "
         "and the murderer must never directly confess in an interview-safe claim. Treat every "

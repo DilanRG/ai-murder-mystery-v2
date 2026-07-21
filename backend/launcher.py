@@ -32,7 +32,7 @@ def _valid_port(value: str) -> int:
 def parse_launcher_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse launcher controls used by people and packaged smoke tests."""
 
-    parser = argparse.ArgumentParser(description="Launch The Ashwick Trust")
+    parser = argparse.ArgumentParser(description="Launch AI Murder Mystery Game")
     parser.add_argument(
         "--port",
         type=_valid_port,
@@ -76,7 +76,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     port = options.port or find_free_port()
     url = f"http://{host}:{port}"
 
-    logger.info("The Ashwick Trust")
+    logger.info("AI Murder Mystery Game")
     logger.info("Starting server on %s ...", url)
 
     # Start uvicorn in a background thread

@@ -1,11 +1,11 @@
-# AI Murder Mystery v2 — Technical Architecture
+# AI Murder Mystery Game — Technical Architecture
 
 > **Historical prototype document:** This describes the real-time v2.0 prototype.
 > It is superseded by [project_brief.md](project_brief.md). See
 > [prototype_reuse_audit.md](prototype_reuse_audit.md) and
 > [mvp_decisions.md](mvp_decisions.md) for the active redesign.
 
-> **Purpose:** This is the definitive technical reference for the AI Murder Mystery v2 project.
+> **Purpose:** This is the definitive technical reference for the AI Murder Mystery Game project.
 > Any developer (human or AI) joining this project should read this document first.
 > Keep this document updated as the architecture evolves.
 

@@ -1,4 +1,4 @@
-"""Application service for the deterministic Ashwick game session.
+"""Application service for the deterministic AI Murder Mystery Game session.
 
 The service is deliberately small: it owns the one in-process engine and
 coordinates validated saves.  HTTP handlers consume only its public views;
@@ -26,7 +26,12 @@ from game.npc_planning import (
     ConstrainedNpcIntentPlanningCoordinator,
     OpenRouterNpcIntentBatchAdapter,
 )
-from game.persistence import SaveValidationError, load_engine, write_save
+from game.persistence import (
+    SaveValidationError,
+    load_engine,
+    snapshot_engine,
+    write_save,
+)
 from game.recipes import (
     ASSEMBLIES_DIR,
     CaseRecipeSelection,
@@ -224,6 +229,7 @@ class GameService:
         engine = self._require_engine()
         preview = engine.preview(command)
         npc_action_ids: dict[str, str] | None = None
+        npc_action_sources: dict[str, str] | None = None
         interview_response_id: str | None = None
         if (
             isinstance(command, InterviewExchangeIntent)
@@ -254,6 +260,10 @@ class GameService:
                 actor_id: selection.action_id
                 for actor_id, selection in plan.selections.items()
             }
+            npc_action_sources = {
+                actor_id: source.value
+                for actor_id, source in plan.sources.items()
+            }
         elif preview.result.accepted and preview.result.committed and preview.npc_request is not None:
             coordinator = ConstrainedNpcIntentPlanningCoordinator(
                 OpenRouterNpcIntentBatchAdapter(self.llm) if self.llm is not None else None
@@ -263,10 +273,15 @@ class GameService:
                 selection.actor_id: selection.action_id
                 for selection in plan.selections
             }
+            npc_action_sources = {
+                selection.actor_id: plan.source.value
+                for selection in plan.selections
+            }
 
         result = engine.apply(
             command,
             npc_action_ids=npc_action_ids,
+            npc_action_sources=npc_action_sources,
             interview_response_id=interview_response_id,
         )
         response = result.model_dump(mode="json")
@@ -460,6 +475,110 @@ class GameService:
             *solution.opportunity_evidence_ids,
         )
         unique_evidence_ids = list(dict.fromkeys(evidence_ids))
+        replay_envelope = snapshot_engine(engine)
+        confirmed_contradictions = sorted(
+            contradiction.id
+            for contradiction in engine.runtime.player_knowledge.contradictions
+            if contradiction.confirmed
+        )
+        audit = {
+            "canonical_truth": {
+                "case_id": case.id,
+                "seed": case.seed,
+                "location_id": case.location_package_id,
+                "cast_ids": list(case.character_ids),
+                "victim_id": case.murder.victim_id,
+                "culprit_id": case.murder.murderer_id,
+                "method": case.murder.method,
+                "means": case.murder.means,
+                "motive": case.murder.motive,
+                "opportunity": case.murder.opportunity,
+                "evidence_routes": [
+                    route.model_dump(mode="json")
+                    for route in solution.evidence_routes
+                ],
+                "case_document": case.model_dump(mode="json"),
+            },
+            "npc_action_trace": [
+                {
+                    "turn": entry.turn,
+                    "actor_id": entry.actor_id,
+                    "proposal": entry.proposed_action_id,
+                    "resolved_action_id": entry.resolved_action_id,
+                    "kind": entry.action_kind,
+                    "source": entry.source,
+                    "outcome": entry.outcome,
+                    "reason": entry.reason,
+                    "room_before_id": entry.room_before_id,
+                    "room_after_id": entry.room_after_id,
+                    "target_character_id": entry.target_character_id,
+                    "evidence_id": entry.evidence_id,
+                    "event_id": entry.event_id,
+                    "knowledge_delta": {
+                        "fact_ids_gained": list(entry.learned_fact_ids),
+                        "fact_ids_shared": list(entry.disclosed_fact_ids),
+                        "evidence_ids_gained": list(entry.learned_evidence_ids),
+                    },
+                    "participant_knowledge_deltas": [
+                        delta.model_dump(mode="json")
+                        for delta in entry.participant_knowledge_deltas
+                    ],
+                    "evidence_condition_before": (
+                        entry.evidence_condition_before.value
+                        if entry.evidence_condition_before is not None
+                        else None
+                    ),
+                    "evidence_condition_after": (
+                        entry.evidence_condition_after.value
+                        if entry.evidence_condition_after is not None
+                        else None
+                    ),
+                }
+                for entry in engine.runtime.npc_action_audit
+            ],
+            "final_knowledge": {
+                "player": {
+                    "known_fact_ids": sorted(
+                        engine.runtime.player_knowledge.known_fact_ids
+                    ),
+                    "discovered_evidence_ids": sorted(
+                        engine.runtime.player_knowledge.discovered_evidence_ids
+                    ),
+                    "statement_ids": [
+                        statement.id
+                        for statement in engine.runtime.player_knowledge.statements
+                    ],
+                    "confirmed_contradiction_ids": confirmed_contradictions,
+                },
+                "npcs": {
+                    character_id: {
+                        "alive": state.alive,
+                        "known_fact_ids": sorted(state.known_fact_ids),
+                        "known_evidence_ids": sorted(state.known_evidence_ids),
+                        "beliefs": {
+                            subject_id: belief.model_dump(mode="json")
+                            for subject_id, belief in state.beliefs.items()
+                        },
+                        "intentions": list(state.intentions),
+                        "conversation_memory": [
+                            memory.model_dump(mode="json")
+                            for memory in state.conversation_memory
+                        ],
+                        "private_overlay": case.overlays[
+                            character_id
+                        ].model_dump(mode="json"),
+                    }
+                    for character_id, state in engine.runtime.characters.items()
+                },
+            },
+            "replay_verification": {
+                "verified": replay_envelope.runtime == engine.runtime,
+                "action_count": len(engine.action_history or []),
+                "resolved_npc_action_count": len(
+                    engine.runtime.npc_action_audit
+                ),
+            },
+        }
         return {
             "case_title": engine.view().case_title,
             "outcome": engine.view().result.model_dump(mode="json") if engine.view().result else None,
@@ -488,7 +607,12 @@ class GameService:
                     }
                     for fact_id in solution.timeline_fact_ids
                 ],
+                "evidence_routes": [
+                    route.model_dump(mode="json")
+                    for route in solution.evidence_routes
+                ],
             },
+            "audit": audit,
         }
 
     def _require_engine(self) -> GameEngine:

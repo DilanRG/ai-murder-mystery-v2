@@ -1,4 +1,4 @@
-# AI Murder Mystery v2 — Implementation Plan
+# AI Murder Mystery Game — Implementation Plan
 
 > **Historical prototype plan:** This plan records the completed real-time v2.0
 > prototype and is superseded by [project_brief.md](project_brief.md). The active

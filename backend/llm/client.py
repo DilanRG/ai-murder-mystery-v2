@@ -80,7 +80,7 @@ class LLMClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/DilanRG/ai-murder-mystery",
-            "X-Title": "AI Murder Mystery",
+            "X-Title": "AI Murder Mystery Game",
         }
 
     def _messages_to_api(self, messages: list[LLMMessage]) -> list[dict]:

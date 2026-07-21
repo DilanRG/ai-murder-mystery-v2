@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def _load_build_script():
     spec = importlib.util.spec_from_file_location(
-        "ashwick_build_script",
+        "murder_mystery_build_script",
         REPO_ROOT / "build" / "build.py",
     )
     assert spec is not None and spec.loader is not None
@@ -31,7 +31,7 @@ def _load_build_script():
 
 def _load_smoke_script():
     spec = importlib.util.spec_from_file_location(
-        "ashwick_smoke_script",
+        "murder_mystery_smoke_script",
         REPO_ROOT / "build" / "smoke_packaged.py",
     )
     assert spec is not None and spec.loader is not None

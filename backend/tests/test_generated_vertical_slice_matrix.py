@@ -209,7 +209,7 @@ def test_authored_projection_can_save_reload_after_turn_six_and_win(
         assert save.status_code == 200
         assert json.loads(
             (tmp_path / f"generated-{seed}.json").read_text(encoding="utf-8")
-        )["schema_version"] == 4
+        )["schema_version"] == 5
         calls_before_reload = provider.calls
         main._session.llm = None
         loaded = client.post(f"/api/game/saves/v1/generated-{seed}.json/load")

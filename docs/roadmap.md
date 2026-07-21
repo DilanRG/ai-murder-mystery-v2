@@ -1,4 +1,4 @@
-# AI Murder Mystery v2 — Roadmap
+# AI Murder Mystery Game — Roadmap
 
 > **Historical prototype roadmap:** The completed milestones below apply to the
 > real-time v2.0 prototype. The current turn-based redesign is governed by
@@ -15,7 +15,7 @@
 
 | Field | Value |
 |---|---|
-| **Project** | AI Murder Mystery v2 |
+| **Project** | AI Murder Mystery Game |
 | **Lead Developer** | Antigravity (architecture, oversight, complex tasks) |
 | **Primary Builder** | Claude Sonnet 4.6 (implementation) |
 | **Subcontractors** | Gemini 3.1 Pro (as needed) |

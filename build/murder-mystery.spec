@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec file for AI Murder Mystery v2.
+PyInstaller spec file for AI Murder Mystery Game.
 Bundles the backend + pre-built static frontend into a single executable.
 """
 import sys

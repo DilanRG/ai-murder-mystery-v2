@@ -14,15 +14,36 @@ from game.persistence import SaveValidationError, load_engine, restore_engine, s
 from game.validator import validate_case, validate_location_package
 
 
-def _engine() -> GameEngine:
+def _engine(
+    *,
+    location_event_rules_version: int | None = None,
+    npc_action_rules_version: int | None = None,
+) -> GameEngine:
     engine = GameEngine(load_case("ashwick_sample"), load_location("ashwick_manor"))
-    assert engine.apply(AdvanceOpeningIntent()).accepted
+    if npc_action_rules_version == 1:
+        for state in engine.runtime.characters.values():
+            state.intentions = []
+    assert engine.apply(
+        AdvanceOpeningIntent(),
+        location_event_rules_version=location_event_rules_version,
+        npc_action_rules_version=npc_action_rules_version,
+    ).accepted
     return engine
 
 
-def _advance(engine: GameEngine, turns: int) -> list[object]:
+def _advance(
+    engine: GameEngine,
+    turns: int,
+    *,
+    location_event_rules_version: int | None = None,
+    npc_action_rules_version: int | None = None,
+) -> list[object]:
     return [
-        engine.apply(SearchIntent(object_id="hall_clock"))
+        engine.apply(
+            SearchIntent(object_id="hall_clock"),
+            location_event_rules_version=location_event_rules_version,
+            npc_action_rules_version=npc_action_rules_version,
+        )
         for _ in range(turns)
     ]
 
@@ -93,7 +114,7 @@ def test_ashwick_turn_six_event_is_recorded_once_and_visible_to_every_survivor()
 
 def test_due_event_is_in_the_frozen_npc_preview_without_mutating_live_state() -> None:
     engine = _engine()
-    _advance(engine, 5)
+    _advance(engine, 5, location_event_rules_version=0)
     due = next(
         event for event in engine.location.events if event.id == "storm_intensifies"
     )
@@ -137,13 +158,19 @@ def test_ashwick_turn_eighteen_event_is_once_only_and_replay_save_is_determinist
 
 
 def test_v3_save_before_turn_six_migrates_and_still_emits_the_due_event() -> None:
-    engine = _engine()
-    _advance(engine, 5)
+    engine = _engine(
+        location_event_rules_version=0,
+        npc_action_rules_version=1,
+    )
+    _advance(engine, 5, npc_action_rules_version=1)
     old_v3 = snapshot_engine(engine).model_dump(mode="json")
-    assert old_v3["schema_version"] == 4
+    assert old_v3["schema_version"] == 5
     old_v3["schema_version"] = 3
     for entry in old_v3["action_history"]:
         entry.pop("location_event_rules_version")
+        entry.pop("npc_action_rules_version")
+        entry.pop("npc_action_sources", None)
+        entry.pop("resolved_npc_actions", None)
 
     restored = restore_engine(old_v3, engine.case, engine.location)
     sixth = restored.apply(SearchIntent(object_id="hall_clock"))
@@ -154,20 +181,31 @@ def test_v3_save_before_turn_six_migrates_and_still_emits_the_due_event() -> Non
         ).description
         in sixth.events
     )
-    assert snapshot_engine(restored).schema_version == 4
+    assert snapshot_engine(restored).schema_version == 5
 
 
 @pytest.mark.parametrize("turns", (6, 18))
 def test_v3_save_after_scheduled_turn_preserves_history_without_retroactive_event(
     turns: int,
 ) -> None:
-    engine = _engine()
-    _advance(engine, turns)
+    engine = _engine(
+        location_event_rules_version=0,
+        npc_action_rules_version=1,
+    )
+    _advance(
+        engine,
+        turns,
+        location_event_rules_version=0,
+        npc_action_rules_version=1,
+    )
     old_v3 = snapshot_engine(engine).model_dump(mode="json")
     old_v3["schema_version"] = 3
-    old_v3["runtime"]["event_log"] = []
+    assert old_v3["runtime"]["event_log"] == []
     for entry in old_v3["action_history"]:
         entry.pop("location_event_rules_version")
+        entry.pop("npc_action_rules_version")
+        entry.pop("npc_action_sources", None)
+        entry.pop("resolved_npc_actions", None)
 
     restored = restore_engine(old_v3, engine.case, engine.location)
 
@@ -179,7 +217,7 @@ def test_v3_save_after_scheduled_turn_preserves_history_without_retroactive_even
     next_turn = restored.apply(SearchIntent(object_id="hall_clock"))
     assert next_turn.accepted
     assert restored.runtime.event_log == []
-    assert snapshot_engine(restored).schema_version == 4
+    assert snapshot_engine(restored).schema_version == 5
 
 
 @pytest.mark.parametrize(
@@ -191,7 +229,7 @@ def test_v3_save_after_scheduled_turn_preserves_history_without_retroactive_even
         ("fact_ids", ["fact_murderer_identity"]),
     ),
 )
-def test_v4_rejects_tampered_scheduled_event_records(
+def test_v5_rejects_tampered_scheduled_event_records(
     field: str,
     value: object,
 ) -> None:
@@ -204,7 +242,7 @@ def test_v4_rejects_tampered_scheduled_event_records(
         restore_engine(payload, engine.case, engine.location)
 
 
-def test_v4_requires_explicit_monotonic_location_event_history_rules() -> None:
+def test_v5_requires_explicit_monotonic_location_event_history_rules() -> None:
     engine = _engine()
     _advance(engine, 2)
     missing = snapshot_engine(engine).model_dump(mode="json")
@@ -220,12 +258,15 @@ def test_v4_requires_explicit_monotonic_location_event_history_rules() -> None:
 
 
 def test_v3_migration_keeps_rejecting_tampered_non_event_runtime() -> None:
-    engine = _engine()
-    _advance(engine, 5)
+    engine = _engine(npc_action_rules_version=1)
+    _advance(engine, 5, npc_action_rules_version=1)
     old_v3 = json.loads(json.dumps(snapshot_engine(engine).model_dump(mode="json")))
     old_v3["schema_version"] = 3
     for entry in old_v3["action_history"]:
         entry.pop("location_event_rules_version")
+        entry.pop("npc_action_rules_version")
+        entry.pop("npc_action_sources", None)
+        entry.pop("resolved_npc_actions", None)
     old_v3["runtime"]["player_room_id"] = "forged_room"
 
     with pytest.raises(SaveValidationError, match="player room"):

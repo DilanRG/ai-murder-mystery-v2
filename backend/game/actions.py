@@ -106,7 +106,11 @@ class AccuseIntent(PlayerIntentBase):
     evidence_ids: list[str] = Field(
         default_factory=list,
         max_length=MAX_ACTION_ID_REFERENCES,
-        validation_alias=AliasChoices("evidence_ids", "selected_evidence_ids"),
+        validation_alias=AliasChoices(
+            "evidence_ids",
+            "selected_evidence_ids",
+            "selected_supporting_evidence_ids",
+        ),
     )
     method: str = Field(default="", max_length=MAX_ACTION_CLAIM_LENGTH)
     motive: str = Field(default="", max_length=MAX_ACTION_CLAIM_LENGTH)
@@ -116,6 +120,10 @@ class AccuseIntent(PlayerIntentBase):
     opportunity_evidence_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
     timeline_evidence_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
     timeline_fact_ids: list[str] = Field(default_factory=list, max_length=MAX_ACTION_ID_REFERENCES)
+    confirmed_contradiction_ids: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_ACTION_ID_REFERENCES,
+    )
 
 
 # ``AccusationIntent`` reads more naturally at call sites while preserving the

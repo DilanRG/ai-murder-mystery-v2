@@ -104,6 +104,11 @@ class PublicResultView(StrictModel):
     method_supported: bool
     motive_supported: bool
     timeline_supported: bool
+    evidence_supported: bool = False
+    contradictions_supported: bool = False
+    evaluation_score: int = 0
+    selected_supporting_evidence_ids: list[str] = Field(default_factory=list)
+    confirmed_contradiction_ids: list[str] = Field(default_factory=list)
     solved: bool
     summary: str
 

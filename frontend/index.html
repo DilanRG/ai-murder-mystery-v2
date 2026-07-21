@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>The Ashwick Trust — A Murder Mystery</title>
+  <title>AI Murder Mystery Game</title>
   <meta name="description" content="A local-first, turn-based murder mystery at Ashwick Manor.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="The Ashwick Trust — A Murder Mystery">
+  <meta property="og:title" content="AI Murder Mystery Game">
   <meta property="og:description" content="Enter stormbound Ashwick Manor. Search the rooms, test seven stories, and build an accusation before the night runs out.">
   <meta property="og:image" content="/og.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="The Ashwick Trust — A Murder Mystery">
+  <meta name="twitter:title" content="AI Murder Mystery Game">
   <meta name="twitter:description" content="A cinematic, turn-based murder mystery where evidence—not AI narration—decides the truth.">
   <meta name="twitter:image" content="/og.png">
   <link rel="stylesheet" href="/css/styles.css">
@@ -20,7 +20,7 @@
     <section id="screen-title" class="screen active" aria-labelledby="title-heading">
       <div class="title-card">
         <p class="eyebrow">Ashwick Manor · Stormbound</p>
-        <h1 id="title-heading">The<br><em>Ashwick Trust</em></h1>
+        <h1 id="title-heading">AI Murder<br><em>Mystery Game</em></h1>
         <p class="lead">A murder has stopped the house. Eight people remain. Every action moves the night forward.</p>
         <div class="title-actions"><button id="new-game" class="primary">Begin investigation</button><button id="resume-game" class="secondary">Resume saved session</button></div>
         <p id="connection" class="status">Checking local case file…</p>
@@ -31,7 +31,7 @@
     <section id="screen-setup" class="screen" aria-labelledby="setup-title">
       <div class="setup-card">
         <button class="text-button back" data-screen="title">← Return</button>
-        <p class="eyebrow">Case file</p><h2 id="setup-title">Prepare for Ashwick</h2>
+        <p class="eyebrow">Case file</p><h2 id="setup-title">Prepare your investigation</h2>
         <p>Choose the eight-person cast automatically or manually. OpenRouter then generates the canonical timeline, roles, clues, private briefings, and solution. The host validates the complete mystery before play begins.</p>
         <dl id="case-summary" class="case-summary"></dl>
         <div class="case-options">
@@ -51,7 +51,7 @@
     </section>
 
     <section id="screen-game" class="screen" aria-label="Investigation">
-      <header class="topbar"><div><p class="eyebrow">Case</p><strong id="case-title">Ashwick</strong></div><div class="status-row"><span id="room-label">—</span><span id="turn-label">Turn 0</span><time id="time-label">—</time></div><div class="top-actions"><button id="save-button" class="secondary small">Save / load</button><button id="game-settings" class="secondary small" aria-label="Settings">Settings</button></div></header>
+      <header class="topbar"><div><p class="eyebrow">Case</p><strong id="case-title">Case file</strong></div><div class="status-row"><span id="room-label">—</span><span id="turn-label">Turn 0</span><time id="time-label">—</time></div><div class="top-actions"><button id="save-button" class="secondary small">Save / load</button><button id="game-settings" class="secondary small" aria-label="Settings">Settings</button></div></header>
       <div class="game-grid">
         <aside class="left-rail"><section><h2>Manor map</h2><p id="map-note" class="muted">Only connected, unlocked rooms can be entered.</p><nav id="room-map" class="room-map" aria-label="Rooms"></nav></section><section><h2>In this room</h2><div id="present-characters" class="stack"></div></section></aside>
         <section class="scene-column"><div id="opening-panel" class="opening-panel"></div><article class="scene"><p id="scene-kicker" class="eyebrow">Current location</p><h2 id="scene-name">—</h2><p id="scene-description"></p><div id="scene-actions" class="action-grid"></div></article><section aria-label="Investigation record"><h2>Case record</h2><ol id="narration" class="narration"></ol></section></section>

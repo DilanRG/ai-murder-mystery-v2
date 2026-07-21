@@ -1,4 +1,4 @@
-# The Ashwick Trust
+# AI Murder Mystery Game
 
 [![Verify packaged game](https://github.com/DilanRG/ai-murder-mystery-v2/actions/workflows/verify-packages.yml/badge.svg)](https://github.com/DilanRG/ai-murder-mystery-v2/actions/workflows/verify-packages.yml)
 
@@ -9,17 +9,20 @@ Normal **New Story** generation requires an OpenRouter API key. Two clearly labe
 ## What is playable
 
 - Automatic or manual selection of any eight characters from the 24-card pool, followed by validated OpenRouter generation of the roles, timeline, murder, evidence, private overlays, solution, and public framing.
+- Generated cases must expose at least two disjoint, complete method/motive/opportunity/timeline evidence routes to one uniquely best-supported culprit before they can become canonical truth.
 - Provider-free authored-projection regression cases exercise four automatic ensembles covering all 24 cards plus an arbitrary manual ensemble through the same admission boundary, full investigation, save/load, scheduled event, solution, and timeout paths. They intentionally reuse an Ashwick crime spine and do not satisfy the procedural-case acceptance milestone.
 - Two complete authored Ashwick Manor demo mysteries for deterministic implementation and offline testing.
 - Twenty-four Character Card V3 characters plus a local JSON import, validation, draft, and export editor.
 - Discovery, room-to-room investigation, body examination, searches, evidence review, and limited interviews.
-- A sourced notebook with facts, notes, timeline entries, contradictions, and suspects.
+- A sourced notebook with facts, notes, timeline entries, host-confirmed contradictions, and suspects.
 - Ten-minute deterministic turns with exact-once authored location events and NPC activity resolved from one immutable turn-start snapshot, including bounded private exchanges and evolving suspicion.
-- Replay-verified v4 local JSON saves, safe legacy-v1/v2/v3 resume, a first-class timeout outcome, supported accusation, and post-game debrief.
-- Seven separately partitioned living-NPC planning calls per committed generated-story turn. Each receives one byte-bounded private briefing plus the same immutable public snapshot and may select only its own engine-authored action ID for movement, holding, permitted evidence defense, or an unobserved social choice.
+- Replay-verified v5 local JSON saves, safe legacy-v1/v2/v3/v4 resume, a first-class timeout outcome, supported accusation, and post-game debrief. A checked-in save emitted by the preserved v4 foundation proves positional `option_XX` NPC histories still replay under their historical rules before upgrading to v5.
+- Seven separately partitioned living-NPC planning calls per committed generated-story turn. Each receives one byte-bounded private briefing plus the same immutable public snapshot and may select only its own engine-authored action ID for movement, investigation, approach, player assistance/misdirection, world-event reaction, bounded evidence defense, or an unobserved social choice.
 - Private social choices can state an alibi, share an observation the speaker actually knows, make a pre-authorized lie, or react without asserting a fact. Truthful observations transfer only their linked fact IDs to one co-located listener; lies never become facts.
 - Generated-case interviews give only the target NPC its private briefing and a finite set of engine-authored alibi, truthful-observation, authorized-lie, and evasion IDs. Its selected canonical claim is recorded and replayable; optional bounded portrayal runs only after that claim has committed.
 - Distinct, versioned noir portrait placeholders for the full cast, with accessible text fallbacks.
+- Six-dimension final accusation evaluation covering culprit, method, motive, timeline, a complete selected evidence route, and confirmed contradictions, with the component verdict shown in the browser result.
+- A complete post-game canonical-truth, NPC-action, final-knowledge, and replay-verification audit through the debrief API.
 - Responsive desktop and mobile browser UI.
 
 ## Run locally
@@ -50,7 +53,7 @@ From the repository root, after installing the backend dependencies:
 .\backend\.venv\Scripts\python.exe build\build.py
 ```
 
-The build produces `dist/ai-murder-mystery.exe` on Windows (or the corresponding extensionless binary on macOS/Linux). A build is considered successful only after the produced executable starts headlessly, loads all 24 characters and both authored cases, advances a turn, and writes and reloads a v4 save. Use `--skip-frontend` only when `backend/static` is already current; `--skip-smoke` is available for build diagnostics, not release publishing.
+The build produces `dist/ai-murder-mystery.exe` on Windows (or the corresponding extensionless binary on macOS/Linux). A build is considered successful only after the produced executable starts headlessly, loads all 24 characters and both authored cases, advances a turn, and writes and reloads a v5 save. Use `--skip-frontend` only when `backend/static` is already current; `--skip-smoke` is available for build diagnostics, not release publishing.
 
 ## Test
 
@@ -60,11 +63,11 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 .\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
 ```
 
-The automated suite contains 290 Python tests plus 13 dependency-free frontend boundary tests. It covers rules, transport-level truth redaction, generated-case admission and retry, full solve paths for both authored dummy mysteries, every pooled card solved against both dummy spines, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, generated-case save/restore, legacy-v2 interview replay, replay and tamper checks, seven-way private NPC isolation, bounded social knowledge transfer, target-only interview selection, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
+The automated suite contains 325 Python tests plus 16 dependency-free frontend behavior tests. It covers rules, transport-level truth redaction, generated-case admission and retry, an independent non-authored procedural solve after autonomous activity, two-route solvability, cross-route accusation coherence, complete participant-aware audit/replay, full solve paths for both authored demo mysteries, every pooled card solved against both authored spines, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, generated-case save/restore, golden legacy-v4 positional replay plus legacy-v2/v3 migration, seven-way private NPC isolation, bounded social knowledge transfer, target-only interview selection, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
 
 ## OpenRouter generation and agent boundary
 
-In Settings, supply an OpenRouter key and model before choosing **Generate new mystery**. The selected eight Character Card V3 profiles and the predefined location package are sent to one scenario-generation call. The host injects IDs and turn policy, parses the result into strict schemas, and rejects it unless chronology, discovery routes, prerequisite reachability, evidence placement, red-herring bounds, reciprocal solution links, and unique solvability all validate. A failed generation never replaces the currently active game.
+In Settings, supply an OpenRouter key and model before choosing **Generate new mystery**. The selected eight Character Card V3 profiles and the predefined location package are sent to one scenario-generation call. The host injects IDs, turn policy, and all player-facing opening prose, parses the result into strict schemas, and rejects it unless chronology, participant locations, private-knowledge provenance, discovery routes, prerequisite reachability, evidence placement, red-herring bounds, non-contradictory implication/exoneration, reciprocal solution links, and unique solvability all validate. A failed generation never replaces the currently active game.
 
 Once admitted, that immutable case spawns seven private NPC contexts: the victim is excluded, the murderer alone receives the crime truth, and no living agent receives another character's motive, secrets, or private memory. On each committed turn the seven calls run independently against the same frozen snapshot. A response can contain only one semantically bound, allow-listed action ID; malformed, stale, timed-out, or out-of-set responses fall back independently without breaking the turn.
 
@@ -89,6 +92,7 @@ In a source checkout, the key is stored locally in `backend/user_config.json`, s
 - `docs/prototype_reuse_audit.md` — retained versus replaced prototype components.
 
 Current completion and remaining-work notes live in [docs/active_status.md](docs/active_status.md).
+The completed procedural milestone evidence is recorded in [docs/procedural_acceptance_report.md](docs/procedural_acceptance_report.md).
 
 ## Design invariant
 

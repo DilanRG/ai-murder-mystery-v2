@@ -329,11 +329,17 @@ def test_new_exchange_after_generated_v2_restore_uses_hardened_rules() -> None:
         }
     )
     engine = GameEngine(case, location)
-    engine.apply(AdvanceOpeningIntent())
-    assert engine.apply(BeginInterviewIntent(character_id=murderer_id)).accepted
+    for state in engine.runtime.characters.values():
+        state.intentions = []
+    engine.apply(AdvanceOpeningIntent(), npc_action_rules_version=1)
+    assert engine.apply(
+        BeginInterviewIntent(character_id=murderer_id),
+        npc_action_rules_version=1,
+    ).accepted
     assert engine.apply(
         InterviewExchangeIntent(message="Where were you?"),
         interview_rules_version=1,
+        npc_action_rules_version=1,
     ).accepted
     assert engine.runtime.player_knowledge.statements[-1].claim == unsafe_alibi
     old_v2 = snapshot_engine(engine).model_dump(mode="json")
@@ -341,6 +347,9 @@ def test_new_exchange_after_generated_v2_restore_uses_hardened_rules() -> None:
     for entry in old_v2["action_history"]:
         entry.pop("interview_rules_version", None)
         entry.pop("location_event_rules_version", None)
+        entry.pop("npc_action_rules_version", None)
+        entry.pop("npc_action_sources", None)
+        entry.pop("resolved_npc_actions", None)
 
     restored = restore_engine(old_v2, case, location)
     command = InterviewExchangeIntent(message="What are you hiding?")

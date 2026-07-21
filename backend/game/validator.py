@@ -293,6 +293,330 @@ def _is_player_resolvable_discovery_route(
     return False
 
 
+def _evidence_with_prerequisites(
+    case: CaseDefinition,
+    evidence_ids: Iterable[str],
+) -> set[str]:
+    """Return the evidence closure needed to establish a proposed proof route."""
+
+    closure: set[str] = set()
+    pending = list(evidence_ids)
+    while pending:
+        evidence_id = pending.pop()
+        if evidence_id in closure or evidence_id not in case.evidence:
+            continue
+        closure.add(evidence_id)
+        pending.extend(case.evidence[evidence_id].prerequisite_evidence_ids)
+    return closure
+
+
+def validate_generated_evidence_routes(
+    case: CaseDefinition,
+    routes: Iterable,
+) -> ValidationReport:
+    """Validate generated proof routes without changing legacy authored schemas.
+
+    Each declared route must stand on its own: it covers every accusation axis
+    and one timeline fact, uniquely points to the culprit, and shares neither
+    evidence (including prerequisites) nor a redundancy group with another
+    declared route.
+    """
+
+    report = ValidationReport()
+    route_closures: list[set[str]] = []
+    route_groups: list[set[str]] = []
+    solution = case.solution
+    allowed_by_axis = {
+        "method": set(solution.method_evidence_ids),
+        "motive": set(solution.motive_evidence_ids),
+        "opportunity": set(solution.opportunity_evidence_ids),
+    }
+    allowed_timeline_facts = set(solution.timeline_fact_ids)
+    cast = set(case.character_ids)
+    culprit_id = case.murder.murderer_id
+    route_ids: set[str] = set()
+
+    for index, route in enumerate(routes):
+        path = f"solution.evidence_routes[{index}]"
+        if route.id in route_ids:
+            report.add(
+                "duplicate_evidence_route_id",
+                f"{path}.id",
+                f"duplicate evidence route id {route.id!r}",
+            )
+        route_ids.add(route.id)
+        axis_sets = (
+            set(route.method_evidence_ids),
+            set(route.motive_evidence_ids),
+            set(route.opportunity_evidence_ids),
+        )
+        if any(
+            len(values) != len(set(values))
+            for values in (
+                route.method_evidence_ids,
+                route.motive_evidence_ids,
+                route.opportunity_evidence_ids,
+                route.timeline_fact_ids,
+            )
+        ):
+            report.add(
+                "duplicate_route_reference",
+                path,
+                "a proof route cannot repeat evidence or timeline references",
+            )
+        if any(
+            axis_sets[left] & axis_sets[right]
+            for left, right in ((0, 1), (0, 2), (1, 2))
+        ):
+            report.add(
+                "route_axis_evidence_overlap",
+                path,
+                "one evidence item cannot stand in for multiple accusation axes within a route",
+            )
+        direct_ids = {
+            *route.method_evidence_ids,
+            *route.motive_evidence_ids,
+            *route.opportunity_evidence_ids,
+        }
+        for axis, evidence_ids in (
+            ("method", route.method_evidence_ids),
+            ("motive", route.motive_evidence_ids),
+            ("opportunity", route.opportunity_evidence_ids),
+        ):
+            unexpected = set(evidence_ids) - allowed_by_axis[axis]
+            if unexpected:
+                report.add(
+                    "route_evidence_not_in_solution_axis",
+                    f"{path}.{axis}_evidence_ids",
+                    f"route {axis} evidence is not part of the declared solution axis: {', '.join(sorted(unexpected))}",
+                )
+        unexpected_facts = set(route.timeline_fact_ids) - allowed_timeline_facts
+        if unexpected_facts:
+            report.add(
+                "route_timeline_not_in_solution",
+                f"{path}.timeline_fact_ids",
+                f"route timeline facts are not part of the declared solution: {', '.join(sorted(unexpected_facts))}",
+            )
+
+        closure = _evidence_with_prerequisites(case, direct_ids)
+        route_closures.append(closure)
+        groups = {
+            case.evidence[evidence_id].redundancy_group
+            for evidence_id in closure
+        }
+        route_groups.append(groups)
+        supported_facts = {
+            fact_id
+            for evidence_id in closure
+            for fact_id in case.evidence[evidence_id].fact_ids
+        }
+        if not set(route.timeline_fact_ids) <= supported_facts:
+            report.add(
+                "route_timeline_not_supported",
+                f"{path}.timeline_fact_ids",
+                "route timeline facts must be supported by that route's evidence or prerequisites",
+            )
+
+        implication_groups: dict[str, set[str]] = defaultdict(set)
+        culprit_exoneration_groups: set[str] = set()
+        for evidence_id in closure:
+            evidence = case.evidence[evidence_id]
+            if evidence.is_red_herring:
+                report.add(
+                    "red_herring_in_evidence_route",
+                    path,
+                    f"proof route contains red herring {evidence_id!r}",
+                )
+                continue
+            for character_id in evidence.implicates_character_ids:
+                implication_groups[character_id].add(evidence.redundancy_group)
+            if culprit_id in evidence.exonerates_character_ids:
+                culprit_exoneration_groups.add(evidence.redundancy_group)
+        if culprit_exoneration_groups:
+            report.add(
+                "evidence_route_exonerates_culprit",
+                path,
+                "a canonical proof route cannot contain evidence that exonerates "
+                f"the culprit (groups: {', '.join(sorted(culprit_exoneration_groups))})",
+            )
+        culprit_score = len(implication_groups[culprit_id])
+        rival_score = max(
+            (len(implication_groups[character_id]) for character_id in cast - {culprit_id}),
+            default=0,
+        )
+        if culprit_score < 2 or culprit_score <= rival_score:
+            report.add(
+                "route_culprit_not_uniquely_supported",
+                path,
+                f"route supports culprit in {culprit_score} groups versus rival best {rival_score}; at least two culprit groups are required",
+            )
+
+    if len(route_closures) < 2:
+        report.add(
+            "insufficient_independent_evidence_routes",
+            "solution.evidence_routes",
+            "generated cases require at least two independently complete evidence routes",
+        )
+    for index, closure in enumerate(route_closures):
+        for other_index in range(index):
+            overlap = closure & route_closures[other_index]
+            group_overlap = route_groups[index] & route_groups[other_index]
+            if overlap or group_overlap:
+                details = []
+                if overlap:
+                    details.append(f"evidence {', '.join(sorted(overlap))}")
+                if group_overlap:
+                    details.append(f"groups {', '.join(sorted(group_overlap))}")
+                report.add(
+                    "overlapping_independent_evidence_routes",
+                    f"solution.evidence_routes[{index}]",
+                    f"route overlaps route {other_index} through {' and '.join(details)}",
+                )
+    return report
+
+
+def validate_generated_private_states(case: CaseDefinition) -> ValidationReport:
+    """Require every living generated NPC to begin with a real private agenda."""
+
+    report = ValidationReport()
+    signatures: dict[tuple[object, ...], str] = {}
+    for character_id in case.character_ids:
+        if character_id == case.murder.victim_id:
+            continue
+        overlay = case.overlays.get(character_id)
+        if overlay is None:
+            continue
+        required_collections = (
+            ("observations", overlay.observations),
+            ("secrets", overlay.secrets),
+            ("relationships", overlay.relationships),
+            ("goals", overlay.goals),
+            ("initial_suspicions", overlay.initial_suspicions),
+        )
+        for field_name, values in required_collections:
+            if not values:
+                report.add(
+                    "incomplete_generated_private_state",
+                    f"overlays.{character_id}.{field_name}",
+                    f"living generated NPC {character_id!r} needs private {field_name}",
+                )
+        known_fact_ids = {
+            fact_id
+            for observation in overlay.observations
+            for fact_id in observation.fact_ids
+        }
+        if not known_fact_ids:
+            report.add(
+                "generated_npc_without_private_knowledge",
+                f"overlays.{character_id}.observations",
+                "a living generated NPC must begin with at least one observed fact",
+            )
+        unsupported_hidden_facts = set(overlay.hides_fact_ids) - known_fact_ids
+        if unsupported_hidden_facts:
+            report.add(
+                "unproven_generated_private_knowledge",
+                f"overlays.{character_id}.hides_fact_ids",
+                "concealed facts must be grounded in that NPC's own observations: "
+                + ", ".join(sorted(unsupported_hidden_facts)),
+            )
+        disclosed_fact_ids = {
+            *overlay.alibi_disclosed_fact_ids,
+            *(
+                fact_id
+                for lie in overlay.lies
+                for fact_id in lie.disclosed_fact_ids
+            ),
+        }
+        unsupported_disclosures = disclosed_fact_ids - known_fact_ids
+        if unsupported_disclosures:
+            report.add(
+                "unproven_generated_fact_disclosure",
+                f"overlays.{character_id}",
+                "an NPC may disclose only facts grounded in its own observations: "
+                + ", ".join(sorted(unsupported_disclosures)),
+            )
+        for evidence_id in overlay.supporting_evidence_ids:
+            evidence = case.evidence.get(evidence_id)
+            if evidence is not None and not (
+                set(evidence.fact_ids) & known_fact_ids
+            ):
+                report.add(
+                    "unproven_generated_evidence_knowledge",
+                    f"overlays.{character_id}.supporting_evidence_ids",
+                    f"evidence {evidence_id!r} is not grounded in that NPC's observations",
+                )
+        signature = (
+            overlay.private_motive,
+            overlay.secrets,
+            overlay.goals,
+            tuple(
+                (
+                    relationship.target_character_id,
+                    relationship.private_summary,
+                    relationship.affinity,
+                )
+                for relationship in overlay.relationships
+            ),
+            tuple(sorted(overlay.initial_suspicions.items())),
+            overlay.initial_emotional_state,
+        )
+        duplicate_of = signatures.get(signature)
+        if duplicate_of is not None:
+            report.add(
+                "duplicate_generated_private_state",
+                f"overlays.{character_id}",
+                f"private agenda duplicates {duplicate_of!r}",
+            )
+        signatures[signature] = character_id
+    return report
+
+
+def validate_generated_timeline_consistency(case: CaseDefinition) -> ValidationReport:
+    """Require every generated timeline participant to be physically present."""
+
+    report = ValidationReport()
+    for index, event in enumerate(case.timeline):
+        for character_id in sorted({*event.actor_ids, *event.observed_by}):
+            if character_id not in case.overlays:
+                continue
+            overlay = case.overlays[character_id]
+            scheduled_here = _scheduled_at_location(
+                case, character_id, event.minute, event.room_id
+            )
+            transition_from_here = (
+                event.event_type.value in {"schedule", "observation"}
+                and any(
+                    entry.end_minute == event.minute
+                    and entry.room_id == event.room_id
+                    for entry in overlay.schedule
+                )
+            )
+            body_remains_here = (
+                character_id == case.murder.victim_id
+                and event.minute >= case.murder.minute
+                and event.room_id == case.murder.room_id
+            )
+            opening_assembly = (
+                character_id != case.murder.victim_id
+                and event.event_type.value == "meeting"
+                and event.minute >= case.opening.discovery_minute
+                and event.room_id == case.opening.assembly_room_id
+            )
+            if not (
+                scheduled_here
+                or transition_from_here
+                or body_remains_here
+                or opening_assembly
+            ):
+                report.add(
+                    "inconsistent_generated_timeline_location",
+                    f"timeline[{index}]",
+                    f"{character_id!r} participates at minute {event.minute} in "
+                    f"{event.room_id!r} but its schedule places it elsewhere",
+                )
+    return report
+
+
 def validate_case(case: CaseDefinition, location: LocationPackage) -> ValidationReport:
     """Validate a case against a location, accumulating every detected issue."""
     report = validate_location_package(location)
@@ -483,6 +807,16 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
         for character_id in (*evidence.implicates_character_ids, *evidence.exonerates_character_ids):
             if character_id not in cast:
                 report.add("unknown_character", path, f"unknown character {character_id!r}")
+        contradictory_characters = set(evidence.implicates_character_ids) & set(
+            evidence.exonerates_character_ids
+        )
+        if case.solution.evidence_routes and contradictory_characters:
+            report.add(
+                "contradictory_evidence_character_effect",
+                path,
+                "evidence cannot both implicate and exonerate the same character: "
+                + ", ".join(sorted(contradictory_characters)),
+            )
         if evidence.is_red_herring and not evidence.red_herring_explanation.strip():
             report.add("missing_red_herring_explanation", path, "red-herring evidence needs an explanation")
         for prerequisite_id in evidence.prerequisite_evidence_ids:
@@ -734,4 +1068,10 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
             "evidence",
             f"culprit has {culprit_score} independent implication groups versus rival best {rival_score}; expected a unique score of at least {required}",
         )
+    if solution.evidence_routes:
+        report.extend(
+            validate_generated_evidence_routes(case, solution.evidence_routes)
+        )
+        report.extend(validate_generated_private_states(case))
+        report.extend(validate_generated_timeline_consistency(case))
     return report
