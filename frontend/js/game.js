@@ -45,6 +45,7 @@ function render() {
 }
 function renderOpening() {
   const host = $('opening-panel'); host.replaceChildren();
+  host.hidden = !game.opening;
   if (!game.opening) return;
   const opening = game.opening;
   const source=game.story?.source==='llm'?'AI-directed story':'Validated authored story';
@@ -105,7 +106,39 @@ function selectedValues(select){return Array.from(select.selectedOptions).map(x=
 function formatMinute(value){return `${String(Math.floor(value/60)%24).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`;}
 
 function interviewModal(person) {
-  const modal=openModal(`Question ${person.name}`), count=game.active_interview_exchanges_remaining ?? 0; modal.body.append(el('p',`${count} exchange${count===1?'':'s'} remain in this interview.`)); const suggestions=['Where were you when it happened?','What did you see near the victim?','Who can confirm your account?']; const suggest=el('div',undefined,'suggestions'), input=document.createElement('textarea');input.placeholder='Ask a focused question…';input.setAttribute('aria-label','Question');suggestions.forEach(s=>suggest.append(button(s,()=>{input.value=s;input.focus();},'chip')));modal.body.append(suggest,input);modal.footer.append(button('Ask',async()=>{if(input.value.trim()){modal.close();await act({kind:'interview_exchange',message:input.value.trim()}); if(game.active_interview_character_id) interviewModal(person);}},'primary'),button('Conclude interview',async()=>{modal.close();await act({kind:'end_interview'});},'secondary'));
+  const modal=openModal(`Question ${person.name}`), count=game.active_interview_exchanges_remaining ?? 0;
+  const verb = count===1?'remains':'remain';
+  modal.body.append(el('p',`${count} exchange${count===1?'':'s'} ${verb} in this interview.`));
+  const suggestions=['Where were you when it happened?','What did you see near the victim?','Who can confirm your account?'];
+  const suggest=el('div',undefined,'suggestions'), input=document.createElement('textarea');
+  input.placeholder='Ask a focused question…';
+  input.setAttribute('aria-label','Question');
+  input.maxLength = 1200;
+  input.disabled = count <= 0;
+  const ask = button('Ask',async()=>{
+    const question = input.value.trim();
+    if (count <= 0 || !question || question.length > 1200) return;
+    modal.close();
+    await act({kind:'interview_exchange',message:question});
+    if(game.active_interview_character_id) interviewModal(person);
+  },'primary');
+  const updateAskAvailability = () => {
+    const question = input.value.trim();
+    ask.disabled = count <= 0 || question.length === 0 || question.length > 1200;
+  };
+  input.addEventListener('input', updateAskAvailability);
+  suggestions.forEach(s=>{
+    const chip = button(s,()=>{
+      input.value=s;
+      updateAskAvailability();
+      input.focus();
+    },'chip');
+    chip.disabled = count <= 0;
+    suggest.append(chip);
+  });
+  updateAskAvailability();
+  modal.body.append(suggest,input);
+  modal.footer.append(ask,button('Conclude interview',async()=>{modal.close();await act({kind:'end_interview'});},'secondary'));
 }
 export function openAccusation() {
   const modal=openModal('Make a final accusation'); modal.body.append(el('p','Choose a living suspect and explicitly support the method, motive, and timeline. Filing the accusation ends this investigation.'));
