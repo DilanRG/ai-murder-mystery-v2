@@ -20,7 +20,7 @@
 | **Primary Builder** | Claude Sonnet 4.6 (implementation) |
 | **Subcontractors** | Gemini 3.1 Pro (as needed) |
 | **Project Manager** | Dilan |
-| **Repository** | `c:\random scripting\game` (DilanRG/ai-murder-mystery) |
+| **Repository** | `c:\random scripting\game` (DilanRG/ai-murder-mystery-v2) |
 | **v1 Archive** | `c:\random scripting\game_v1_archive` |
 
 ---

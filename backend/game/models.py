@@ -72,6 +72,7 @@ MAX_NOTEBOOK_RECORDS = 128
 MAX_ACTION_ID_REFERENCES = 64
 MAX_ACTION_CLAIM_LENGTH = 2_000
 MAX_CONVERSATION_MEMORIES = 256
+MAX_RUNTIME_EVENTS = 256
 BoundedNote = Annotated[str, Field(min_length=1, max_length=1_000)]
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=100)]
 
@@ -336,11 +337,11 @@ class MurderOpportunityRule(FrozenModel):
 
 
 class LocationEventDefinition(FrozenModel):
-    id: str
-    name: str
-    trigger: str
-    description: str
-    engine_effect: str
+    id: BoundedIdentifier
+    name: str = Field(min_length=1, max_length=120)
+    trigger: str = Field(min_length=1, max_length=32)
+    description: str = Field(min_length=1, max_length=500)
+    engine_effect: BoundedIdentifier
 
 
 class LocationPackage(FrozenModel):
@@ -360,7 +361,10 @@ class LocationPackage(FrozenModel):
     murder_opportunity_rules: tuple[MurderOpportunityRule, ...]
     body_discovery_room_ids: tuple[str, ...]
     movement_constraints: tuple[str, ...] = Field(default_factory=tuple)
-    events: tuple[LocationEventDefinition, ...] = Field(default_factory=tuple)
+    events: tuple[LocationEventDefinition, ...] = Field(
+        default_factory=tuple,
+        max_length=MAX_RUNTIME_EVENTS,
+    )
     visual_theme: VisualTheme
 
 
@@ -638,16 +642,19 @@ class PlayerKnowledgeState(StrictModel):
 
 
 class RuntimeEvent(StrictModel):
-    id: str
+    id: BoundedIdentifier
     turn: int = Field(ge=0)
     minute: int = Field(ge=0)
-    event_type: str
-    room_id: str
-    actor_ids: list[str]
-    narration: str
-    visible_to_character_ids: list[str] = Field(default_factory=list)
+    event_type: BoundedIdentifier
+    room_id: BoundedIdentifier
+    actor_ids: list[BoundedIdentifier] = Field(default_factory=list, max_length=8)
+    narration: str = Field(min_length=1, max_length=500)
+    visible_to_character_ids: list[BoundedIdentifier] = Field(
+        default_factory=list,
+        max_length=8,
+    )
     visible_to_player: bool = False
-    fact_ids: list[str] = Field(default_factory=list)
+    fact_ids: list[BoundedIdentifier] = Field(default_factory=list, max_length=16)
 
 
 class InterviewSession(StrictModel):
@@ -684,6 +691,7 @@ class ActionHistoryEntry(StrictModel):
     )
     interview_response_id: BoundedIdentifier | None = None
     interview_rules_version: Literal[1, 2] | None = None
+    location_event_rules_version: Literal[0, 1] | None = None
 
     @model_validator(mode="after")
     def interview_selection_belongs_only_to_an_exchange(
@@ -721,6 +729,9 @@ class WorldRuntimeState(StrictModel):
     items: dict[str, ItemRuntimeState] = Field(default_factory=dict)
     weapons: dict[str, WeaponRuntimeState] = Field(default_factory=dict)
     player_knowledge: PlayerKnowledgeState = Field(default_factory=PlayerKnowledgeState)
-    event_log: list[RuntimeEvent] = Field(default_factory=list)
+    event_log: list[RuntimeEvent] = Field(
+        default_factory=list,
+        max_length=MAX_RUNTIME_EVENTS,
+    )
     active_interview: InterviewSession | None = None
     result: GameResult | None = None

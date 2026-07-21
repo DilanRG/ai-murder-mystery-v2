@@ -46,6 +46,7 @@ from game.models import (
     SearchableObjectRuntimeState,
     StatementRecord,
     PlayerTimelineEntry,
+    RuntimeEvent,
     WeaponRuntimeState,
     WorldRuntimeState,
 )
@@ -67,7 +68,7 @@ from game.private_interview import (
     PrivateInterviewResponseCandidate,
     PrivateInterviewResponseRequest,
 )
-from game.validator import validate_case
+from game.validator import location_event_turn, validate_case
 from game.public_assets import portrait_url
 from game.recipes import CaseRecipeSelection
 from game.story_director import (
@@ -158,6 +159,7 @@ class GameEngine:
             else validate_story_presentation(story_presentation, case, location)
         )
         self.action_history: list[ActionHistoryEntry] | None = []
+        self._location_event_rules_version = 1
         self.runtime = self._initial_runtime()
 
     @classmethod
@@ -374,6 +376,7 @@ class GameEngine:
         npc_action_ids: Mapping[str, str] | None = None,
         interview_response_id: str | None = None,
         interview_rules_version: int | None = None,
+        location_event_rules_version: int | None = None,
     ) -> TurnResultView:
         """Apply an intent synchronously, retaining deterministic NPC fallback.
 
@@ -385,6 +388,13 @@ class GameEngine:
         command = parse_player_intent(intent) if isinstance(intent, dict) else intent
         if interview_rules_version not in {None, 1, 2}:
             raise ValueError("interview_rules_version must be 1 or 2")
+        if location_event_rules_version not in {None, 0, 1}:
+            raise ValueError("location_event_rules_version must be 0 or 1")
+        resolved_location_event_rules_version = (
+            1
+            if location_event_rules_version is None
+            else location_event_rules_version
+        )
         if not isinstance(command, InterviewExchangeIntent):
             if interview_response_id is not None:
                 raise ValueError(
@@ -404,13 +414,20 @@ class GameEngine:
                 raise ValueError(
                     "legacy interview rules cannot contain a response ID"
                 )
-        result = self._apply(
-            command,
-            npc_action_ids=npc_action_ids,
-            interview_response_id=interview_response_id,
-            interview_rules_version=resolved_interview_rules_version,
-            defer_npc_phase=False,
-        )
+        previous_location_event_rules_version = self._location_event_rules_version
+        self._location_event_rules_version = resolved_location_event_rules_version
+        try:
+            result = self._apply(
+                command,
+                npc_action_ids=npc_action_ids,
+                interview_response_id=interview_response_id,
+                interview_rules_version=resolved_interview_rules_version,
+                defer_npc_phase=False,
+            )
+        finally:
+            self._location_event_rules_version = (
+                previous_location_event_rules_version
+            )
         if (
             result.accepted
             and not isinstance(command, ReviewNotebookIntent)
@@ -424,6 +441,9 @@ class GameEngine:
                     ),
                     interview_response_id=interview_response_id,
                     interview_rules_version=resolved_interview_rules_version,
+                    location_event_rules_version=(
+                        resolved_location_event_rules_version
+                    ),
                 )
             )
         return result
@@ -447,6 +467,7 @@ class GameEngine:
             if self.action_history is not None
             else None
         )
+        clone._location_event_rules_version = 1
         clone.runtime = self.runtime.model_copy(deep=True)
         private_interview_request = (
             clone._build_private_interview_request(command)
@@ -1087,11 +1108,51 @@ class GameEngine:
     ) -> TurnResultView:
         self.runtime.turn += 1
         self.runtime.in_game_minute += self.case.turn_minutes
-        events = [] if defer_npc_phase else self._run_npc_phase(npc_action_ids)
+        events = (
+            self._run_location_events()
+            if self._location_event_rules_version == 1
+            else []
+        )
+        if not defer_npc_phase:
+            events.extend(self._run_npc_phase(npc_action_ids))
         if self.runtime.turn >= self.case.max_turns and self.runtime.phase != GamePhase.ENDED:
             self.runtime.phase = GamePhase.ENDED
             narration += " The investigation time has expired."
         return self._accept(True, narration, discoveries=discoveries or [], items=items or [], events=events)
+
+    def _run_location_events(self) -> list[str]:
+        """Resolve due host-authored atmosphere events exactly once."""
+
+        recorded_ids = {event.id for event in self.runtime.event_log}
+        survivor_ids = sorted(
+            character_id
+            for character_id, state in self.runtime.characters.items()
+            if state.alive
+        )
+        public_events: list[str] = []
+        for definition in self.location.events:
+            if (
+                definition.id in recorded_ids
+                or location_event_turn(definition.trigger) != self.runtime.turn
+            ):
+                continue
+            self.runtime.event_log.append(
+                RuntimeEvent(
+                    id=definition.id,
+                    turn=self.runtime.turn,
+                    minute=self.runtime.in_game_minute,
+                    event_type="atmosphere",
+                    room_id=self.runtime.player_room_id,
+                    actor_ids=[],
+                    narration=definition.description,
+                    visible_to_character_ids=survivor_ids,
+                    visible_to_player=True,
+                    fact_ids=[],
+                )
+            )
+            recorded_ids.add(definition.id)
+            public_events.append(definition.description)
+        return public_events
 
     def _build_npc_planning_request(self) -> NpcIntentPlanningRequest:
         """Build one immutable, bounded request from the NPC turn-start state."""

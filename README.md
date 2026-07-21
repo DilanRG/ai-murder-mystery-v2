@@ -1,6 +1,6 @@
 # The Ashwick Trust
 
-[![Verify packaged game](https://github.com/DilanRG/ai-murder-mystery/actions/workflows/verify-packages.yml/badge.svg)](https://github.com/DilanRG/ai-murder-mystery/actions/workflows/verify-packages.yml)
+[![Verify packaged game](https://github.com/DilanRG/ai-murder-mystery-v2/actions/workflows/verify-packages.yml/badge.svg)](https://github.com/DilanRG/ai-murder-mystery-v2/actions/workflows/verify-packages.yml)
 
 A local-first, turn-based murder mystery in which OpenRouter generates a new canonical case from a selected cast and location, then the rules engine owns and enforces that truth. Investigate Ashwick Manor, interview its inhabitants, reconcile evidence and testimony, then make a supported accusation before time expires.
 
@@ -13,8 +13,8 @@ Normal **New Story** generation requires an OpenRouter API key. Two clearly labe
 - Twenty-four Character Card V3 characters plus a local JSON import, validation, draft, and export editor.
 - Discovery, room-to-room investigation, body examination, searches, evidence review, and limited interviews.
 - A sourced notebook with facts, notes, timeline entries, contradictions, and suspects.
-- Ten-minute deterministic turns with NPC activity resolved from one immutable turn-start snapshot, including bounded private exchanges and evolving suspicion.
-- Replay-verified v3 local JSON saves, safe legacy-v1/v2 resume, timeout, supported accusation, and post-game debrief.
+- Ten-minute deterministic turns with exact-once authored location events and NPC activity resolved from one immutable turn-start snapshot, including bounded private exchanges and evolving suspicion.
+- Replay-verified v4 local JSON saves, safe legacy-v1/v2/v3 resume, timeout, supported accusation, and post-game debrief.
 - Seven separately partitioned living-NPC planning calls per committed generated-story turn. Each receives one byte-bounded private briefing plus the same immutable public snapshot and may select only its own engine-authored action ID for movement, holding, permitted evidence defense, or an unobserved social choice.
 - Private social choices can state an alibi, share an observation the speaker actually knows, make a pre-authorized lie, or react without asserting a fact. Truthful observations transfer only their linked fact IDs to one co-located listener; lies never become facts.
 - Generated-case interviews give only the target NPC its private briefing and a finite set of engine-authored alibi, truthful-observation, authorized-lie, and evasion IDs. Its selected canonical claim is recorded and replayable; optional bounded portrayal runs only after that claim has committed.
@@ -49,7 +49,7 @@ From the repository root, after installing the backend dependencies:
 .\backend\.venv\Scripts\python.exe build\build.py
 ```
 
-The build produces `dist/ai-murder-mystery.exe` on Windows (or the corresponding extensionless binary on macOS/Linux). A build is considered successful only after the produced executable starts headlessly, loads all 24 characters and both authored cases, advances a turn, and writes and reloads a v3 save. Use `--skip-frontend` only when `backend/static` is already current; `--skip-smoke` is available for build diagnostics, not release publishing.
+The build produces `dist/ai-murder-mystery.exe` on Windows (or the corresponding extensionless binary on macOS/Linux). A build is considered successful only after the produced executable starts headlessly, loads all 24 characters and both authored cases, advances a turn, and writes and reloads a v4 save. Use `--skip-frontend` only when `backend/static` is already current; `--skip-smoke` is available for build diagnostics, not release publishing.
 
 ## Test
 

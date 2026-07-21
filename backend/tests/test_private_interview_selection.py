@@ -340,6 +340,7 @@ def test_new_exchange_after_generated_v2_restore_uses_hardened_rules() -> None:
     old_v2["schema_version"] = 2
     for entry in old_v2["action_history"]:
         entry.pop("interview_rules_version", None)
+        entry.pop("location_event_rules_version", None)
 
     restored = restore_engine(old_v2, case, location)
     command = InterviewExchangeIntent(message="What are you hiding?")

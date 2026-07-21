@@ -35,10 +35,11 @@ from game.recipes import (
     resolve_case_recipe,
 )
 from game.story_director import StoryPresentationPatch, validate_story_presentation
-from game.validator import validate_case
+from game.validator import location_event_turn, validate_case
 
 
-SAVE_SCHEMA_VERSION = 3
+SAVE_SCHEMA_VERSION = 4
+PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION = 3
 PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION = 2
 LEGACY_SAVE_SCHEMA_VERSION = 1
 RUNTIME_SCHEMA_VERSION = 1
@@ -53,7 +54,7 @@ class SaveValidationError(ValueError):
 class SaveEnvelope(StrictModel):
     """Portable runtime plus either authored IDs or fingerprinted generated truth."""
 
-    schema_version: Literal[1, 2, 3] = SAVE_SCHEMA_VERSION
+    schema_version: Literal[1, 2, 3, 4] = SAVE_SCHEMA_VERSION
     case_id: str
     location_id: str
     case_recipe: CaseRecipeSelection | None = None
@@ -75,18 +76,44 @@ class SaveEnvelope(StrictModel):
     def require_replay_metadata(self) -> "SaveEnvelope":
         if (
             self.schema_version
-            in {PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION, SAVE_SCHEMA_VERSION}
+            in {
+                PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION,
+                PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION,
+                SAVE_SCHEMA_VERSION,
+            }
             and self.action_history is None
         ):
             raise ValueError("replay-verified saves require action history")
-        if self.schema_version == SAVE_SCHEMA_VERSION and self.action_history is not None:
+        if (
+            self.schema_version
+            in {PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION, SAVE_SCHEMA_VERSION}
+            and self.action_history is not None
+        ):
             if any(
                 entry.intent.get("kind") == "interview_exchange"
                 and entry.interview_rules_version is None
                 for entry in self.action_history
             ):
                 raise ValueError(
-                    "save schema v3 requires rules metadata for every interview"
+                    "save schema v3+ requires rules metadata for every interview"
+                )
+        if self.action_history is not None:
+            event_versions = [
+                entry.location_event_rules_version
+                for entry in self.action_history
+            ]
+            if self.schema_version == SAVE_SCHEMA_VERSION:
+                if any(version is None for version in event_versions):
+                    raise ValueError(
+                        "save schema v4 requires location-event rules metadata"
+                    )
+                if event_versions != sorted(event_versions):
+                    raise ValueError(
+                        "legacy location-event rules may only form a history prefix"
+                    )
+            elif any(version is not None for version in event_versions):
+                raise ValueError(
+                    "pre-v4 saves cannot contain location-event rules metadata"
                 )
         if (self.generated_case is None) != (self.generated_case_fingerprint is None):
             raise ValueError("generated case and fingerprint must appear together")
@@ -303,6 +330,12 @@ def validate_runtime_state(
         if contradiction.left_statement_id not in statement_ids or contradiction.right_statement_id not in statement_ids:
             _fail("contradiction references an unknown statement")
     event_ids: set[str] = set()
+    location_events = {event.id: event for event in location.events}
+    survivor_ids = sorted(
+        character_id
+        for character_id, state in runtime.characters.items()
+        if state.alive
+    )
     for event in runtime.event_log:
         if event.id in event_ids or event.room_id not in room_ids:
             _fail("event log has a duplicate ID or invalid room")
@@ -312,6 +345,28 @@ def validate_runtime_state(
         _require_subset("event visibility", event.visible_to_character_ids, cast_ids | {PLAYER_ID})
         if event.turn > runtime.turn or event.minute > runtime.in_game_minute:
             _fail("event occurs after the saved runtime")
+        definition = location_events.get(event.id)
+        scheduled_turn = (
+            location_event_turn(definition.trigger)
+            if definition is not None
+            else None
+        )
+        if (
+            definition is None
+            or definition.engine_effect != "atmosphere_only"
+            or scheduled_turn is None
+            or event.turn != scheduled_turn
+            or event.minute
+            != case.investigation_start_minute
+            + scheduled_turn * case.turn_minutes
+            or event.event_type != "atmosphere"
+            or event.actor_ids
+            or event.narration != definition.description
+            or event.visible_to_character_ids != survivor_ids
+            or not event.visible_to_player
+            or event.fact_ids
+        ):
+            _fail("event log entry does not match its authored schedule")
 
     interview = runtime.active_interview
     if interview is not None:
@@ -381,6 +436,7 @@ def validate_save_envelope(
     if envelope.schema_version not in {
         LEGACY_SAVE_SCHEMA_VERSION,
         PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION,
+        PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION,
         SAVE_SCHEMA_VERSION,
     }:
         _fail("unsupported save schema version")
@@ -436,6 +492,7 @@ def validate_save_envelope(
     validate_runtime_state(envelope.runtime, case, location)
     if envelope.schema_version in {
         PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION,
+        PRE_LOCATION_EVENT_SAVE_SCHEMA_VERSION,
         SAVE_SCHEMA_VERSION,
     }:
         assert envelope.action_history is not None
@@ -463,6 +520,11 @@ def validate_save_envelope(
                     npc_action_ids=entry.npc_action_ids,
                     interview_response_id=entry.interview_response_id,
                     interview_rules_version=interview_rules_version,
+                    location_event_rules_version=(
+                        entry.location_event_rules_version
+                        if envelope.schema_version == SAVE_SCHEMA_VERSION
+                        else 0
+                    ),
                 )
             except (TypeError, ValueError, ValidationError) as error:
                 raise SaveValidationError(
@@ -529,28 +591,26 @@ def restore_engine(
         story_presentation=envelope.story_presentation,
     )
     engine.runtime = envelope.runtime.model_copy(deep=True)
-    engine.action_history = (
-        [
-            entry.model_copy(
-                deep=True,
-                update=(
-                    {
-                        "interview_rules_version": (
-                            2 if entry.interview_response_id is not None else 1
-                        )
-                    }
-                    if envelope.schema_version
-                    == PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION
-                    and entry.intent.get("kind") == "interview_exchange"
-                    and entry.interview_rules_version is None
-                    else {}
-                ),
+    if envelope.action_history is None:
+        engine.action_history = None
+    else:
+        engine.action_history = []
+        for entry in envelope.action_history:
+            updates: dict[str, int] = {}
+            if (
+                envelope.schema_version
+                == PRE_INTERVIEW_AGENT_SAVE_SCHEMA_VERSION
+                and entry.intent.get("kind") == "interview_exchange"
+                and entry.interview_rules_version is None
+            ):
+                updates["interview_rules_version"] = (
+                    2 if entry.interview_response_id is not None else 1
+                )
+            if envelope.schema_version != SAVE_SCHEMA_VERSION:
+                updates["location_event_rules_version"] = 0
+            engine.action_history.append(
+                entry.model_copy(deep=True, update=updates)
             )
-            for entry in envelope.action_history
-        ]
-        if envelope.action_history is not None
-        else None
-    )
     return engine
 
 

@@ -24,12 +24,21 @@ _DIRECT_MURDER_CONFESSION = re.compile(
     r")",
     re.IGNORECASE,
 )
+_LOCATION_EVENT_TRIGGER = re.compile(r"turn_([1-9]\d{0,3})")
+SUPPORTED_LOCATION_EVENT_EFFECTS = frozenset({"atmosphere_only"})
 
 
 def claim_contains_direct_murder_confession(claim: str) -> bool:
     """Detect explicit first-person murder admissions in interview-safe claims."""
 
     return _DIRECT_MURDER_CONFESSION.search(claim) is not None
+
+
+def location_event_turn(trigger: str) -> int | None:
+    """Return the strict positive turn encoded by a location-event trigger."""
+
+    match = _LOCATION_EVENT_TRIGGER.fullmatch(trigger)
+    return int(match.group(1)) if match else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +109,21 @@ def validate_location_package(location: LocationPackage) -> ValidationReport:
     _check_unique_ids(report, location.doors, "doors")
     _check_unique_ids(report, location.events, "events")
     _check_unique_ids(report, location.murder_opportunity_rules, "murder_opportunity_rules")
+
+    for index, event in enumerate(location.events):
+        path = f"events[{index}]"
+        if location_event_turn(event.trigger) is None:
+            report.add(
+                "invalid_event_trigger",
+                f"{path}.trigger",
+                "event trigger must use turn_N with N from 1 to 9999",
+            )
+        if event.engine_effect not in SUPPORTED_LOCATION_EVENT_EFFECTS:
+            report.add(
+                "unsupported_event_effect",
+                f"{path}.engine_effect",
+                "event effect is not supported by the deterministic engine",
+            )
 
     if location.assembly_room_id not in room_ids:
         report.add("unknown_room", "assembly_room_id", "assembly room must name a defined room")
@@ -287,6 +311,15 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
     _check_mapping_ids(report, case.overlays, "overlays", "character_id")
     _check_mapping_ids(report, case.evidence, "evidence")
     _check_unique_ids(report, case.timeline, "timeline")
+
+    for index, event in enumerate(location.events):
+        trigger_turn = location_event_turn(event.trigger)
+        if trigger_turn is not None and trigger_turn > case.max_turns:
+            report.add(
+                "unreachable_event_trigger",
+                f"events[{index}].trigger",
+                "event trigger occurs after the case turn limit",
+            )
 
     if set(case.overlays) != cast:
         report.add("overlay_cast_mismatch", "overlays", "overlays must exist for exactly every character in character_ids")

@@ -50,7 +50,7 @@ def test_save_round_trip_restores_runtime_without_embedded_truth(tmp_path: Path)
         "story_presentation",
         "runtime",
     }
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["case_recipe"] is None
     # Runtime may legitimately contain opaque fact IDs, but never a copied
     # authored solution object or an authored murder-truth field.
@@ -97,24 +97,25 @@ def test_pre_interview_agent_v2_save_replays_and_resaves_with_legacy_semantics()
     assert disclosed_ids & set(engine.case.overlays[actor_id].hides_fact_ids)
 
     current = snapshot_engine(engine).model_dump(mode="json")
-    assert current["schema_version"] == 3
+    assert current["schema_version"] == 4
     assert [
         entry["interview_rules_version"]
         for entry in current["action_history"]
         if entry["intent"]["kind"] == "interview_exchange"
     ] == [1, 1]
-    malformed_v3 = json.loads(json.dumps(current))
+    malformed_v4 = json.loads(json.dumps(current))
     next(
         entry
-        for entry in malformed_v3["action_history"]
+        for entry in malformed_v4["action_history"]
         if entry["intent"]["kind"] == "interview_exchange"
     ).pop("interview_rules_version")
     with pytest.raises(SaveValidationError, match="supported schema"):
-        restore_engine(malformed_v3, engine.case, engine.location)
+        restore_engine(malformed_v4, engine.case, engine.location)
     old_v2 = json.loads(json.dumps(current))
     old_v2["schema_version"] = 2
     for entry in old_v2["action_history"]:
         entry.pop("interview_rules_version", None)
+        entry.pop("location_event_rules_version", None)
 
     restored = restore_engine(old_v2, engine.case, engine.location)
 
@@ -129,13 +130,13 @@ def test_pre_interview_agent_v2_save_replays_and_resaves_with_legacy_semantics()
     ).accepted
     assert restored.action_history[-1].interview_rules_version == 2
     resaved = snapshot_engine(restored)
-    assert resaved.schema_version == 3
+    assert resaved.schema_version == 4
     assert restore_engine(resaved, engine.case, engine.location).runtime == (
         restored.runtime
     )
 
 
-def test_v3_action_history_rejects_forged_evidence_progression() -> None:
+def test_v4_action_history_rejects_forged_evidence_progression() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
     payload = snapshot_engine(engine).model_dump(mode="json")
@@ -161,7 +162,7 @@ def test_v3_action_history_rejects_forged_evidence_progression() -> None:
         restore_engine(payload, engine.case, engine.location)
 
 
-def test_v3_rejects_removed_or_invalid_history_but_v1_legacy_still_loads() -> None:
+def test_v4_rejects_removed_or_invalid_history_but_v1_legacy_still_loads() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
     engine.apply(MoveIntent(room_id="library"))
@@ -185,7 +186,7 @@ def test_v3_rejects_removed_or_invalid_history_but_v1_legacy_still_loads() -> No
     assert restored.action_history is None
 
 
-def test_v3_rejects_unbounded_or_oversized_npc_history_selections() -> None:
+def test_v4_rejects_unbounded_or_oversized_npc_history_selections() -> None:
     engine = make_engine()
     engine.apply(AdvanceOpeningIntent())
     payload = snapshot_engine(engine).model_dump(mode="json")
