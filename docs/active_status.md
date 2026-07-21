@@ -8,8 +8,6 @@
 
 **Settled decisions:** [decision_log.md](decision_log.md)
 
-**Preserved authored-build brief:** [project_brief.md](project_brief.md)
-
 ## Playable now
 
 - Normal New Story now requires OpenRouter and generates one complete canonical mystery from the predefined Ashwick Manor package plus either an automatic or manual eight-person cast selected from all 24 cards.
@@ -52,4 +50,4 @@ The first procedural case has passed the technical acceptance criteria preserved
 7. The complete audit is available through the debrief API, while the browser currently presents the player-oriented solution rather than every private audit field.
 8. Provider rejection rate and narrative quality across real models have not been measured. Structural rejection is fail-closed by design.
 
-The original continuous-real-time prototype documents are historical references. They do not describe the active turn-based build.
+The original continuous-real-time prototype documents are preserved on the repository's [`archived` branch](https://github.com/DilanRG/ai-murder-mystery-v2/tree/archived/docs). They are intentionally absent from the active branch and do not describe the active turn-based build.

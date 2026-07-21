@@ -91,9 +91,8 @@ In a source checkout, the key is stored locally in `backend/user_config.json`, s
 - `docs/product_north_star.md` — controlling invariant product direction.
 - `docs/AI_Murder_Mystery_Game_Design_Roadmap.md` — living systems design, sequencing, testing strategy, and acceptance gates.
 - `docs/decision_log.md` — canonical short record of settled product and architecture decisions.
-- `docs/project_brief.md` — preserved predecessor brief for the authored turn-based foundation.
-- `docs/mvp_decisions.md` — historical implementation defaults used while building that foundation.
-- `docs/prototype_reuse_audit.md` — historical record of retained versus replaced prototype components.
+
+Superseded plans, architecture notes, and foundation decision records are preserved on the repository's [`archived` branch](https://github.com/DilanRG/ai-murder-mystery-v2/tree/archived/docs), not in the active code branch.
 
 Current completion and remaining-work notes live in [docs/active_status.md](docs/active_status.md).
 The first procedural technical-gate evidence is recorded in [docs/procedural_acceptance_report.md](docs/procedural_acceptance_report.md); it is not the full Phase 1 playtest acceptance gate.
