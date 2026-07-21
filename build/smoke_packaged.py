@@ -146,7 +146,7 @@ def smoke(executable: Path) -> None:
 
                 automatic = _request_json(
                     base_url,
-                    "/api/game/new",
+                    "/api/game/demo",
                     {"recipe_id": recipe["id"], "seed": 42},
                 )
                 if len(_public_cast_ids(automatic)) != 8:
@@ -166,7 +166,7 @@ def smoke(executable: Path) -> None:
                 ]
                 manual = _request_json(
                     base_url,
-                    "/api/game/new",
+                    "/api/game/demo",
                     {
                         "recipe_id": recipe["id"],
                         "seed": 43,
@@ -181,7 +181,7 @@ def smoke(executable: Path) -> None:
                 for case_id in ("ashwick_sample", "ashwick_quiet_vow"):
                     started = _request_json(
                         base_url,
-                        "/api/game/new",
+                        "/api/game/demo",
                         {"case_id": case_id, "location_id": "ashwick_manor"},
                     )
                     if started.get("game", {}).get("phase") != "discovery":

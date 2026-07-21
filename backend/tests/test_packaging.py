@@ -122,6 +122,15 @@ def test_release_and_local_build_use_reproducible_node_install() -> None:
     assert frontend_package["scripts"]["test"] == "node --test"
 
 
+def test_packaged_smoke_uses_only_provider_free_demo_starts() -> None:
+    smoke_script = (REPO_ROOT / "build" / "smoke_packaged.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"/api/game/new"' not in smoke_script
+    assert smoke_script.count('"/api/game/demo"') == 3
+
+
 def test_packaged_launcher_supports_headless_smoke_mode_and_validates_ports() -> None:
     options = parse_launcher_args(["--no-browser", "--port", "8790"])
     assert options.no_browser is True
