@@ -6,6 +6,8 @@ Adding a field here is a visibility decision, not a serialization convenience.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 
 from game.models import StrictModel
@@ -95,7 +97,8 @@ class PublicOpeningView(StrictModel):
 
 
 class PublicResultView(StrictModel):
-    accused_character_id: str
+    end_reason: Literal["accusation", "timeout"]
+    accused_character_id: str | None
     correct_culprit: bool
     support_score: int
     method_supported: bool

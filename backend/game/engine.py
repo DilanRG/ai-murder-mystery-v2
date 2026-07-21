@@ -1928,8 +1928,24 @@ class GameEngine:
     def _result_view(self) -> PublicResultView | None:
         result = self.runtime.result
         if result is None:
+            if (
+                self.runtime.phase == GamePhase.ENDED
+                and self.runtime.turn >= self.case.max_turns
+            ):
+                return PublicResultView(
+                    end_reason="timeout",
+                    accused_character_id=None,
+                    correct_culprit=False,
+                    support_score=0,
+                    method_supported=False,
+                    motive_supported=False,
+                    timeline_supported=False,
+                    solved=False,
+                    summary="Time expired before you filed a final accusation.",
+                )
             return None
         return PublicResultView(
+            end_reason="accusation",
             accused_character_id=result.accused_character_id,
             correct_culprit=result.correct_culprit,
             support_score=result.support_score,

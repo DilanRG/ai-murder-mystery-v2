@@ -3,17 +3,55 @@ tests/conftest.py — Shared fixtures for the AI Murder Mystery v2 test suite.
 """
 import pytest
 from game.content import load_case, load_location
+from game.models import CaseDefinition
 from game.story_director import fallback_story_presentation
 from world.state import WorldState, CharacterState, ClueState, GamePhase
 from story.models import LocationDef, Scenario, MurderDetails, CharacterDef
 
 
-def make_dummy_generated_document() -> dict[str, object]:
-    """Return provider-shaped canonical output without making a provider call."""
+def _remap_generated_case_value(value: object, character_ids: dict[str, str]) -> object:
+    """Apply the recipe materializer's ID/route projection to fixture JSON."""
+
+    if isinstance(value, dict):
+        return {
+            character_ids.get(key, key): _remap_generated_case_value(item, character_ids)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_remap_generated_case_value(item, character_ids) for item in value]
+    if not isinstance(value, str):
+        return value
+    if value in character_ids:
+        return character_ids[value]
+    if ":" in value:
+        route, target = value.split(":", 1)
+        if target in character_ids:
+            return f"{route}:{character_ids[target]}"
+    return value
+
+
+def make_dummy_generated_document(
+    *,
+    character_ids: tuple[str, ...] | None = None,
+) -> dict[str, object]:
+    """Return provider-shaped truth projected onto an exact eight-card cast.
+
+    This is deliberately a test fixture, not an alternate generation path.  It
+    starts with the authored sample spine and applies the same ID/route mapping
+    shape used by recipe materialization, allowing normal ``/game/new`` tests
+    to exercise arbitrary automatic casts without OpenRouter.
+    """
 
     case = load_case("ashwick_sample")
     location = load_location("ashwick_manor")
     case_data = case.model_dump(mode="json")
+    if character_ids is not None:
+        if len(character_ids) != 8 or len(set(character_ids)) != 8:
+            raise ValueError("dummy generated casts must contain exactly eight unique IDs")
+        character_map = dict(zip(case.character_ids, character_ids, strict=True))
+        case_data = _remap_generated_case_value(case_data, character_map)
+        assert isinstance(case_data, dict)
+        case = CaseDefinition.model_validate(case_data)
     retained_evidence_ids = {
         "ev_library_poker",
         "ev_fireplace_trace",

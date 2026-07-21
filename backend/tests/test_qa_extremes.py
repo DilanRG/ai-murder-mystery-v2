@@ -272,6 +272,9 @@ def test_many_turns_timeout_and_post_end_rejections(tmp_path: Path) -> None:
             _assert_no_truth(game)
         assert game["phase"] == "ended"
         assert game["turn"] == 36
+        assert game["result"]["end_reason"] == "timeout"
+        assert game["result"]["accused_character_id"] is None
+        assert game["result"]["solved"] is False
         for payload in (
             {"kind": "review_notebook"},
             {"kind": "move", "room_id": game["player_room"]["id"]},
