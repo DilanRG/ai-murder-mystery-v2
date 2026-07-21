@@ -6,6 +6,8 @@ A local-first, turn-based murder mystery in which OpenRouter generates a new can
 
 Normal **New Story** generation requires an OpenRouter API key. Two clearly labelled offline demo fixtures remain available for development, automated testing, and provider outages; they are not substitutes for the generation engine.
 
+The first provider-shaped procedural case has passed the technical generation, autonomy, solvability, replay, and audit gate. The broader Phase 1 milestone remains active pending materially varied generated cases, blind interface-only agent playthroughs, and a human blind playthrough. See [Active Build Status](docs/active_status.md) for the exact boundary.
+
 ## What is playable
 
 - Automatic or manual selection of any eight characters from the 24-card pool, followed by validated OpenRouter generation of the roles, timeline, murder, evidence, private overlays, solution, and public framing.
@@ -86,13 +88,15 @@ In a source checkout, the key is stored locally in `backend/user_config.json`, s
 - `backend/routers/` — FastAPI transport.
 - `frontend/` — vanilla JavaScript/Vite interface.
 - `backend/tests/` — unit, contract, adversarial, and playthrough coverage.
-- `docs/product_north_star.md` — controlling product direction and procedural-case acceptance milestone.
-- `docs/project_brief.md` — preserved original implementation brief for the authored foundation.
-- `docs/mvp_decisions.md` — resolved MVP ambiguities and invariants.
-- `docs/prototype_reuse_audit.md` — retained versus replaced prototype components.
+- `docs/product_north_star.md` — controlling invariant product direction.
+- `docs/AI_Murder_Mystery_Game_Design_Roadmap.md` — living systems design, sequencing, testing strategy, and acceptance gates.
+- `docs/decision_log.md` — canonical short record of settled product and architecture decisions.
+- `docs/project_brief.md` — preserved predecessor brief for the authored turn-based foundation.
+- `docs/mvp_decisions.md` — historical implementation defaults used while building that foundation.
+- `docs/prototype_reuse_audit.md` — historical record of retained versus replaced prototype components.
 
 Current completion and remaining-work notes live in [docs/active_status.md](docs/active_status.md).
-The completed procedural milestone evidence is recorded in [docs/procedural_acceptance_report.md](docs/procedural_acceptance_report.md).
+The first procedural technical-gate evidence is recorded in [docs/procedural_acceptance_report.md](docs/procedural_acceptance_report.md); it is not the full Phase 1 playtest acceptance gate.
 
 ## Design invariant
 

@@ -1,11 +1,13 @@
 # AI Murder Mystery Game — Roadmap
 
-> **Historical prototype roadmap:** The completed milestones below apply to the
-> real-time v2.0 prototype. The current turn-based redesign is governed by
-> [project_brief.md](project_brief.md).
+> **Archived prototype roadmap:** The completed milestones and decision sections
+> below apply only to the superseded real-time v2.0 prototype. The living roadmap is
+> [AI_Murder_Mystery_Game_Design_Roadmap.md](AI_Murder_Mystery_Game_Design_Roadmap.md),
+> invariant intent is in [product_north_star.md](product_north_star.md), and the
+> canonical current decision history is [decision_log.md](decision_log.md).
 
-> **Purpose:** High-level milestone tracker for the project manager.
-> Update this document as milestones are completed.
+> **Historical purpose:** Preserve the prototype milestone record. Do not update
+> this file with current milestones or treat its real-time decisions as active.
 > 
 > **Last updated:** 2026-03-06
 

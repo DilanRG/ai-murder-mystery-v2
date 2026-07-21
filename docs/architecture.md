@@ -1,13 +1,15 @@
 # AI Murder Mystery Game — Technical Architecture
 
-> **Historical prototype document:** This describes the real-time v2.0 prototype.
-> It is superseded by [project_brief.md](project_brief.md). See
-> [prototype_reuse_audit.md](prototype_reuse_audit.md) and
-> [mvp_decisions.md](mvp_decisions.md) for the active redesign.
+> **Archived prototype document:** This describes the superseded real-time v2.0
+> prototype. It is not the architecture of the active build. Current invariant
+> boundaries are in [product_north_star.md](product_north_star.md), current systems
+> direction is in [AI_Murder_Mystery_Game_Design_Roadmap.md](AI_Murder_Mystery_Game_Design_Roadmap.md),
+> settled choices are in [decision_log.md](decision_log.md), and verified reality is
+> in [active_status.md](active_status.md).
 
-> **Purpose:** This is the definitive technical reference for the AI Murder Mystery Game project.
-> Any developer (human or AI) joining this project should read this document first.
-> Keep this document updated as the architecture evolves.
+> **Historical purpose:** Retain the prototype's original technical design for
+> archaeology and regression context. Statements below such as “continuous, not
+> turn-based” are historical, not active requirements.
 
 ---
 

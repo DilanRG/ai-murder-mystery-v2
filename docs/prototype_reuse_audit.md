@@ -1,7 +1,9 @@
 # Prototype Reuse Audit
 
-**Status:** Completed before the turn-based redesign
-**Controlling specification:** [project_brief.md](project_brief.md)
+**Status:** Historical audit completed before the turn-based redesign
+**Specification at the time:** [project_brief.md](project_brief.md)
+
+Current direction is controlled by [product_north_star.md](product_north_star.md) and [AI_Murder_Mystery_Game_Design_Roadmap.md](AI_Murder_Mystery_Game_Design_Roadmap.md); current settled choices are recorded in [decision_log.md](decision_log.md). This audit remains useful evidence about what was retained or replaced, but it is not an active architecture specification.
 
 ## Executive Summary
 

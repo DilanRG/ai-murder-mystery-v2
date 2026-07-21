@@ -1,8 +1,11 @@
 # AI Murder Mystery Game — Implementation Plan
 
-> **Historical prototype plan:** This plan records the completed real-time v2.0
-> prototype and is superseded by [project_brief.md](project_brief.md). The active
-> redesign decisions are tracked in [mvp_decisions.md](mvp_decisions.md).
+> **Archived prototype plan:** This plan records the completed real-time v2.0
+> prototype. Active sequencing is governed by
+> [AI_Murder_Mystery_Game_Design_Roadmap.md](AI_Murder_Mystery_Game_Design_Roadmap.md),
+> invariant intent by [product_north_star.md](product_north_star.md), and settled
+> choices by [decision_log.md](decision_log.md). The plan below is retained only for
+> implementation archaeology.
 
 > **Purpose:** Step-by-step build plan with file-level detail.
 > Each phase is a self-contained deliverable that can be built in one or two sessions.

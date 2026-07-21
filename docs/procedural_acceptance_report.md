@@ -1,9 +1,11 @@
 # Procedural Vertical Slice Acceptance Report
 
 **Date:** 2026-07-21
-**Result:** Accepted
+**Technical gate result:** Passed
 **Provider credits:** None; the acceptance provider is an in-process dummy
 **Authored foundation:** preserved at commit `761193a55828772ec7668190c8a010b2f51ee841` and tag `ashwick-authored-foundation-v1`
+
+This report proves the first generated-case technical gate captured in Appendix A of the [Game Design Roadmap](AI_Murder_Mystery_Game_Design_Roadmap.md). It does **not** complete the broader Phase 1 acceptance gate, which also requires materially varied procedural cases, two blind player-interface agent playthroughs, and at least one human blind playthrough. Current remaining work is tracked in [Active Build Status](active_status.md).
 
 ## Generated case
 

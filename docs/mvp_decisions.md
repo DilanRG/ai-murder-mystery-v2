@@ -1,9 +1,9 @@
-# MVP Decision Register
+# Historical Foundation Decision Register
 
-**Status:** Working defaults, surfaced before implementation
+**Status:** Historical implementation defaults for the authored turn-based foundation
 **Last updated:** 2026-07-21
 
-The project brief intentionally leaves the following decisions open. These defaults are selected to keep an unattended, iterative build moving while remaining easy to revise. They are not silent assumptions; the project owner may override any item.
+These defaults were selected to keep the foundation build moving while the predecessor project brief still controlled the work. Some remain implemented constraints; others have since been refined or superseded. Current settled decisions belong in [decision_log.md](decision_log.md), current direction and acceptance gates in [AI_Murder_Mystery_Game_Design_Roadmap.md](AI_Murder_Mystery_Game_Design_Roadmap.md), and verified implementation facts in [active_status.md](active_status.md). This table is retained to explain why the foundation was built as it was.
 
 | Decision | Working MVP default | Rationale and boundary |
 |---|---|---|

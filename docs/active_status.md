@@ -1,7 +1,12 @@
 # Active Build Status
 
 **Updated:** 2026-07-21
+
 **Controlling direction:** [product_north_star.md](product_north_star.md)
+
+**Design roadmap and acceptance gate:** [AI_Murder_Mystery_Game_Design_Roadmap.md](AI_Murder_Mystery_Game_Design_Roadmap.md)
+
+**Settled decisions:** [decision_log.md](decision_log.md)
 
 **Preserved authored-build brief:** [project_brief.md](project_brief.md)
 
@@ -32,12 +37,19 @@
 - Accepted generated truth is embedded only in local saves with a content fingerprint, revalidated, and replay-checked during restore. Restore does not make another provider call.
 - Initial implementation and automated tests feed the exact production boundary a dummy provider document and spend no OpenRouter credits.
 
-## Remaining limitations outside the completed milestone
+## Milestone interpretation
+
+The first procedural case has passed the technical acceptance criteria preserved in Appendix A of the design roadmap. That is implementation evidence, not a declaration that the product milestone or MVP is finished. Under the superseding roadmap, **Phase 1 remains active** until the blind-playtesting gate is met.
+
+## Remaining Phase 1 acceptance work and limitations
 
 1. Real-provider playtesting remains on hold; the procedural acceptance run uses a local dummy provider and spends no OpenRouter credits.
-2. Ashwick Manor is still the only authored location package. The pipeline accepts an arbitrary compatible package, but multi-location content breadth has not yet been demonstrated.
-3. Autonomous behaviour is intentionally turn-based and selected from finite host-authored actions; it is not a continuous-time social simulation.
-4. The complete audit is available through the debrief API, while the browser currently presents the player-oriented solution rather than every private audit field.
-5. Provider rejection rate and narrative quality across real models have not been measured. Structural rejection is fail-closed by design.
+2. The expanded gate still requires three procedural cases with different seeds and materially different casts or locations to pass automated validation.
+3. Two blind sub-agent playthroughs on different cases must use only the actual player interface and reach fair, evidence-supported accusations without hidden-state access.
+4. At least one human blind playthrough is required before the MVP may be described as trustworthy.
+5. Ashwick Manor is still the only authored location package. The pipeline accepts an arbitrary compatible package, but multi-location content breadth has not yet been demonstrated.
+6. Autonomous behaviour is intentionally turn-based and selected from finite host-authored actions. Turn-based play remains supported; continuous event-driven simulation is a possible later selectable mode.
+7. The complete audit is available through the debrief API, while the browser currently presents the player-oriented solution rather than every private audit field.
+8. Provider rejection rate and narrative quality across real models have not been measured. Structural rejection is fail-closed by design.
 
 The original continuous-real-time prototype documents are historical references. They do not describe the active turn-based build.

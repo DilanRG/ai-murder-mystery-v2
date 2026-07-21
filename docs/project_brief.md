@@ -1,8 +1,15 @@
-# Project Brief: AI-Driven Murder Mystery Game
+# Historical Project Brief: AI-Driven Murder Mystery Game
 
-## Current Source of Truth
+## Supersession notice
 
-Use this brief as the current plan for the project. The existing prototype is approximately six or seven months old and will require a major redesign. When the prototype becomes available, inspect it before deciding what can be reused. Where the old prototype or design document conflicts with this brief, this brief takes precedence.
+This predecessor brief is preserved because it guided the authored turn-based foundation and remains useful regression context. It is **not** the current source of truth.
+
+- [product_north_star.md](product_north_star.md) controls invariant product intent.
+- [AI_Murder_Mystery_Game_Design_Roadmap.md](AI_Murder_Mystery_Game_Design_Roadmap.md) controls current sequencing, architecture direction, and acceptance gates.
+- [decision_log.md](decision_log.md) records settled decisions.
+- [active_status.md](active_status.md) records verified implementation status.
+
+The remainder of this document is retained as the historical brief in effect when the current foundation was designed. Where it conflicts with the documents above, the newer documents take precedence.
 
 ## Core Concept
 
