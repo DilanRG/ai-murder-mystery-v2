@@ -80,6 +80,7 @@ async def main() -> int:
         if not isinstance(record, dict) or record.get("result") != "success":
             raise RuntimeError(f"{model_key} preflight did not produce verified evidence.")
         evidence[model_key] = {
+            "git_sha": git_sha,
             "model": record["actual_model"],
             "upstream_provider": record["upstream_provider"],
             "is_byok": record["is_byok"],
@@ -92,7 +93,7 @@ async def main() -> int:
             "openrouter_fee_usd": record["openrouter_fee_usd"],
             "total_external_cost_usd": record["total_external_cost_usd"],
         }
-    verify_preflights(evidence, manifest)
+    verify_preflights(evidence, manifest, expected_git_sha=git_sha)
     _atomic_json(artifact_root / "verified_preflights.json", evidence)
     snapshot = ledger.snapshot()
     print(

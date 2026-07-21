@@ -9,8 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 
-from llm.client import LLMClient, LLMMessage, LLMResponse
-from llm.experiment import DeepSeekExperimentLedger, Reservation
+from llm.client import LLMClient, LLMMessage, LLMProviderError, LLMResponse
+from llm.experiment import (
+    BudgetStop,
+    DeepSeekExperimentLedger,
+    ExperimentPolicyError,
+    LedgerIntegrityError,
+    Reservation,
+)
 
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
@@ -49,6 +55,7 @@ class DeepSeekRequestObserver:
         self._reservations: dict[str, Reservation] = {}
         self._lock = threading.Lock()
         self.last_record: dict[str, Any] | None = None
+        self.records: list[dict[str, Any]] = []
 
     async def __call__(self, event: str, data: dict[str, Any]) -> None:
         if event == "pre_call":
@@ -214,6 +221,7 @@ class DeepSeekRequestObserver:
                 handle.write(encoded)
                 handle.flush()
             self.last_record = dict(record)
+            self.records.append(dict(record))
 
 
 def build_measured_client(
@@ -226,6 +234,26 @@ def build_measured_client(
 
     if model not in EXPECTED_MODELS.values():
         raise ExperimentSafetyError("Only exact manifest model slugs are allowed.")
+
+    async def fail_closed_observer(event: str, data: dict[str, Any]) -> None:
+        try:
+            await observer(event, data)
+        except (
+            ExperimentSafetyError,
+            BudgetStop,
+            ExperimentPolicyError,
+            LedgerIntegrityError,
+        ) as error:
+            # The production generator retries malformed candidates, but a
+            # budget/BYOK/accounting failure is never a candidate-quality issue.
+            # Convert it to a non-retryable provider boundary error so the
+            # generator stops after the current call and the matrix aborts.
+            raise LLMProviderError(
+                "The measured provider safety gate stopped execution.",
+                code="experiment_safety_stop",
+                retryable=False,
+            ) from error
+
     client = LLMClient(
         api_key=api_key,
         model=model,
@@ -235,7 +263,7 @@ def build_measured_client(
         top_p=0.95,
         top_k=40,
         max_tokens=1024,
-        request_observer=observer,
+        request_observer=fail_closed_observer,
     )
     observer.stats_lookup = client.query_generation_stats
     return client

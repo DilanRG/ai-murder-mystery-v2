@@ -158,7 +158,12 @@ def build_request(manifest: Mapping[str, Any], model_key: str, *, task_role: str
     )
 
 
-def verify_preflights(evidence: Mapping[str, Any], manifest: Mapping[str, Any]) -> None:
+def verify_preflights(
+    evidence: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    *,
+    expected_git_sha: str | None = None,
+) -> None:
     """Require verified DeepSeek BYOK evidence for both exact models.
 
     The evidence format is intentionally small and sanitized: one entry under
@@ -175,6 +180,8 @@ def verify_preflights(evidence: Mapping[str, Any], manifest: Mapping[str, Any]) 
             raise ExperimentSafetyError("Preflight did not verify the exact DeepSeek endpoint.")
         if record.get("is_byok") is not True or record.get("fallback_used") is not False:
             raise ExperimentSafetyError("Preflight did not verify DeepSeek BYOK without fallback.")
+        if expected_git_sha is not None and record.get("git_sha") != expected_git_sha:
+            raise ExperimentSafetyError("Preflight evidence belongs to a different code revision.")
 
 
 def load_private_preflights(path: Path) -> dict[str, Any]:

@@ -8,8 +8,12 @@ from pathlib import Path
 import pytest
 
 from experiments.deepseek_v4_runner import ExperimentSafetyError
-from experiments.deepseek_v4_runtime import DeepSeekRequestObserver, RunContext
-from llm.client import LLMResponse
+from experiments.deepseek_v4_runtime import (
+    DeepSeekRequestObserver,
+    RunContext,
+    build_measured_client,
+)
+from llm.client import LLMMessage, LLMProviderError, LLMResponse
 from llm.experiment import DeepSeekExperimentLedger, PRO_MODEL_SLUG
 
 
@@ -104,3 +108,38 @@ def test_non_byok_response_stops_and_retains_reservation(tmp_path: Path) -> None
     assert observer.last_record is not None
     assert observer.last_record["result"] == "byok_verification_failed"
     assert observer.ledger.snapshot()["open_reservations"] == 1
+
+
+def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observer = _observer(tmp_path)
+    client = build_measured_client(
+        api_key="test-gateway-credential",
+        model=PRO_MODEL_SLUG,
+        observer=observer,
+    )
+
+    async def non_byok_stats(_generation_id: str) -> dict[str, object]:
+        return {
+            "model": PRO_MODEL_SLUG,
+            "provider_name": "DeepSeek",
+            "is_byok": False,
+            "provider_responses": [],
+        }
+
+    async def fake_post(_payload) -> LLMResponse:
+        return LLMResponse(content="OK", id="gen-3", model=PRO_MODEL_SLUG)
+
+    observer.stats_lookup = non_byok_stats
+    monkeypatch.setattr(client, "_post", fake_post)
+
+    async def run() -> None:
+        with pytest.raises(LLMProviderError) as caught:
+            await client.generate([LLMMessage(role="user", content="OK")], max_tokens=8)
+        assert caught.value.code == "experiment_safety_stop"
+        assert caught.value.retryable is False
+
+    asyncio.run(run())
+    assert observer.records[-1]["result"] == "byok_verification_failed"

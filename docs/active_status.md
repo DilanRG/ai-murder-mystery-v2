@@ -25,7 +25,7 @@
 - Bounded notebooks, accusation payloads, conversation memories, and action histories, with rejected actions leaving time and history unchanged.
 - Frozen builds bundle all authored content and write config, saves, and card drafts to durable per-user storage. The build fails closed and smoke-tests the real artifact across automatic casting, an exact manual cast, both fixed cases, and v5 save/load.
 - The package-verification matrix builds and launches the distributable successfully on Windows, Ubuntu, and macOS; the latest three-run matrix completed without annotations.
-- 341 automated unit, contract, adversarial, persistence, AI-boundary, concurrency, packaging, cast-reachability, frontend-behavior, and solve tests (325 Python plus 16 Node tests). The deterministic authored soak matrix solves every pooled card against both authored mystery spines; a separate independent provider-shaped case proves procedural variety and remains solvable after six autonomous turns. Desktop/mobile browser playthroughs cover both demo mysteries and the card editor, including exact-once scheduled-event presentation.
+- 364 automated unit, contract, adversarial, persistence, AI-boundary, concurrency, packaging, cast-reachability, frontend-behavior, and solve tests (348 Python plus 16 Node tests). The deterministic authored soak matrix solves every pooled card against both authored mystery spines; a separate independent provider-shaped case proves procedural variety and remains solvable after six autonomous turns. Desktop/mobile browser playthroughs cover both demo mysteries and the card editor, including exact-once scheduled-event presentation.
 
 ## Generated-story architecture now connected
 
@@ -43,9 +43,11 @@ The first procedural case has passed the technical acceptance criteria preserved
 
 The general real-provider hold is lifted only for a paired, budget-capped comparison of `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash` through the configured DeepSeek BYOK endpoint. Provider-only routing, fallback prohibition, BYOK verification, atomic cost accounting, and a frozen experiment manifest must pass locally before substantive traffic. The run stops at the human blind-playtest gate and cannot declare Phase 1 or the MVP complete.
 
+The first Flash preflight on 2026-07-21 stopped with HTTP 404 before verifiable generation evidence was returned. Both exact models and their DeepSeek-hosted endpoints are visible to the OpenRouter gateway key, but a usable DeepSeek BYOK provider credential has not been demonstrated. The Pro preflight and all substantive generation/playtest traffic remain unrun. OpenRouter key metadata showed zero BYOK and gateway-usage change across the rejection; the local ledger conservatively retains its USD 0.00005410 reservation until trusted settlement exists.
+
 ## Remaining Phase 1 acceptance work and limitations
 
-1. Real-provider playtesting outside the controlled DeepSeek V4 experiment remains on hold. The earlier procedural acceptance run used a local dummy provider and spent no OpenRouter credits.
+1. Connect and require a separate DeepSeek provider credential in OpenRouter BYOK, then rerun the two tiny preflights. Real-provider playtesting outside this controlled experiment remains on hold. The earlier procedural acceptance run used a local dummy provider and spent no OpenRouter credits.
 2. The expanded gate still requires three procedural cases with different seeds and materially different casts or locations to pass automated validation.
 3. Two blind sub-agent playthroughs on different cases must use only the actual player interface and reach fair, evidence-supported accusations without hidden-state access.
 4. At least one human blind playthrough is required before the MVP may be described as trustworthy.
