@@ -229,7 +229,7 @@ async def prepare_crossed_session(
     if not explicitly_enabled:
         raise ExperimentSafetyError("Crossed runtime requires explicit provider opt-in.")
     if not api_key:
-        raise ExperimentSafetyError("An OpenRouter gateway credential is required.")
+        raise ExperimentSafetyError("A direct DeepSeek credential is required.")
     verify_preflights(preflight_evidence, manifest, expected_git_sha=git_sha)
     if cell.npc_model_key not in EXPECTED_MODELS:
         raise ExperimentSafetyError("Crossed cell has an unapproved NPC model.")

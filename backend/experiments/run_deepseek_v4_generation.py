@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-from config.user_settings import get_user_config, load_user_config
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
     PRIVATE_ARTIFACT_ROOT,
@@ -26,6 +25,7 @@ from experiments.deepseek_v4_runtime import (
     DeepSeekRequestObserver,
     RunContext,
     build_measured_client,
+    load_direct_api_key,
 )
 from game.case_generation import GeneratedScenarioError
 from game.persistence import snapshot_engine
@@ -160,7 +160,7 @@ async def run_generation_matrix(
     if not explicitly_enabled:
         raise ExperimentSafetyError("Generation traffic requires an explicit opt-in.")
     if not api_key:
-        raise ExperimentSafetyError("An OpenRouter gateway credential is required.")
+        raise ExperimentSafetyError("A direct DeepSeek credential is required.")
     verify_preflights(preflight_evidence, manifest, expected_git_sha=git_sha)
 
     selected_pairs = list(pairs if pairs is not None else manifest["generation_pairs"])
@@ -273,8 +273,7 @@ async def main() -> int:
     manifest = load_manifest()
     git_sha = resolve_clean_git_sha()
     preflights = load_private_preflights(PRIVATE_ARTIFACT_ROOT / "verified_preflights.json")
-    load_user_config()
-    api_key = str(get_user_config().get("api_key", ""))
+    api_key = load_direct_api_key()
     outcomes = await run_generation_matrix(
         manifest=manifest,
         preflight_evidence=preflights,

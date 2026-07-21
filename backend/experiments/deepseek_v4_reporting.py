@@ -29,6 +29,7 @@ PUBLIC_REQUEST_FIELDS = (
     "requested_model",
     "actual_model",
     "upstream_provider",
+    "transport",
     "is_byok",
     "fallback_used",
     "provider_failover_used",
@@ -40,6 +41,7 @@ PUBLIC_REQUEST_FIELDS = (
     "provider_latency",
     "prompt_tokens",
     "cached_prompt_tokens",
+    "cache_miss_prompt_tokens",
     "completion_tokens",
     "reasoning_tokens",
     "total_tokens",
@@ -86,11 +88,11 @@ def sanitize_request_records(records: Iterable[Mapping[str, Any]]) -> list[dict[
         if record.get("result") == "success" and (
             not model_resolution_matches(str(model), str(record.get("actual_model", "")))
             or str(record.get("upstream_provider", "")).casefold() != "deepseek"
-            or record.get("is_byok") is not True
+            or record.get("transport") != "deepseek_direct"
             or record.get("fallback_used") is not False
-            or record.get("accounting_mode") != "byok"
+            or record.get("accounting_mode") != "direct_token_meter"
         ):
-            raise ExperimentSafetyError("Successful metrics do not prove exact DeepSeek BYOK routing.")
+            raise ExperimentSafetyError("Successful metrics do not prove exact direct DeepSeek routing.")
         sanitized.append(
             {
                 field: record.get(field)

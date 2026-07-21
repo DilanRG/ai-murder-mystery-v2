@@ -22,13 +22,14 @@ from experiments.deepseek_v4_runner import (
 def _verified_preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 3,
+            "experiment_revision": 4,
             "model": slug,
             "actual_model": slug,
             "upstream_provider": "deepseek",
-            "is_byok": True,
+            "transport": "deepseek_direct",
+            "is_byok": None,
             "fallback_used": False,
-            "accounting_mode": "byok",
+            "accounting_mode": "direct_token_meter",
             "generation_id": f"preflight-{key}",
             "total_external_cost_usd": 0.001,
         }
@@ -39,17 +40,22 @@ def _verified_preflights() -> dict[str, object]:
 def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     manifest = load_manifest()
 
-    assert manifest["manifest_revision"] == 3
-    assert manifest["git_checkpoint"] == "7aee11513c70eee562a0b606731afb2ae24ccaac"
-    assert manifest["gateway"] == "openrouter"
+    assert manifest["manifest_revision"] == 4
+    assert manifest["git_checkpoint"] == "b6edfbf6875ab1627c14a81e63071cfbc509a4e6"
+    assert manifest["gateway"] == "deepseek_direct"
     assert manifest["model_fallbacks"] == []
     assert manifest["runtime_settings"]["sampler_defaults"]["top_k"] is None
     assert manifest["reservation_pricing_ceiling_usd_per_million"]["pro"] == {
         "input": 5.0,
         "output": 10.0,
     }
+    assert manifest["direct_deepseek_pricing_usd_per_million"]["flash"] == {
+        "cache_hit_input": 0.0028,
+        "cache_miss_input": 0.14,
+        "output": 0.28,
+    }
     assert manifest["models"] == EXPECTED_MODELS
-    assert manifest["provider_routing"] == EXPECTED_ROUTING
+    assert manifest["provider_routing"] is EXPECTED_ROUTING is None
     assert manifest["runtime_settings"]["reasoning_effort"] == "high"
     assert manifest["runtime_settings"]["generation_attempt_limit"] == 3
     assert manifest["runtime_settings"]["roles"] == {
@@ -110,7 +116,7 @@ def test_verified_preflight_and_request_are_pinned() -> None:
     request = build_request(manifest, "flash", task_role="private_npc_action")
 
     assert request.model == EXPECTED_MODELS["flash"]
-    assert dict(request.provider) == EXPECTED_ROUTING
+    assert request.provider is EXPECTED_ROUTING is None
     assert request.reasoning_effort == "high"
     assert request.max_tokens == 80
     assert request.temperature == 0.0

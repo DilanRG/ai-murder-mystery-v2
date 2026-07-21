@@ -1,14 +1,15 @@
-"""Measured OpenRouter request boundary for the DeepSeek V4 experiment."""
+"""Measured direct-DeepSeek request boundary for the V4 experiment."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-import math
+import os
 import threading
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Mapping
 
 from llm.client import LLMClient, LLMMessage, LLMProviderError, LLMResponse
 from llm.experiment import (
@@ -21,14 +22,35 @@ from llm.experiment import (
 
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
-    EXPECTED_ROUTING,
+    PRIVATE_ARTIFACT_ROOT,
     ExperimentSafetyError,
     model_resolution_matches,
 )
 
+DIRECT_PRICING_USD_PER_MILLION = {
+    "deepseek-v4-flash": {
+        "cache_hit_input": Decimal("0.0028"),
+        "cache_miss_input": Decimal("0.14"),
+        "output": Decimal("0.28"),
+    },
+    "deepseek-v4-pro": {
+        "cache_hit_input": Decimal("0.003625"),
+        "cache_miss_input": Decimal("0.435"),
+        "output": Decimal("0.87"),
+    },
+}
+DIRECT_API_KEY_PATH = PRIVATE_ARTIFACT_ROOT / "direct_api_key.txt"
 
-StatsLookup = Callable[[str], Awaitable[dict[str, Any]]]
-STATS_LOOKUP_RETRY_DELAYS_SECONDS = (0.0, 0.5, 1.0, 2.0, 4.0)
+
+def load_direct_api_key() -> str:
+    """Load the ignored direct credential without exposing it to committed config."""
+
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if not api_key and DIRECT_API_KEY_PATH.is_file():
+        api_key = DIRECT_API_KEY_PATH.read_text(encoding="utf-8").strip()
+    if not api_key or any(character.isspace() for character in api_key):
+        raise ExperimentSafetyError("Configure a valid direct DeepSeek credential locally.")
+    return api_key
 
 
 @dataclass(frozen=True)
@@ -54,7 +76,6 @@ class DeepSeekRequestObserver:
         self.ledger = ledger
         self.metrics_path = metrics_path
         self.context = context
-        self.stats_lookup: StatsLookup | None = None
         self._reservations: dict[str, Reservation] = {}
         self._lock = threading.Lock()
         self.last_record: dict[str, Any] | None = None
@@ -71,11 +92,10 @@ class DeepSeekRequestObserver:
     def _reserve(self, data: Mapping[str, Any]) -> None:
         request_id = str(data.get("request_id", ""))
         model = str(data.get("model", ""))
-        routing = data.get("provider_routing")
         if model not in EXPECTED_MODELS.values():
             raise ExperimentSafetyError("Measured request used an unapproved model slug.")
-        if routing != EXPECTED_ROUTING:
-            raise ExperimentSafetyError("Measured request was not pinned to OpenRouter routing.")
+        if data.get("transport") != "deepseek_direct" or data.get("provider_routing") is not None:
+            raise ExperimentSafetyError("Measured request was not pinned to direct DeepSeek.")
         if data.get("reasoning_effort") != "high":
             raise ExperimentSafetyError("Measured request did not use high reasoning effort.")
         reservation = self.ledger.reserve(
@@ -83,7 +103,7 @@ class DeepSeekRequestObserver:
             model=model,  # type: ignore[arg-type]
             prompt_tokens_upper_bound=int(data.get("prompt_tokens_upper_bound", 0)),
             max_output_tokens=int(data.get("max_tokens", 0)),
-            parameters=dict(routing),
+            parameters={"transport": "deepseek_direct", "thinking": "enabled"},
             reasoning="high",
             allow_fallbacks=False,
         )
@@ -104,7 +124,7 @@ class DeepSeekRequestObserver:
             }
             self._append_record(record)
             return
-        if not response.id or self.stats_lookup is None:
+        if not response.id:
             self._append_record(
                 self._base_record(data, reservation)
                 | {
@@ -112,123 +132,78 @@ class DeepSeekRequestObserver:
                     "accounting_status": "reservation_retained",
                 }
             )
-            raise ExperimentSafetyError("Generation ID or statistics lookup is unavailable.")
+            raise ExperimentSafetyError("Direct DeepSeek generation ID is unavailable.")
 
-        try:
-            stats = await self._query_stats_with_bounded_retry(response.id)
-        except LLMProviderError as error:
-            self._append_record(
-                self._base_record(data, reservation)
-                | {
-                    "generation_id": response.id,
-                    "result": "accounting_lookup_failed",
-                    "error_type": error.code,
-                    "accounting_status": "reservation_retained",
-                }
-            )
-            raise ExperimentSafetyError(
-                "OpenRouter generation accounting did not become available in time."
-            ) from error
-        provider = str(stats.get("provider_name") or response.provider).casefold()
-        actual_model = str(stats.get("model") or response.model)
-        is_byok = stats.get("is_byok") if stats.get("is_byok") is not None else response.is_byok
-        provider_responses = stats.get("provider_responses") or []
-        provider_attempts = {
-            str(item.get("provider_name", "")).strip().casefold()
-            for item in provider_responses
-            if isinstance(item, Mapping) and str(item.get("provider_name", "")).strip()
-        }
-        provider_failover_used = (
-            len(provider_attempts) > 1
-            or any(name != "deepseek" for name in provider_attempts)
-        )
+        provider = "deepseek"
+        actual_model = response.model
         fallback_used = not model_resolution_matches(reservation.model, actual_model)
-        if (
-            fallback_used
-            or provider != "deepseek"
-            or is_byok is not True
-            or provider_failover_used
-        ):
+        if fallback_used or provider != "deepseek":
             self._append_record(
                 self._base_record(data, reservation)
                 | {
                     "generation_id": response.id,
                     "actual_model": actual_model,
                     "upstream_provider": provider,
-                    "is_byok": is_byok,
+                    "transport": str(data.get("transport", "")),
                     "fallback_used": fallback_used,
-                    "provider_failover_used": provider_failover_used,
-                    "result": "byok_verification_failed",
+                    "provider_failover_used": False,
+                    "result": "direct_verification_failed",
                     "accounting_status": "reservation_retained",
                 }
             )
-            raise ExperimentSafetyError("DeepSeek BYOK endpoint verification failed.")
+            raise ExperimentSafetyError("Direct DeepSeek model verification failed.")
 
-        upstream_cost = response.cost_details.get("upstream_inference_cost")
-        upstream_prompt_cost = response.cost_details.get(
-            "upstream_inference_prompt_cost"
+        cached_tokens = response.prompt_cached_tokens
+        uncached_tokens = response.prompt_cache_miss_tokens
+        usage_is_complete = (
+            response.prompt_tokens > 0
+            and response.completion_tokens > 0
+            and cached_tokens >= 0
+            and uncached_tokens >= 0
+            and cached_tokens + uncached_tokens == response.prompt_tokens
+            and response.reported_total_tokens
+            == response.prompt_tokens + response.completion_tokens
         )
-        upstream_completion_cost = response.cost_details.get(
-            "upstream_inference_completions_cost"
-        )
-        if upstream_cost is None and (
-            upstream_prompt_cost is not None and upstream_completion_cost is not None
-        ):
-            try:
-                upstream_cost = float(upstream_prompt_cost) + float(upstream_completion_cost)
-            except (TypeError, ValueError):
-                upstream_cost = None
-        if upstream_cost is None:
-            upstream_cost = stats.get("upstream_inference_cost")
-        openrouter_charge = response.cost
-        if openrouter_charge is None:
-            openrouter_charge = stats.get("total_cost")
-        if openrouter_charge is None or (is_byok is True and upstream_cost is None):
+        if not usage_is_complete:
             self._append_record(
                 self._base_record(data, reservation)
                 | {
                     "generation_id": response.id,
                     "actual_model": actual_model,
                     "upstream_provider": provider,
-                    "is_byok": is_byok,
                     "fallback_used": False,
-                    "provider_failover_used": provider_failover_used,
+                    "provider_failover_used": False,
                     "result": "accounting_unavailable",
                     "accounting_status": "reservation_retained",
                 }
             )
-            raise ExperimentSafetyError("Trusted OpenRouter accounting is required.")
+            raise ExperimentSafetyError("Complete direct DeepSeek token accounting is required.")
 
-        if is_byok is True:
-            settlement = self.ledger.settle(
-                reservation,
-                upstream_cost_usd=upstream_cost,
-                openrouter_fee_usd=openrouter_charge,
-                accounting_trusted=True,
-            )
-            accounting_mode = "byok"
-            measured_upstream_cost = float(settlement.upstream_cost_usd)
-            measured_openrouter_fee = float(settlement.openrouter_fee_usd)
-            measured_openrouter_charge = None
-        else:
-            settlement = self.ledger.settle_openrouter_charge(
-                reservation,
-                openrouter_charge_usd=openrouter_charge,
-                accounting_trusted=True,
-            )
-            accounting_mode = "openrouter"
-            measured_upstream_cost = self._safe_optional_cost(upstream_cost)
-            measured_openrouter_fee = None
-            measured_openrouter_charge = float(settlement.total_cost_usd)
+        price = DIRECT_PRICING_USD_PER_MILLION[reservation.model]
+        prompt_cost = (
+            Decimal(cached_tokens) * price["cache_hit_input"]
+            + Decimal(uncached_tokens) * price["cache_miss_input"]
+        ) / Decimal(1_000_000)
+        completion_cost = (
+            Decimal(response.completion_tokens) * price["output"]
+        ) / Decimal(1_000_000)
+        settlement = self.ledger.settle(
+            reservation,
+            upstream_cost_usd=prompt_cost + completion_cost,
+            openrouter_fee_usd="0",
+            accounting_trusted=True,
+        )
         record = self._base_record(data, reservation) | {
             "generation_id": response.id,
             "actual_model": actual_model,
             "upstream_provider": provider,
-            "is_byok": is_byok,
+            "transport": "deepseek_direct",
+            "is_byok": None,
             "fallback_used": False,
-            "provider_failover_used": provider_failover_used,
+            "provider_failover_used": False,
             "prompt_tokens": response.prompt_tokens,
             "cached_prompt_tokens": response.prompt_cached_tokens,
+            "cache_miss_prompt_tokens": response.prompt_cache_miss_tokens,
             "completion_tokens": response.completion_tokens,
             "reasoning_tokens": response.reasoning_tokens,
             "total_tokens": response.total_tokens,
@@ -236,19 +211,15 @@ class DeepSeekRequestObserver:
             "provider_latency": response.latency,
             "finish_reason": response.finish_reason,
             "native_finish_reason": response.native_finish_reason,
-            "upstream_inference_cost_usd": measured_upstream_cost,
-            "upstream_prompt_cost_usd": self._safe_optional_cost(
-                upstream_prompt_cost
-            ),
-            "upstream_completion_cost_usd": self._safe_optional_cost(
-                upstream_completion_cost
-            ),
-            "openrouter_fee_usd": measured_openrouter_fee,
-            "openrouter_charge_usd": measured_openrouter_charge,
+            "upstream_inference_cost_usd": float(settlement.upstream_cost_usd),
+            "upstream_prompt_cost_usd": float(prompt_cost),
+            "upstream_completion_cost_usd": float(completion_cost),
+            "openrouter_fee_usd": 0.0,
+            "openrouter_charge_usd": None,
             "total_external_cost_usd": float(settlement.total_cost_usd),
             "result": "success",
             "accounting_status": "measured",
-            "accounting_mode": accounting_mode,
+            "accounting_mode": "direct_token_meter",
         }
         self._append_record(record)
 
@@ -274,33 +245,6 @@ class DeepSeekRequestObserver:
             "max_output_tokens": reservation.max_output_tokens,
             "reserved_usd": float(reservation.reserved_usd),
         }
-
-    @staticmethod
-    def _safe_optional_cost(value: object) -> float | None:
-        if isinstance(value, bool):
-            return None
-        try:
-            parsed = float(value)
-        except (TypeError, ValueError):
-            return None
-        return parsed if math.isfinite(parsed) and parsed >= 0 else None
-
-    async def _query_stats_with_bounded_retry(self, generation_id: str) -> dict[str, Any]:
-        if self.stats_lookup is None:
-            raise ExperimentSafetyError("Generation statistics lookup is unavailable.")
-        last_error: LLMProviderError | None = None
-        for delay in STATS_LOOKUP_RETRY_DELAYS_SECONDS:
-            if delay:
-                await asyncio.sleep(delay)
-            try:
-                return await self.stats_lookup(generation_id)
-            except LLMProviderError as error:
-                if error.status_code != 404:
-                    raise
-                last_error = error
-        if last_error is None:  # Defensive: the retry schedule is non-empty.
-            raise ExperimentSafetyError("Generation statistics retry schedule is empty.")
-        raise last_error
 
     def _append_record(self, record: dict[str, Any]) -> None:
         self.metrics_path.parent.mkdir(parents=True, exist_ok=True)
@@ -390,19 +334,18 @@ def build_measured_client(
     client = LLMClient(
         api_key=api_key,
         model=model,
-        provider_routing=EXPECTED_ROUTING,
         reasoning_effort="high",
+        transport="deepseek_direct",
         temperature=0.8,
         top_p=0.95,
         top_k=None,
         max_tokens=1024,
         request_observer=fail_closed_observer,
     )
-    observer.stats_lookup = client.query_generation_stats
     return client
 
 
-async def run_tiny_openrouter_preflight(client: LLMClient) -> dict[str, Any]:
+async def run_tiny_direct_preflight(client: LLMClient) -> dict[str, Any]:
     """Spend one deliberately tiny request and return sanitized evidence."""
 
     response = await client.generate(
@@ -425,10 +368,10 @@ async def run_tiny_openrouter_preflight(client: LLMClient) -> dict[str, Any]:
 
 
 def run_preflight_sync(client: LLMClient) -> dict[str, Any]:
-    return asyncio.run(run_tiny_openrouter_preflight(client))
+    return asyncio.run(run_tiny_direct_preflight(client))
 
 
-# Compatibility import for the already committed opt-in runner. Revision 2
-# verifies OpenRouter exact-model/accounting evidence rather than requiring a
-# direct-provider BYOK route.
-run_tiny_byok_preflight = run_tiny_openrouter_preflight
+# Compatibility imports retained for older internal callers; revision 4 uses
+# the exact same tiny prompt through the direct DeepSeek transport.
+run_tiny_byok_preflight = run_tiny_direct_preflight
+run_tiny_openrouter_preflight = run_tiny_direct_preflight

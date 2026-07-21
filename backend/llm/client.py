@@ -18,6 +18,10 @@ import httpx
 
 from config.settings import OPENROUTER_BASE_URL
 
+
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+_SUPPORTED_TRANSPORTS = {"openrouter", "deepseek_direct"}
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +80,7 @@ class LLMResponse:
     native_finish_reason: str = ""
     finish_reasons: list[str] = field(default_factory=list)
     prompt_cached_tokens: int = 0
+    prompt_cache_miss_tokens: int = 0
     reasoning_tokens: int = 0
     reported_total_tokens: int | None = None
     is_byok: bool | None = None
@@ -111,12 +116,18 @@ class LLMClient:
         provider_routing: Mapping[str, Any] | None = None,
         reasoning_effort: str | None = None,
         request_observer: RequestObserver | None = None,
+        transport: str = "openrouter",
         **sampler_kwargs: Any,
     ) -> None:
         self.api_key = api_key
         self.model = model
         # Round-trip through JSON both validates the config and ensures callers
         # cannot mutate an in-flight provider-routing payload.
+        if transport not in _SUPPORTED_TRANSPORTS:
+            raise ValueError("transport must be openrouter or deepseek_direct")
+        if transport == "deepseek_direct" and provider_routing is not None:
+            raise ValueError("direct DeepSeek requests cannot carry OpenRouter routing")
+        self.transport = transport
         self.provider_routing = self._copy_optional_mapping(
             provider_routing, field_name="provider_routing"
         )
@@ -149,12 +160,18 @@ class LLMClient:
         return copied
 
     def _headers(self) -> dict[str, str]:
-        return {
+        headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/DilanRG/ai-murder-mystery",
-            "X-Title": "AI Murder Mystery Game",
         }
+        if self.transport == "openrouter":
+            headers.update(
+                {
+                    "HTTP-Referer": "https://github.com/DilanRG/ai-murder-mystery",
+                    "X-Title": "AI Murder Mystery Game",
+                }
+            )
+        return headers
 
     def _messages_to_api(self, messages: list[LLMMessage]) -> list[dict]:
         """Convert internal message objects to OpenRouter API format."""
@@ -184,14 +201,18 @@ class LLMClient:
             "model": self.model,
             "messages": self._messages_to_api(messages),
             "max_tokens": self.sampler["max_tokens"] if max_tokens is None else max_tokens,
-            # Zero is a meaningful value for schema-constrained planning; an
-            # ``or`` fallback would silently replace it with the user's prose
-            # temperature and make action selection needlessly variable.
-            "temperature": self.sampler["temperature"] if temperature is None else temperature,
-            "top_p": self.sampler["top_p"],
         }
-        if self.sampler.get("top_k"):
-            payload["top_k"] = self.sampler["top_k"]
+        # Direct DeepSeek thinking mode documents these samplers as ignored, so
+        # omit them rather than imply that they affect the measured comparison.
+        if self.transport != "deepseek_direct" or self.reasoning_effort is None:
+            # Zero is meaningful for schema-constrained planning; an ``or``
+            # fallback would silently replace it with the prose temperature.
+            payload["temperature"] = (
+                self.sampler["temperature"] if temperature is None else temperature
+            )
+            payload["top_p"] = self.sampler["top_p"]
+            if self.sampler.get("top_k"):
+                payload["top_k"] = self.sampler["top_k"]
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
@@ -208,6 +229,12 @@ class LLMClient:
         Generation with tool-calling enabled — used exclusively for agent loops.
         Returns both text content and any tool calls the model wants to make.
         """
+        if self.transport == "deepseek_direct" and self.reasoning_effort is not None:
+            raise LLMProviderError(
+                "Direct DeepSeek thinking mode does not support this tool-call interface.",
+                code="provider_feature_unsupported",
+                retryable=False,
+            )
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._messages_to_api(messages),
@@ -220,12 +247,15 @@ class LLMClient:
         return await self._request(payload, task_role=task_role)
 
     def _apply_experiment_options(self, payload: dict[str, Any]) -> None:
-        """Append opt-in OpenRouter controls without changing legacy payloads."""
+        """Append transport-specific controls without changing legacy payloads."""
         if self.provider_routing is not None:
             # Copy once more because a mocked/observed request may mutate payload.
             payload["provider"] = json.loads(json.dumps(self.provider_routing))
-        if self.reasoning_effort is not None:
+        if self.reasoning_effort is not None and self.transport == "openrouter":
             payload["reasoning"] = {"effort": self.reasoning_effort}
+        elif self.reasoning_effort is not None:
+            payload["thinking"] = {"type": "enabled"}
+            payload["reasoning_effort"] = self.reasoning_effort
 
     async def _notify_observer(self, event: str, data: dict[str, Any]) -> None:
         if self.request_observer is None:
@@ -262,6 +292,7 @@ class LLMClient:
                 field_name="provider_routing",
             ),
             "reasoning_effort": self.reasoning_effort,
+            "transport": self.transport,
         }
         await self._notify_observer("pre_call", event_base)
 
@@ -296,11 +327,13 @@ class LLMClient:
                     raise
 
     async def _post(self, payload: dict[str, Any]) -> LLMResponse:
-        """Send a request to OpenRouter and parse the response."""
+        """Send one OpenAI-compatible chat request and parse the response."""
+        base_url = OPENROUTER_BASE_URL if self.transport == "openrouter" else DEEPSEEK_BASE_URL
+        provider_label = "OpenRouter" if self.transport == "openrouter" else "DeepSeek"
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
                 resp = await client.post(
-                    f"{OPENROUTER_BASE_URL}/chat/completions",
+                    f"{base_url}/chat/completions",
                     headers=self._headers(),
                     json=payload,
                 )
@@ -308,15 +341,15 @@ class LLMClient:
             except httpx.HTTPStatusError as e:
                 raise self._sanitized_http_error(e) from e
             except httpx.TimeoutException as e:
-                logger.error("OpenRouter request timed out")
+                logger.error("%s request timed out", provider_label)
                 raise LLMProviderError(
-                    "OpenRouter request timed out.",
+                    f"{provider_label} request timed out.",
                     code="provider_timeout",
                 ) from e
             except httpx.RequestError as e:
-                logger.error("OpenRouter request could not be completed")
+                logger.error("%s request could not be completed", provider_label)
                 raise LLMProviderError(
-                    "OpenRouter request could not be completed.",
+                    f"{provider_label} request could not be completed.",
                     code="provider_unavailable",
                 ) from e
 
@@ -326,7 +359,7 @@ class LLMClient:
             msg = choice["message"]
         except (KeyError, IndexError, TypeError) as error:
             raise LLMProviderError(
-                "OpenRouter returned an invalid response.",
+                f"{provider_label} returned an invalid response.",
                 code="provider_invalid_response",
                 retryable=True,
             ) from error
@@ -353,13 +386,17 @@ class LLMClient:
             tool_calls=tool_calls,
             prompt_tokens=self._int_value(usage.get("prompt_tokens")),
             completion_tokens=self._int_value(usage.get("completion_tokens")),
-            model=data.get("model", self.model),
+            model=(
+                self._string_value(data.get("model"))
+                or (self.model if self.transport == "openrouter" else "")
+            ),
             id=self._string_value(data.get("id")),
             provider=self._string_value(data.get("provider")),
             finish_reason=self._string_value(choice.get("finish_reason")),
             native_finish_reason=self._string_value(choice.get("native_finish_reason")),
             finish_reasons=self._finish_reasons(data),
             prompt_cached_tokens=self._cached_prompt_tokens(usage),
+            prompt_cache_miss_tokens=self._int_value(usage.get("prompt_cache_miss_tokens")),
             reasoning_tokens=self._reasoning_tokens(usage),
             reported_total_tokens=self._optional_int_value(usage.get("total_tokens")),
             # OpenRouter exposes accounting under ``usage`` for chat responses;
@@ -410,7 +447,10 @@ class LLMClient:
     def _cached_prompt_tokens(cls, usage: Mapping[str, Any]) -> int:
         details = cls._dict_value(usage.get("prompt_tokens_details"))
         return cls._int_value(
-            details.get("cached_tokens", details.get("cache_read_input_tokens"))
+            usage.get(
+                "prompt_cache_hit_tokens",
+                details.get("cached_tokens", details.get("cache_read_input_tokens")),
+            )
         )
 
     @classmethod
@@ -429,8 +469,7 @@ class LLMClient:
                 reasons.append(item["finish_reason"])
         return reasons
 
-    @staticmethod
-    def _sanitized_http_error(error: httpx.HTTPStatusError) -> LLMProviderError:
+    def _sanitized_http_error(self, error: httpx.HTTPStatusError) -> LLMProviderError:
         status_code = error.response.status_code
         if status_code in {401, 403}:
             code, retryable = "provider_auth_failed", False
@@ -440,9 +479,10 @@ class LLMClient:
             code, retryable = "provider_unavailable", True
         else:
             code, retryable = "provider_rejected_request", False
-        logger.error("OpenRouter request failed with status %s (%s)", status_code, code)
+        provider_label = "OpenRouter" if self.transport == "openrouter" else "DeepSeek"
+        logger.error("%s request failed with status %s (%s)", provider_label, status_code, code)
         return LLMProviderError(
-            "OpenRouter request failed.",
+            f"{provider_label} request failed.",
             code=code,
             status_code=status_code,
             retryable=retryable,
@@ -571,6 +611,49 @@ class LLMClient:
             field: self._optional_float_value(raw.get(field))
             for field in numeric_fields
         } | {"include_byok_in_limit": self._optional_bool_value(raw.get("include_byok_in_limit"))}
+
+    async def fetch_current_balance(self) -> dict[str, Any]:
+        """Return sanitized direct-DeepSeek balance data for experiment baselines."""
+
+        if self.transport != "deepseek_direct":
+            raise ValueError("balance lookup is available only for direct DeepSeek")
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            try:
+                response = await client.get(
+                    f"{DEEPSEEK_BASE_URL}/user/balance",
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                raise self._sanitized_http_error(error) from error
+            except httpx.TimeoutException as error:
+                raise LLMProviderError(
+                    "DeepSeek balance request timed out.", code="provider_timeout"
+                ) from error
+            except httpx.RequestError as error:
+                raise LLMProviderError(
+                    "DeepSeek balance request could not be completed.",
+                    code="provider_unavailable",
+                ) from error
+        body = response.json()
+        if not isinstance(body, Mapping) or not isinstance(body.get("balance_infos"), list):
+            raise LLMProviderError(
+                "DeepSeek returned invalid balance data.",
+                code="provider_invalid_response",
+                retryable=True,
+            )
+        balances: list[dict[str, str]] = []
+        for item in body["balance_infos"]:
+            if not isinstance(item, Mapping):
+                continue
+            currency = self._string_value(item.get("currency"))
+            total = self._string_value(item.get("total_balance"))
+            if currency in {"USD", "CNY"} and total:
+                balances.append({"currency": currency, "total_balance": total})
+        return {
+            "is_available": body.get("is_available") is True,
+            "balances": balances,
+        }
 
     @staticmethod
     async def fetch_models(api_key: str) -> list[dict[str, Any]]:

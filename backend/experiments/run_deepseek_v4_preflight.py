@@ -1,4 +1,4 @@
-"""Explicit opt-in DeepSeek V4 OpenRouter preflight; makes two tiny calls."""
+"""Explicit opt-in direct DeepSeek V4 preflight; makes two tiny calls."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 
-from config.user_settings import get_user_config, load_user_config
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
     PRIVATE_ARTIFACT_ROOT,
@@ -19,7 +18,8 @@ from experiments.deepseek_v4_runtime import (
     DeepSeekRequestObserver,
     RunContext,
     build_measured_client,
-    run_tiny_openrouter_preflight,
+    load_direct_api_key,
+    run_tiny_direct_preflight,
 )
 from llm.experiment import DeepSeekExperimentLedger
 
@@ -38,10 +38,7 @@ async def main() -> int:
     if os.environ.get("AI_MYSTERY_ENABLE_DEEPSEEK_PREFLIGHT") != "1":
         raise RuntimeError("Set the explicit preflight enable flag to run provider traffic.")
     manifest = load_manifest()
-    load_user_config()
-    api_key = str(get_user_config().get("api_key", ""))
-    if not api_key:
-        raise RuntimeError("Configure the OpenRouter credential locally before preflight.")
+    api_key = load_direct_api_key()
     git_sha = resolve_clean_git_sha()
 
     artifact_root = PRIVATE_ARTIFACT_ROOT
@@ -60,7 +57,7 @@ async def main() -> int:
             ),
         ),
     )
-    baseline = await baseline_client.fetch_current_key_usage()
+    baseline = await baseline_client.fetch_current_balance()
     _atomic_json(artifact_root / "key_usage_baseline.json", baseline)
 
     evidence: dict[str, object] = {}
@@ -80,7 +77,7 @@ async def main() -> int:
             model=EXPECTED_MODELS[model_key],
             observer=observer,
         )
-        await run_tiny_openrouter_preflight(client)
+        await run_tiny_direct_preflight(client)
         record = observer.last_record
         if not isinstance(record, dict) or record.get("result") != "success":
             raise RuntimeError(f"{model_key} preflight did not produce verified evidence.")
@@ -90,7 +87,8 @@ async def main() -> int:
             "model": record["requested_model"],
             "actual_model": record["actual_model"],
             "upstream_provider": record["upstream_provider"],
-            "is_byok": record["is_byok"],
+            "transport": record["transport"],
+            "is_byok": None,
             "fallback_used": record["fallback_used"],
             "provider_failover_used": record["provider_failover_used"],
             "accounting_mode": record["accounting_mode"],
@@ -114,7 +112,7 @@ async def main() -> int:
                     key: {
                         "model": value["model"],
                         "provider": value["upstream_provider"],
-                        "is_byok": value["is_byok"],
+                        "transport": value["transport"],
                         "fallback_used": value["fallback_used"],
                         "accounting_mode": value["accounting_mode"],
                     }

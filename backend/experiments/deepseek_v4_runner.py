@@ -21,20 +21,14 @@ MANIFEST_PATH = EXPERIMENT_DIR / "deepseek_v4_manifest.json"
 REPOSITORY_ROOT = EXPERIMENT_DIR.parents[1]
 PRIVATE_ARTIFACT_ROOT = REPOSITORY_ROOT / ".private" / "deepseek_v4"
 EXPECTED_MODELS = {
-    "pro": "deepseek/deepseek-v4-pro",
-    "flash": "deepseek/deepseek-v4-flash",
+    "pro": "deepseek-v4-pro",
+    "flash": "deepseek-v4-flash",
 }
-EXPECTED_RESOLVED_MODELS = {
-    "pro": "deepseek/deepseek-v4-pro-20260423",
-    "flash": "deepseek/deepseek-v4-flash-20260423",
-}
-EXPECTED_MANIFEST_REVISION = 3
-EXPECTED_GIT_CHECKPOINT = "7aee11513c70eee562a0b606731afb2ae24ccaac"
-EXPECTED_ROUTING = {
-    "only": ["deepseek"],
-    "allow_fallbacks": False,
-    "require_parameters": True,
-}
+EXPECTED_RESOLVED_MODELS = dict(EXPECTED_MODELS)
+EXPECTED_MANIFEST_REVISION = 4
+EXPECTED_GIT_CHECKPOINT = "b6edfbf6875ab1627c14a81e63071cfbc509a4e6"
+EXPECTED_GATEWAY = "deepseek_direct"
+EXPECTED_ROUTING = None
 
 
 class ExperimentSafetyError(RuntimeError):
@@ -46,7 +40,7 @@ class ProviderRequest:
     """A sanitized, bounded request contract for a future adapter."""
 
     model: str
-    provider: Mapping[str, Any]
+    provider: Mapping[str, Any] | None
     reasoning_effort: str
     max_tokens: int
     temperature: float
@@ -71,21 +65,21 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Reject changes that would make the paired measurement unfair or unsafe."""
 
     if manifest.get("manifest_revision") != EXPECTED_MANIFEST_REVISION:
-        raise ExperimentSafetyError("Only frozen manifest revision 3 is accepted.")
+        raise ExperimentSafetyError("Only frozen manifest revision 4 is accepted.")
     if manifest.get("git_checkpoint") != EXPECTED_GIT_CHECKPOINT:
-        raise ExperimentSafetyError("Manifest must retain the revision-2 evaluator checkpoint.")
+        raise ExperimentSafetyError("Manifest must retain the revision-3 evaluator checkpoint.")
     if (
-        manifest.get("supersedes_revision") != 2
-        or manifest.get("gateway") != "openrouter"
+        manifest.get("supersedes_revision") != 3
+        or manifest.get("gateway") != EXPECTED_GATEWAY
         or manifest.get("model_fallbacks") != []
     ):
-        raise ExperimentSafetyError("Manifest revision 3 must retain OpenRouter/DeepSeek routing provenance.")
+        raise ExperimentSafetyError("Manifest revision 4 must require direct DeepSeek without fallback.")
     if manifest.get("models") != EXPECTED_MODELS:
         raise ExperimentSafetyError("Manifest model slugs must be the exact DeepSeek V4 pair.")
     if manifest.get("resolved_models") != EXPECTED_RESOLVED_MODELS:
-        raise ExperimentSafetyError("Manifest must freeze OpenRouter's dated model resolutions.")
+        raise ExperimentSafetyError("Manifest must freeze the direct DeepSeek model resolutions.")
     if manifest.get("provider_routing") != EXPECTED_ROUTING:
-        raise ExperimentSafetyError("Provider routing must match the frozen OpenRouter policy.")
+        raise ExperimentSafetyError("Direct DeepSeek must not carry gateway routing fields.")
 
     settings = manifest.get("runtime_settings")
     if not isinstance(settings, Mapping) or settings.get("reasoning_effort") != "high":
@@ -125,6 +119,11 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         "flash": {"input": 5.0, "output": 10.0},
     }:
         raise ExperimentSafetyError("Reservation price ceilings must remain conservative and frozen.")
+    if manifest.get("direct_deepseek_pricing_usd_per_million") != {
+        "pro": {"cache_hit_input": 0.003625, "cache_miss_input": 0.435, "output": 0.87},
+        "flash": {"cache_hit_input": 0.0028, "cache_miss_input": 0.14, "output": 0.28},
+    }:
+        raise ExperimentSafetyError("Direct DeepSeek settlement prices must remain frozen.")
 
     pairs = manifest.get("generation_pairs")
     if not isinstance(pairs, list) or [pair.get("pair_id") for pair in pairs] != ["P1", "P2", "P3"]:
@@ -166,7 +165,7 @@ def build_request(manifest: Mapping[str, Any], model_key: str, *, task_role: str
         raise ExperimentSafetyError("Experiment task role is not authorized.")
     return ProviderRequest(
         model=EXPECTED_MODELS[model_key],
-        provider=dict(EXPECTED_ROUTING),
+        provider=None,
         reasoning_effort="high",
         max_tokens=int(role_settings["max_tokens"]),
         temperature=float(role_settings["temperature"]),
@@ -183,7 +182,7 @@ def verify_preflights(
     *,
     expected_git_sha: str | None = None,
 ) -> None:
-    """Require verified OpenRouter evidence for both exact models.
+    """Require verified direct-DeepSeek evidence for both exact models.
 
     The evidence format is intentionally small and sanitized: one entry under
     each model key with revision, model, serving provider, accounting mode,
@@ -202,10 +201,10 @@ def verify_preflights(
             slug, str(record.get("actual_model", ""))
         ) or str(record.get("upstream_provider", "")).casefold() != "deepseek":
             raise ExperimentSafetyError("Preflight did not verify the exact DeepSeek upstream model.")
-        if record.get("is_byok") is not True or record.get("fallback_used") is not False:
-            raise ExperimentSafetyError("Preflight did not verify DeepSeek BYOK without fallback.")
-        if record.get("accounting_mode") != "byok":
-            raise ExperimentSafetyError("Preflight did not verify BYOK accounting.")
+        if record.get("transport") != EXPECTED_GATEWAY or record.get("fallback_used") is not False:
+            raise ExperimentSafetyError("Preflight did not verify direct DeepSeek without fallback.")
+        if record.get("accounting_mode") != "direct_token_meter":
+            raise ExperimentSafetyError("Preflight did not verify direct token accounting.")
         if not str(record.get("generation_id", "")):
             raise ExperimentSafetyError("Preflight did not retain a generation ID.")
         total_cost = record.get("total_external_cost_usd")
@@ -216,7 +215,7 @@ def verify_preflights(
 
 
 def model_resolution_matches(requested_model: str, actual_model: str) -> bool:
-    """Accept only an exact alias or its frozen dated OpenRouter resolution."""
+    """Accept only an exact direct DeepSeek model resolution."""
 
     if requested_model not in EXPECTED_MODELS.values():
         return False
@@ -257,15 +256,15 @@ def execute_with_verified_preflights(
     if not explicitly_enabled:
         raise ExperimentSafetyError("Provider traffic requires an explicit opt-in.")
     verify_preflights(preflight_evidence, manifest)
-    if request.model not in EXPECTED_MODELS.values() or dict(request.provider) != EXPECTED_ROUTING:
-        raise ExperimentSafetyError("Request is not pinned to the approved OpenRouter route.")
+    if request.model not in EXPECTED_MODELS.values() or request.provider is not None:
+        raise ExperimentSafetyError("Request is not pinned to the approved direct DeepSeek route.")
     return provider_call(request)
 
 
 def configured_openrouter_credential_present() -> bool:
-    """Check only whether the normal environment config is present; never return it."""
+    """Compatibility check for the direct evaluation credential; never return it."""
 
-    return bool(os.environ.get("OPENROUTER_API_KEY"))
+    return bool(os.environ.get("DEEPSEEK_API_KEY"))
 
 
 def resolve_clean_git_sha(repository_root: Path = REPOSITORY_ROOT) -> str:

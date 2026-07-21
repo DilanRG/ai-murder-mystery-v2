@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -78,6 +79,159 @@ def test_explicit_none_omits_top_k_without_changing_legacy_default() -> None:
 
     assert "top_k" not in captured
     assert LLMClient(api_key="test", model="test/model").sampler["top_k"] == 40
+
+
+def test_direct_deepseek_uses_exact_endpoint_headers_and_thinking_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers.get("authorization")
+        captured["referer"] = request.headers.get("http-referer")
+        captured["payload"] = json.loads(request.read().decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "id": "direct-1",
+                "model": "deepseek-v4-flash",
+                "usage": {
+                    "prompt_tokens": 2,
+                    "completion_tokens": 1,
+                    "total_tokens": 3,
+                    "prompt_cache_hit_tokens": 0,
+                    "prompt_cache_miss_tokens": 2,
+                },
+                "choices": [{"finish_reason": "stop", "message": {"content": "OK"}}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    original_async_client = httpx.AsyncClient
+
+    class MockClient(original_async_client):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(transport=transport, **kwargs)
+
+    monkeypatch.setattr("llm.client.httpx.AsyncClient", MockClient)
+    client = LLMClient(
+        api_key="direct-secret",
+        model="deepseek-v4-flash",
+        transport="deepseek_direct",
+        reasoning_effort="high",
+        top_k=None,
+    )
+    response = asyncio.run(client.generate([LLMMessage(role="user", content="OK")]))
+
+    payload = captured["payload"]
+    assert captured["url"] == "https://api.deepseek.com/chat/completions"
+    assert captured["authorization"] == "Bearer direct-secret"
+    assert captured["referer"] is None
+    assert payload["thinking"] == {"type": "enabled"}
+    assert payload["reasoning_effort"] == "high"
+    assert "provider" not in payload
+    assert "temperature" not in payload
+    assert "top_p" not in payload
+    assert response.provider == ""
+    assert response.prompt_cache_miss_tokens == 2
+
+
+def test_direct_transport_rejects_openrouter_routing() -> None:
+    with pytest.raises(ValueError, match="cannot carry OpenRouter routing"):
+        LLMClient(
+            api_key="test",
+            model="deepseek-v4-pro",
+            transport="deepseek_direct",
+            provider_routing={"only": ["deepseek"]},
+        )
+
+
+def test_direct_thinking_mode_rejects_tool_calls_before_transport() -> None:
+    client = LLMClient(
+        api_key="test",
+        model="deepseek-v4-pro",
+        transport="deepseek_direct",
+        reasoning_effort="high",
+    )
+    with pytest.raises(LLMProviderError) as caught:
+        asyncio.run(
+            client.generate_with_tools(
+                [LLMMessage(role="user", content="use a tool")],
+                [{"type": "function", "function": {"name": "noop"}}],
+            )
+        )
+    assert caught.value.code == "provider_feature_unsupported"
+    assert caught.value.retryable is False
+
+
+def test_direct_response_does_not_synthesize_missing_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={
+                "id": "direct-missing-model",
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                    "prompt_cache_hit_tokens": 0,
+                    "prompt_cache_miss_tokens": 1,
+                },
+                "choices": [{"finish_reason": "stop", "message": {"content": "OK"}}],
+            },
+        )
+    )
+    original_async_client = httpx.AsyncClient
+
+    class MockClient(original_async_client):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(transport=transport, **kwargs)
+
+    monkeypatch.setattr("llm.client.httpx.AsyncClient", MockClient)
+    client = LLMClient(
+        api_key="test",
+        model="deepseek-v4-pro",
+        transport="deepseek_direct",
+    )
+    response = asyncio.run(client.generate([LLMMessage(role="user", content="OK")]))
+    assert response.model == ""
+
+
+def test_direct_balance_baseline_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    response_body = {
+        "is_available": True,
+        "balance_infos": [
+            {
+                "currency": "USD",
+                "total_balance": "1.00",
+                "granted_balance": "private-detail",
+                "topped_up_balance": "private-detail",
+            }
+        ],
+    }
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=response_body))
+    original_async_client = httpx.AsyncClient
+
+    class MockClient(original_async_client):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(transport=transport, **kwargs)
+
+    monkeypatch.setattr("llm.client.httpx.AsyncClient", MockClient)
+    client = LLMClient(
+        api_key="direct-secret",
+        model="deepseek-v4-flash",
+        transport="deepseek_direct",
+    )
+    baseline = asyncio.run(client.fetch_current_balance())
+
+    assert baseline == {
+        "is_available": True,
+        "balances": [{"currency": "USD", "total_balance": "1.00"}],
+    }
+    assert "private-detail" not in repr(baseline)
 
 
 def test_response_parses_provider_accounting_and_finish_details(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -13,7 +13,6 @@ from conftest import make_dummy_generated_document
 from experiments.run_deepseek_v4_generation import run_generation_matrix
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
-    EXPECTED_ROUTING,
     ExperimentSafetyError,
     load_manifest,
 )
@@ -26,14 +25,15 @@ GIT_SHA = "b" * 40
 def _preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 3,
+            "experiment_revision": 4,
             "git_sha": GIT_SHA,
             "model": model,
             "actual_model": model,
             "upstream_provider": "deepseek",
-            "is_byok": True,
+            "transport": "deepseek_direct",
+            "is_byok": None,
             "fallback_used": False,
-            "accounting_mode": "byok",
+            "accounting_mode": "direct_token_meter",
             "generation_id": f"preflight-{key}",
             "total_external_cost_usd": 0.001,
         }
@@ -47,18 +47,6 @@ class _OfflineMeasuredClient:
         self.observer = observer
         self.content_factory = content_factory
         self.calls = 0
-        observer.stats_lookup = self._stats
-
-    async def _stats(self, generation_id: str) -> dict[str, object]:
-        return {
-            "id": generation_id,
-            "model": self.model,
-            "provider_name": "DeepSeek",
-            "is_byok": True,
-            "provider_responses": [{"provider_name": "DeepSeek"}],
-            "total_cost": 0.00001,
-            "upstream_inference_cost": 0.0001,
-        }
 
     async def generate(self, messages, **kwargs) -> LLMResponse:
         assert kwargs["task_role"] == "case_generation"
@@ -70,8 +58,9 @@ class _OfflineMeasuredClient:
             "task_role": kwargs["task_role"],
             "max_tokens": kwargs["max_tokens"],
             "prompt_tokens_upper_bound": sum(len(message.content) for message in messages),
-            "provider_routing": dict(EXPECTED_ROUTING),
+            "provider_routing": None,
             "reasoning_effort": "high",
+            "transport": "deepseek_direct",
         }
         await self.observer("pre_call", event)
         content = self.content_factory(messages)
@@ -83,10 +72,10 @@ class _OfflineMeasuredClient:
             model=self.model,
             provider="DeepSeek",
             prompt_tokens=100,
+            prompt_cache_miss_tokens=100,
             completion_tokens=200,
+            reported_total_tokens=300,
             reasoning_tokens=50,
-            cost=0.00001,
-            cost_details={"upstream_inference_cost": 0.0001},
             wall_latency_seconds=0.01,
         )
         await self.observer(

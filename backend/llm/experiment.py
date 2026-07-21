@@ -24,13 +24,17 @@ from typing import Any, Literal, Mapping
 from uuid import uuid4
 
 
-PRO_MODEL_SLUG = "deepseek/deepseek-v4-pro"
-FLASH_MODEL_SLUG = "deepseek/deepseek-v4-flash"
+PRO_MODEL_SLUG = "deepseek-v4-pro"
+FLASH_MODEL_SLUG = "deepseek-v4-flash"
 AllowedModelSlug = Literal[
-    "deepseek/deepseek-v4-pro",
-    "deepseek/deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
 ]
 _ALLOWED_MODELS = frozenset((PRO_MODEL_SLUG, FLASH_MODEL_SLUG))
+_HISTORICAL_MODEL_SLUGS = frozenset(
+    ("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash")
+)
+_JOURNAL_MODEL_SLUGS = _ALLOWED_MODELS | _HISTORICAL_MODEL_SLUGS
 _REQUEST_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _AMOUNT_QUANTUM = Decimal("0.00000001")
 _MAX_PROMPT_TOKENS = 1_000_000
@@ -69,7 +73,7 @@ class ModelPricing:
             raise ValueError("model prices must be non-negative")
 
 
-# These are deliberately conservative OpenRouter-route reservation ceilings,
+# These are deliberately conservative direct-provider reservation ceilings,
 # not permanent product prices. Actual successful requests settle from trusted
 # response accounting, so the ceiling only decides whether a bounded request
 # may safely start under the experiment cap.
@@ -90,7 +94,7 @@ class ExperimentPolicy:
     soft_stop_usd: Decimal = Decimal("8.50")
     hard_stop_usd: Decimal = Decimal("9.50")
     uncertainty_reserve_usd: Decimal = Decimal("0.50")
-    openrouter_fee_rate: Decimal = Decimal("0.05")
+    openrouter_fee_rate: Decimal = Decimal("0")
     pricing: Mapping[AllowedModelSlug, ModelPricing] = field(
         default_factory=lambda: DEFAULT_MODEL_PRICING
     )
@@ -410,7 +414,7 @@ class DeepSeekExperimentLedger:
                 prompt = record.get("prompt_tokens_upper_bound")
                 output = record.get("max_output_tokens")
                 provider = record.get("provider")
-                if provider not in {"deepseek", "openrouter"} or model not in _ALLOWED_MODELS:
+                if provider not in {"deepseek", "openrouter"} or model not in _JOURNAL_MODEL_SLUGS:
                     raise LedgerIntegrityError(f"invalid reservation policy at line {number}")
                 try:
                     self._validate_bounds(prompt, output)

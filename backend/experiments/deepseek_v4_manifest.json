@@ -1,10 +1,10 @@
 {
   "experiment_id": "deepseek-v4-phase1",
-  "manifest_revision": 3,
+  "manifest_revision": 4,
   "frozen_at": "2026-07-22",
-  "git_checkpoint": "7aee11513c70eee562a0b606731afb2ae24ccaac",
-  "supersedes_revision": 2,
-  "revision_reason": "Force the DeepSeek upstream through OpenRouter, omit unsupported top_k, bound statistics polling, and recognize each dated model resolution.",
+  "git_checkpoint": "b6edfbf6875ab1627c14a81e63071cfbc509a4e6",
+  "supersedes_revision": 3,
+  "revision_reason": "Use the official direct DeepSeek API after OpenRouter account privacy policy excluded the requested DeepSeek endpoint; preserve identical model, prompt, schema, seed, cast, reasoning, and budget controls.",
   "invalidated_preflight_attempts": [
     {
       "revision": 1,
@@ -17,25 +17,27 @@
       "count": 1,
       "provider_generation_ids_returned": 1,
       "reason": "The model call succeeded, but immediate statistics lookup raced OpenRouter ingestion and the returned dated model resolution was not yet admitted by the verifier."
+    },
+    {
+      "revision": 3,
+      "count": 2,
+      "provider_generation_ids_returned": 0,
+      "reason": "OpenRouter rejected the forced DeepSeek route because the account guardrail and data policy excluded the direct endpoint."
     }
   ],
   "location_package_id": "ashwick_manor",
   "prompt_revision": "procedural-case-generation-v1",
   "schema_revision": "procedural-case-schema-v1",
   "models": {
-    "pro": "deepseek/deepseek-v4-pro",
-    "flash": "deepseek/deepseek-v4-flash"
+    "pro": "deepseek-v4-pro",
+    "flash": "deepseek-v4-flash"
   },
   "resolved_models": {
-    "pro": "deepseek/deepseek-v4-pro-20260423",
-    "flash": "deepseek/deepseek-v4-flash-20260423"
+    "pro": "deepseek-v4-pro",
+    "flash": "deepseek-v4-flash"
   },
-  "provider_routing": {
-    "only": ["deepseek"],
-    "allow_fallbacks": false,
-    "require_parameters": true
-  },
-  "gateway": "openrouter",
+  "provider_routing": null,
+  "gateway": "deepseek_direct",
   "model_fallbacks": [],
   "runtime_settings": {
     "reasoning_effort": "high",
@@ -65,9 +67,9 @@
     "pro": {"input": 5.0, "output": 10.0},
     "flash": {"input": 5.0, "output": 10.0}
   },
-  "observed_direct_deepseek_pricing_2026_07_22": {
-    "pro": {"input": 0.435, "output": 0.87},
-    "flash": {"input": 0.14, "output": 0.28}
+  "direct_deepseek_pricing_usd_per_million": {
+    "pro": {"cache_hit_input": 0.003625, "cache_miss_input": 0.435, "output": 0.87},
+    "flash": {"cache_hit_input": 0.0028, "cache_miss_input": 0.14, "output": 0.28}
   },
   "generation_pairs": [
     {

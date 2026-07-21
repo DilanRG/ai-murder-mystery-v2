@@ -12,7 +12,6 @@ from typing import Sequence
 
 import uvicorn
 
-from config.user_settings import get_user_config, load_user_config
 from experiments.deepseek_v4_blind import BlindTranscriptRecorder, build_blind_app
 from experiments.deepseek_v4_crossed import (
     build_crossed_cells,
@@ -27,6 +26,7 @@ from experiments.deepseek_v4_runner import (
     load_private_preflights,
     resolve_clean_git_sha,
 )
+from experiments.deepseek_v4_runtime import load_direct_api_key
 from launcher import _valid_port, find_free_port
 
 
@@ -81,8 +81,7 @@ async def _prepare(cell_id: str, *, phase: str = "phase_a"):
         cells=cells,
     )
     cell = next(item for item in cells if item.cell_id == cell_id)
-    load_user_config()
-    api_key = str(get_user_config().get("api_key", ""))
+    api_key = load_direct_api_key()
     prepared = await prepare_crossed_session(
         manifest=manifest,
         preflight_evidence=preflights,

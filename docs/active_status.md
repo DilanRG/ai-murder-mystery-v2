@@ -1,6 +1,6 @@
 # Active Build Status
 
-**Updated:** 2026-07-21
+**Updated:** 2026-07-22
 
 **Controlling direction:** [product_north_star.md](product_north_star.md)
 
@@ -25,7 +25,7 @@
 - Bounded notebooks, accusation payloads, conversation memories, and action histories, with rejected actions leaving time and history unchanged.
 - Frozen builds bundle all authored content and write config, saves, and card drafts to durable per-user storage. The build fails closed and smoke-tests the real artifact across automatic casting, an exact manual cast, both fixed cases, and v5 save/load.
 - The package-verification matrix builds and launches the distributable successfully on Windows, Ubuntu, and macOS; the latest three-run matrix completed without annotations.
-- 379 automated unit, contract, adversarial, persistence, AI-boundary, concurrency, packaging, cast-reachability, frontend-behavior, and solve tests (363 Python plus 16 Node tests). The deterministic authored soak matrix solves every pooled card against both authored mystery spines; a separate independent provider-shaped case proves procedural variety and remains solvable after six autonomous turns. Desktop/mobile browser playthroughs cover both demo mysteries and the card editor, including exact-once scheduled-event presentation.
+- 388 automated unit, contract, adversarial, persistence, AI-boundary, concurrency, packaging, cast-reachability, frontend-behavior, and solve tests (372 Python plus 16 Node tests). The deterministic authored soak matrix solves every pooled card against both authored mystery spines; a separate independent provider-shaped case proves procedural variety and remains solvable after six autonomous turns. Desktop/mobile browser playthroughs cover both demo mysteries and the card editor, including exact-once scheduled-event presentation.
 
 ## Generated-story architecture now connected
 
@@ -41,15 +41,15 @@ The first procedural case has passed the technical acceptance criteria preserved
 
 ## Controlled DeepSeek V4 evaluation in progress
 
-The general real-provider hold is lifted only for a paired, budget-capped comparison of `deepseek/deepseek-v4-pro` and `deepseek/deepseek-v4-flash` through OpenRouter with the `deepseek` upstream forced. Exact dated-model resolution, `is_byok=true`, no shared/provider/model fallback, parameter-compatible routing, atomic two-component accounting, and a frozen experiment manifest must pass before substantive traffic. The run stops at the human blind-playtest gate and cannot declare Phase 1 or the MVP complete.
+The general real-provider hold is lifted only for a paired, budget-capped comparison of direct `deepseek-v4-pro` and `deepseek-v4-flash`. Exact model resolution, direct transport identity, no model fallback, complete token-meter accounting, and a frozen experiment manifest must pass before substantive traffic. The run stops at the human blind-playtest gate and cannot declare Phase 1 or the MVP complete. Normal game generation remains OpenRouter-compatible; the direct transport is isolated to the controlled evaluation.
 
-Three revision-1 Flash preflights stopped before generation because `top_k=40` made the direct DeepSeek endpoint ineligible under `require_parameters=true`. A revision-2 routing diagnostic removed the provider lock and succeeded through WandB, proving the OpenRouter gateway and model alias work but not satisfying the DeepSeek-upstream requirement. That diagnostic cost USD 0.00000490 and is settled but invalidated as comparison evidence. Revision 3 forces `only=["deepseek"]`, disables fallbacks, omits only `top_k`, accepts the frozen dated `20260423` resolution, and polls generation statistics for at most 7.5 seconds. Pro and all substantive generation/playtest traffic remain unrun. The ledger retains USD 0.00016230 for the three unresolved revision-1 reservations.
+Three revision-1 Flash preflights stopped before generation because `top_k=40` made the direct DeepSeek endpoint ineligible under `require_parameters=true`. A revision-2 routing diagnostic succeeded through WandB and cost USD 0.00000490, but was invalidated as comparison evidence. Revision 3 used the documented forced-provider payload; OpenRouter then returned a precise privacy/guardrail-policy rejection before generation. Revision 4 therefore uses the official direct DeepSeek endpoint and token-meter price card. It omits `temperature` and `top_p` because DeepSeek documents them as ignored in thinking mode. Pro and all substantive generation/playtest traffic remain unrun. The ledger conservatively retains USD 0.00391080 across five unresolved reservations and leaves USD 7.99608430 before the soft stop.
 
 The offline execution gate is now prepared without further provider traffic: candidate-level admission diagnostics, first-admitted-in-manifest-order crossed selection, pristine generated-save restoration, concurrency-one measured NPC calls, classified runtime fallbacks, and a restricted player-only API with append-only transcript sealing. The restricted surface omits generation, demo, settings, model, card, save/load, OpenAPI, and premature debrief routes during Phase A.
 
 ## Remaining Phase 1 acceptance work and limitations
 
-1. Commit experiment revision 3 and rerun both tiny preflights. Proceed only if each proves the exact dated model, upstream provider `deepseek`, `is_byok=true`, no fallback, and trusted upstream/fee accounting. Real-provider playtesting outside this controlled experiment remains on hold.
+1. Commit experiment revision 4 and run both tiny preflights. Proceed only if each proves the exact direct model, transport `deepseek_direct`, no fallback, and complete token-meter accounting. Real-provider playtesting outside this controlled experiment remains on hold.
 2. The expanded gate still requires three procedural cases with different seeds and materially different casts or locations to pass automated validation.
 3. Two blind sub-agent playthroughs on different cases must use only the actual player interface and reach fair, evidence-supported accusations without hidden-state access.
 4. At least one human blind playthrough is required before the MVP may be described as trustworthy.

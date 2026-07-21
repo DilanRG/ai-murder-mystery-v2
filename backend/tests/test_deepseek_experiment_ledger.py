@@ -52,7 +52,7 @@ def _reserve(ledger: DeepSeekExperimentLedger, **extra: object):
 def test_policy_is_exact_and_rejects_unbounded_or_fallback_requests(tmp_path):
     ledger = DeepSeekExperimentLedger(tmp_path / "ledger.jsonl", _policy())
     with pytest.raises(ExperimentPolicyError, match="exact approved"):
-        _reserve(ledger, model="deepseek-v4-pro")
+        _reserve(ledger, model="deepseek/deepseek-v4-pro")
     with pytest.raises(ExperimentPolicyError, match="fallback"):
         _reserve(ledger, allow_fallbacks=True)
     with pytest.raises(ExperimentPolicyError, match="parameters"):
