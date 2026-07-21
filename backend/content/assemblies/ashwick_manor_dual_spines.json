@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "ashwick_manor_dual_spines",
   "location_package_id": "ashwick_manor",
   "case_ids": [
@@ -9,5 +9,105 @@
   "case_fingerprints": {
     "ashwick_sample": "9944db9a598d38906ae5a808355da226e9e6ef22c1595a3d71ef0aac14af24fc",
     "ashwick_quiet_vow": "d7e07d59898eba23146c4ec93cfb688f9358eb7d8f29a152a760d4c1c133bcd1"
+  },
+  "cast_slots": [
+    {
+      "id": "captain_marcus_drake",
+      "candidate_card_ids": [
+        "captain_marcus_drake",
+        "commander_elias_ward",
+        "major_hugo_st_clair"
+      ],
+      "required_traits": ["male", "older", "military-background", "guest"]
+    },
+    {
+      "id": "chef_armand_dubois",
+      "candidate_card_ids": [
+        "chef_armand_dubois",
+        "chef_luca_bianchi",
+        "chef_kenji_watanabe"
+      ],
+      "required_traits": ["male", "chef", "staff"]
+    },
+    {
+      "id": "dr_celestine_moreau",
+      "candidate_card_ids": [
+        "dr_celestine_moreau",
+        "dr_imogen_frost",
+        "dr_amara_sen"
+      ],
+      "required_traits": ["female", "doctor", "guest"]
+    },
+    {
+      "id": "edgar_blackwood",
+      "candidate_card_ids": [
+        "edgar_blackwood",
+        "gabriel_cross",
+        "thomas_vale"
+      ],
+      "required_traits": ["male", "professional", "guest"]
+    },
+    {
+      "id": "inspector_elena_hayes",
+      "candidate_card_ids": [
+        "inspector_elena_hayes",
+        "inspector_nadia_singh",
+        "inspector_maeve_quinn"
+      ],
+      "required_traits": ["female", "investigator", "guest"]
+    },
+    {
+      "id": "lady_vivienne_ashford",
+      "candidate_card_ids": [
+        "lady_vivienne_ashford",
+        "lady_helena_wren",
+        "countess_beatrice_harrow"
+      ],
+      "required_traits": ["female", "aristocrat", "host"]
+    },
+    {
+      "id": "sabrina_voss",
+      "candidate_card_ids": [
+        "sabrina_voss",
+        "celia_marlowe",
+        "naomi_price"
+      ],
+      "required_traits": ["female", "socialite", "guest"]
+    },
+    {
+      "id": "zara_okonkwo",
+      "candidate_card_ids": [
+        "zara_okonkwo",
+        "leila_haddad",
+        "ines_costa"
+      ],
+      "required_traits": ["female", "financial-investigator", "guest"]
+    }
+  ],
+  "card_fingerprints": {
+    "captain_marcus_drake": "472b5e68137425fc7e6eaadc5a6a64584c9df090bc41b68b1d5e1e186a37ad1d",
+    "celia_marlowe": "d337ba256760c8ecf6dfc945e6fb4f3f8c6e4bcf20ab25b2e870b7b2f67be321",
+    "chef_armand_dubois": "f475ba0ddf685e8fcc205baaff2fd1b2646a23052d088d2cce6c93b1d7eeb922",
+    "chef_kenji_watanabe": "389990468e3d708bf2f236150b24a81694c67cc2a791005f02e46058f6b1a75c",
+    "chef_luca_bianchi": "7cf138d6f8c7f015389b75fedd3de86af036d9939b1aa805991709ffd6820f34",
+    "commander_elias_ward": "b43d2597f7dafb691096db38b96a8a147a21ba0243cce5755bd66be973695181",
+    "countess_beatrice_harrow": "693b4f15b27a2e017fb98b6900ba81bdb2e529eec971ac64eb98054e18894c37",
+    "dr_amara_sen": "54642e05a4a6ad310c61985692fc3ad170fb2ef38d8c0afc2dca364bee0b331b",
+    "dr_celestine_moreau": "466305a9953736bdaeeea44cdc39b30eecf5123dcc9eeebd19b9ce4aa96bf571",
+    "dr_imogen_frost": "17393e76c425cb57212755b6f220e7a5fac84936c3a197d76bd323226be7ee15",
+    "edgar_blackwood": "d9ad356cd74093905b0c4484217bc6d1bfa47b3e1c221b29c8cbf84ca06ff5b5",
+    "gabriel_cross": "1a46f8181cf9e0f42acf35513945cc01d59d9b71454c2e4cd5bf1e846f263c90",
+    "ines_costa": "1dbf3cb44a08bfd9fa792fc85003dfae541cae5b466f7404d9b0c9863e3bb6eb",
+    "inspector_elena_hayes": "391fa0b634348cb8474f37cee48875c5db0304f7580f30ac8082b0d93e865571",
+    "inspector_maeve_quinn": "2114028f977b07557776c2ed470508d5158c100bbb3a114ae1d6d9dcea490f9e",
+    "inspector_nadia_singh": "336aaad0b72f9033a0dee299faa35bca2ca1d65718cd07a6352cb0eea83da93b",
+    "lady_helena_wren": "c726811901a2b77605fa0797d363900ccaf78471cc21b3f755b2367df4926cf9",
+    "lady_vivienne_ashford": "7dbc4ff18cf0c0cac65ba3efce6b2b66b12f24896213368ccc492948be211ff3",
+    "leila_haddad": "5b3810245a6346b20ff2a695f6b2cf9ea7429e8cc4cf59795b3d4114a924e878",
+    "major_hugo_st_clair": "18474fd9ac52213027c1ac639c9a08186c4fb091e9d4b8c68a00491ce3e5dc47",
+    "naomi_price": "3fa4cc5d22b228b67390bf2f6e687241543320fe8486d26d03ea621787e5b03d",
+    "sabrina_voss": "ecc56c5a58405addc54d0525c0676f450af7b63a1cf102899b2816278df909f7",
+    "thomas_vale": "4db7391f2b1a4f9be7ce5d91f3d274f6a38914714230e4c8afbaddd163d31ed5",
+    "zara_okonkwo": "2ec9ef742f178e57fc408068eda9c89f819e4ceaac900589f25884d8532b053a"
   }
 }

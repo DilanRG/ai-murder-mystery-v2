@@ -263,6 +263,26 @@ def test_player_view_never_serializes_hidden_truth_or_unseen_locations() -> None
     assert "Lady Vivienne Ashford" in rendered  # the victim is public in the opening
 
 
+def test_player_sees_only_the_demeanour_of_characters_in_the_same_room() -> None:
+    engine = make_engine()
+    character_id = "edgar_blackwood"
+    engine.runtime.characters[character_id].emotional_state = "wary"
+
+    view = engine.view()
+    present = next(item for item in view.present_characters if item.id == character_id)
+    suspect = next(item for item in view.suspects if item.id == character_id)
+    assert present.emotional_state == "wary"
+    assert suspect.emotional_state == ""
+
+    engine.runtime.characters[character_id].current_room_id = "library"
+    hidden_view = engine.view()
+    assert character_id not in {item.id for item in hidden_view.present_characters}
+    hidden_suspect = next(
+        item for item in hidden_view.suspects if item.id == character_id
+    )
+    assert hidden_suspect.emotional_state == ""
+
+
 def test_initial_npc_knowledge_comes_from_authored_observations_and_secrets() -> None:
     engine = make_engine()
     zara = engine.runtime.characters["zara_okonkwo"]
@@ -430,6 +450,9 @@ def test_accusation_scores_three_evidence_components_and_ends_case() -> None:
     result = engine.apply(
         AccuseIntent(
             character_id="edgar_blackwood",
+            evidence_ids=sorted(
+                engine.runtime.player_knowledge.discovered_evidence_ids
+            ),
             method=known_facts["fact_murder_method"],
             motive=known_facts["fact_financial_exposure"],
             timeline=known_facts["fact_murder_time"],
@@ -442,6 +465,31 @@ def test_accusation_scores_three_evidence_components_and_ends_case() -> None:
     assert result.game.result.motive_supported
     assert result.game.result.timeline_supported
     assert result.game.result.solved
+
+
+def test_accusation_never_infers_evidence_the_player_did_not_select() -> None:
+    engine = make_engine()
+    engine.apply(AdvanceOpeningIntent())
+    engine.apply(MoveIntent(room_id="library"))
+    engine.apply(ExamineBodyIntent())
+    engine.apply(SearchIntent(object_id="library_desk"))
+    engine.apply(SearchIntent(object_id="library_desk"))
+    known_facts = {fact.id: fact.statement for fact in engine.view().known_facts}
+
+    result = engine.apply(
+        AccuseIntent(
+            character_id="edgar_blackwood",
+            method=known_facts["fact_murder_method"],
+            motive=known_facts["fact_financial_exposure"],
+            timeline=known_facts["fact_murder_time"],
+        )
+    )
+
+    assert result.game.result is not None
+    assert engine.runtime.result is not None
+    assert engine.runtime.result.selected_evidence_ids == []
+    assert result.game.result.support_score == 0
+    assert not result.game.result.solved
 
 
 def test_blank_or_wrong_accusation_claims_do_not_count_as_support() -> None:
@@ -466,6 +514,9 @@ def test_blank_or_wrong_accusation_claims_do_not_count_as_support() -> None:
     wrong = engine.apply(
         AccuseIntent(
             character_id="edgar_blackwood",
+            evidence_ids=sorted(
+                engine.runtime.player_knowledge.discovered_evidence_ids
+            ),
             method="poison",
             motive={fact.id: fact.statement for fact in engine.view().known_facts}["fact_financial_exposure"],
             timeline={fact.id: fact.statement for fact in engine.view().known_facts}["fact_murder_time"],
@@ -489,6 +540,9 @@ def test_full_playthrough_reaches_a_supported_final_accusation() -> None:
     result = engine.apply(
         AccuseIntent(
             culprit_id="edgar_blackwood",
+            evidence_ids=sorted(
+                engine.runtime.player_knowledge.discovered_evidence_ids
+            ),
             method=known_facts["fact_murder_method"],
             motive=known_facts["fact_financial_exposure"],
             timeline=known_facts["fact_murder_time"],

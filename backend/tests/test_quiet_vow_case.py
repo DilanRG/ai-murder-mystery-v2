@@ -67,6 +67,9 @@ def test_quiet_vow_physical_document_and_route_path_solves_case() -> None:
     result = engine.apply(
         AccuseIntent(
             character_id="dr_celestine_moreau",
+            evidence_ids=sorted(
+                engine.runtime.player_knowledge.discovered_evidence_ids
+            ),
             method=facts["fact_murder_method"],
             motive=facts["fact_certificate_forgery"],
             timeline=facts["fact_moreau_gallery_crossing"],

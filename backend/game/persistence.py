@@ -30,8 +30,10 @@ from game.recipes import (
     CaseRecipeSelection,
     RecipeValidationError,
     case_content_fingerprint,
+    materialize_case_recipe,
     resolve_case_recipe,
 )
+from game.story_director import StoryPresentationPatch, validate_story_presentation
 
 
 SAVE_SCHEMA_VERSION = 2
@@ -56,6 +58,7 @@ class SaveEnvelope(StrictModel):
         default=None,
         max_length=MAX_ACTION_HISTORY,
     )
+    story_presentation: StoryPresentationPatch | None = None
     runtime: WorldRuntimeState
 
     @model_validator(mode="after")
@@ -319,11 +322,32 @@ def validate_save_envelope(
         if selection.content_fingerprint != case_content_fingerprint(case):
             _fail("saved recipe content fingerprint does not match authored content")
         try:
-            resolved = resolve_case_recipe(selection.recipe_id, selection.seed)
+            resolved = resolve_case_recipe(
+                selection.recipe_id,
+                selection.seed,
+                selected_character_ids=(
+                    selection.slot_card_ids.values()
+                    if selection.cast_mode == "manual"
+                    else None
+                ),
+            )
         except RecipeValidationError as error:
             raise SaveValidationError("saved recipe can no longer be resolved") from error
-        if resolved != selection:
-            _fail("saved recipe selection is not reproducible")
+        if selection.slot_card_ids:
+            if resolved != selection:
+                _fail("saved recipe selection is not reproducible")
+        elif not (
+            selection.schema_version == 1
+            and resolved.recipe_id == selection.recipe_id
+            and resolved.seed == selection.seed
+            and resolved.selected_case_id == selection.selected_case_id
+        ):
+            _fail("saved legacy recipe selection is not reproducible")
+    if envelope.story_presentation is not None:
+        try:
+            validate_story_presentation(envelope.story_presentation, case, location)
+        except ValueError as error:
+            raise SaveValidationError("saved story presentation is not valid") from error
     validate_runtime_state(envelope.runtime, case, location)
     if envelope.schema_version == SAVE_SCHEMA_VERSION:
         assert envelope.action_history is not None
@@ -333,6 +357,7 @@ def validate_save_envelope(
             case,
             location,
             recipe_selection=envelope.case_recipe,
+            story_presentation=envelope.story_presentation,
         )
         for entry in envelope.action_history:
             try:
@@ -369,6 +394,7 @@ def snapshot_engine(engine: Any) -> SaveEnvelope:
             if history is not None
             else None
         ),
+        story_presentation=getattr(engine, "story_presentation", None),
         runtime=engine.runtime.model_copy(deep=True),
     )
     return validate_save_envelope(envelope, engine.case, engine.location)
@@ -385,7 +411,12 @@ def restore_engine(
     # Local import avoids coupling the engine module to persistence at startup.
     from game.engine import GameEngine
 
-    engine = GameEngine(case, location, recipe_selection=envelope.case_recipe)
+    engine = GameEngine(
+        case,
+        location,
+        recipe_selection=envelope.case_recipe,
+        story_presentation=envelope.story_presentation,
+    )
     engine.runtime = envelope.runtime.model_copy(deep=True)
     engine.action_history = (
         [entry.model_copy(deep=True) for entry in envelope.action_history]
@@ -470,7 +501,10 @@ def load_engine(
         case_loader = case_loader or load_case
         location_loader = location_loader or load_location
     try:
-        case = case_loader(envelope.case_id)
+        if envelope.case_recipe is not None and envelope.case_recipe.slot_card_ids:
+            case = materialize_case_recipe(envelope.case_recipe)
+        else:
+            case = case_loader(envelope.case_id)
         location = location_loader(envelope.location_id)
     except (OSError, ValueError, FileNotFoundError) as error:
         raise SaveValidationError("save references unavailable authored content") from error

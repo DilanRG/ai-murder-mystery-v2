@@ -24,6 +24,7 @@ class PublicCharacterView(StrictModel):
     name: str
     description: str = ""
     portrait_url: str = ""
+    emotional_state: str = Field(default="", max_length=80)
 
 
 class PublicEvidenceView(StrictModel):
@@ -104,10 +105,20 @@ class PublicResultView(StrictModel):
     summary: str
 
 
+class PublicStoryPresentationView(StrictModel):
+    source: str
+    tagline: str
+    public_opening: str
+    atmosphere: str
+    character_tensions: dict[str, str] = Field(default_factory=dict)
+    room_flavour: dict[str, str] = Field(default_factory=dict)
+
+
 class PlayerGameView(StrictModel):
     """The only complete game-state shape intended for a player or API client."""
 
     case_title: str
+    story: PublicStoryPresentationView
     phase: str
     turn: int
     in_game_minute: int

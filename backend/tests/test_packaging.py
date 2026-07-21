@@ -28,6 +28,17 @@ def _load_build_script():
     return module
 
 
+def _load_smoke_script():
+    spec = importlib.util.spec_from_file_location(
+        "ashwick_smoke_script",
+        REPO_ROOT / "build" / "smoke_packaged.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_source_mode_keeps_repo_local_data_unless_overridden() -> None:
     assert resolve_app_data_root(frozen=False, environ={}) == BASE_DIR
     assert resolve_app_data_root(
@@ -70,11 +81,25 @@ def test_release_and_local_build_use_reproducible_node_install() -> None:
         encoding="utf-8"
     )
     build_script = (REPO_ROOT / "build" / "build.py").read_text(encoding="utf-8")
+    runtime_lock = (REPO_ROOT / "backend" / "requirements.txt").read_text(
+        encoding="utf-8"
+    )
+    build_lock = (REPO_ROOT / "backend" / "requirements-build.lock").read_text(
+        encoding="utf-8"
+    )
     assert "run: npm ci" in workflow
     assert 'run(["npm", "ci"]' in build_script
     assert "PyInstaller failed with exit code" in build_script
     assert "step_packaged_smoke(executable)" in build_script
     assert "python build/build.py --skip-frontend" in workflow
+    assert "pip install --require-hashes -r backend/requirements-build.lock" in workflow
+    assert "requirements-build.lock" in build_script
+    assert "--hash=sha256:" in runtime_lock
+    assert "--hash=sha256:" in build_lock
+    assert "pyinstaller==6.19.0" in build_lock
+    assert ">=" not in runtime_lock
+    assert "tag_name: ${{ env.RELEASE_TAG }}" in workflow
+    assert "target_commitish: ${{ github.sha }}" in workflow
 
 
 def test_packaged_launcher_supports_headless_smoke_mode_and_validates_ports() -> None:
@@ -85,6 +110,28 @@ def test_packaged_launcher_supports_headless_smoke_mode_and_validates_ports() ->
     for invalid_port in ("-1", "0", "65536", "a-million"):
         with pytest.raises(SystemExit):
             parse_launcher_args(["--port", invalid_port])
+
+
+def test_packaged_smoke_retries_transient_windows_handle_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    smoke_script = _load_smoke_script()
+    calls = 0
+
+    def transient_lock(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise PermissionError("simulated inherited log handle")
+        assert path == tmp_path
+
+    monkeypatch.setattr(smoke_script.shutil, "rmtree", transient_lock)
+    monkeypatch.setattr(smoke_script.time, "sleep", lambda _: None)
+
+    smoke_script._cleanup_data_dir(tmp_path, attempts=3)
+
+    assert calls == 3
 
 
 def test_failed_packager_cannot_reuse_a_stale_executable(

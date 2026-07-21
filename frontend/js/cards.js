@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { openModal } from './modal.js';
 
 const node=(tag,text,cls)=>{const item=document.createElement(tag);if(text!==undefined)item.textContent=text;if(cls)item.className=cls;return item;};
 const field=(title,input)=>{const label=node('label',title);label.append(input);return label;};
@@ -6,11 +7,7 @@ const field=(title,input)=>{const label=node('label',title);label.append(input);
 function downloadValidated(raw,id){const parsed=JSON.parse(raw),payload=JSON.stringify(parsed,null,2)+'\n',url=URL.createObjectURL(new Blob([payload],{type:'application/json'})),anchor=document.createElement('a');anchor.href=url;anchor.download=`${id}.json`;anchor.click();URL.revokeObjectURL(url);}
 
 function editorModal(catalog){
-  const root=document.getElementById('modal-root'),opener=document.activeElement;root.replaceChildren();
-  const overlay=node('div',undefined,'modal-overlay'),panel=node('section',undefined,'modal-panel card-editor'),head=node('header'),body=node('div',undefined,'modal-body'),footer=node('footer',undefined,'modal-footer');
-  const close=()=>{root.replaceChildren();if(opener instanceof HTMLElement)opener.focus();};
-  panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Character card editor');panel.tabIndex=-1;
-  const closeButton=node('button','Close','text-button');closeButton.type='button';closeButton.addEventListener('click',close);head.append(node('h2','Character card editor'),closeButton);
+  const modal=openModal('Character card editor',{className:'card-editor'}),body=modal.body,footer=modal.footer,close=modal.close;
   body.append(node('p','Import, inspect, edit, validate, and export JSON Character Card V3 data. Imported prompts remain inert data and drafts do not alter the active case.','muted'));
 
   const source=document.createElement('select');source.setAttribute('aria-label','Starter card');
@@ -38,7 +35,7 @@ function editorModal(catalog){
   validate.addEventListener('click',async()=>{try{const result=await api.validateCard({raw_json:textarea.value,character_id:characterId.value.trim()||null});if(!result.ok){validatedRaw='';exportButton.disabled=true;setStatus(result.issues.map(issue=>issue.message).join(' ')||'Card is invalid.',true);return;}validatedRaw=textarea.value;validatedId=result.preview.character_id;characterId.value=validatedId;exportButton.disabled=false;setStatus(`Valid playable CCv3 card: ${result.preview.name}.`);}catch(error){setStatus(error.message,true);}});
   save.addEventListener('click',async()=>{try{const result=await api.saveCardDraft({raw_json:textarea.value,character_id:characterId.value.trim()||null,replace:replace.checked});validatedRaw=textarea.value;validatedId=result.preview.character_id;characterId.value=validatedId;addDraftOption(result.preview);source.value=`draft:${validatedId}`;exportButton.disabled=false;setStatus(`Saved ${result.filename}.`);}catch(error){setStatus(error.message,true);}});
   exportButton.addEventListener('click',()=>{try{downloadValidated(validatedRaw,validatedId);}catch{setStatus('Validate the JSON again before exporting.',true);}});
-  footer.append(validate,exportButton,save);panel.append(head,body,footer);overlay.append(panel);overlay.addEventListener('click',event=>{if(event.target===overlay)close();});panel.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();close();}});root.append(overlay);panel.focus();
+  footer.append(validate,exportButton,save);
 }
 
 export function initCardEditor(getCatalog){document.getElementById('card-editor').addEventListener('click',()=>editorModal(getCatalog()));}

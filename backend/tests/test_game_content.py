@@ -29,6 +29,25 @@ EXPECTED_CAST = {
     "zara_okonkwo",
 }
 
+EXPECTED_CHARACTER_POOL = EXPECTED_CAST | {
+    "commander_elias_ward",
+    "major_hugo_st_clair",
+    "chef_luca_bianchi",
+    "chef_kenji_watanabe",
+    "dr_imogen_frost",
+    "dr_amara_sen",
+    "gabriel_cross",
+    "thomas_vale",
+    "inspector_nadia_singh",
+    "inspector_maeve_quinn",
+    "lady_helena_wren",
+    "countess_beatrice_harrow",
+    "celia_marlowe",
+    "naomi_price",
+    "leila_haddad",
+    "ines_costa",
+}
+
 
 def test_content_id_resolution_rejects_path_traversal() -> None:
     with pytest.raises(ValueError):
@@ -121,14 +140,14 @@ def test_location_round_trips_without_serializer_warnings() -> None:
     assert "Ashwick Manor" in encoded
 
 
-def test_exactly_eight_playable_ccv3_cards_load() -> None:
+def test_exactly_twenty_four_playable_ccv3_cards_load() -> None:
     card_ids = set(list_content_ids(CHARACTER_CARDS_DIR))
-    assert card_ids == EXPECTED_CAST
+    assert card_ids == EXPECTED_CHARACTER_POOL
 
     cards = {character_id: load_character_card(character_id) for character_id in card_ids}
     assert {card.spec for card in cards.values()} == {"chara_card_v3"}
     assert {card.spec_version for card in cards.values()} == {"3.0"}
-    assert len({card.data.name for card in cards.values()}) == 8
+    assert len({card.data.name for card in cards.values()}) == 24
     for character_id, card in cards.items():
         extension = card.data.extensions.murder_mystery
         assert extension.values
@@ -149,7 +168,7 @@ def test_exactly_eight_playable_ccv3_cards_load() -> None:
 
 def test_character_portrait_assets_are_versioned_safe_svg_files() -> None:
     project_root = CHARACTER_CARDS_DIR.parents[2]
-    for character_id in EXPECTED_CAST:
+    for character_id in EXPECTED_CHARACTER_POOL:
         url = portrait_url(character_id)
         assert url == f"/assets/characters/{character_id}/portrait-placeholder.svg"
         asset = project_root / "frontend" / "public" / "assets" / url.removeprefix("/assets/")

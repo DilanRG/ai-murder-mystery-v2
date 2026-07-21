@@ -163,6 +163,7 @@ class MurderMysteryCardExtension(FrozenModel):
     motive_hooks: tuple[str, ...]
     secret_hooks: tuple[str, ...]
     behavioural_constraints: tuple[str, ...]
+    compatible_case_slots: tuple[str, ...] = Field(default_factory=tuple)
     assets: CharacterAssets = Field(default_factory=CharacterAssets)
 
 

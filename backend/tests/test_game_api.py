@@ -22,6 +22,16 @@ def _client(tmp_path):
     return TestClient(main.app)
 
 
+def _public_cast_ids(payload: dict[str, object]) -> set[str]:
+    game = payload["game"]
+    assert isinstance(game, dict)
+    cast_ids = {str(suspect["id"]) for suspect in game["suspects"]}
+    opening = game.get("opening")
+    if isinstance(opening, dict):
+        cast_ids.add(str(opening["victim_id"]))
+    return cast_ids
+
+
 def test_no_key_start_catalog_opening_and_safe_state(tmp_path):
     with _client(tmp_path) as client:
         social_preview = client.get("/og.png")
@@ -33,13 +43,15 @@ def test_no_key_start_catalog_opening_and_safe_state(tmp_path):
         payload = catalog.json()
         assert payload["default_case_id"] == "ashwick_sample"
         assert payload["default_recipe_id"] == "ashwick_manor_dual_spines"
-        assert payload["recipes"][0]["variation_count"] == 2
+        assert payload["recipes"][0]["variation_count"] == 13_122
+        assert payload["recipes"][0]["cast_variation_count"] == 6_561
+        assert payload["recipes"][0]["character_pool_size"] == 24
         serialized_recipes = json.dumps(payload["recipes"]).lower()
         assert "culprit" not in serialized_recipes
         assert "fingerprint" not in serialized_recipes
         assert "case_ids" not in serialized_recipes
         assert len(payload["locations"][0]["rooms"]) >= 8
-        assert len(payload["characters"]) == 8
+        assert len(payload["characters"]) == 24
         assert "role" not in json.dumps(payload).lower()
         for character in payload["characters"]:
             assert character["portrait_url"] == (
@@ -78,8 +90,11 @@ def test_seeded_recipe_start_is_reproducible_and_does_not_leak_selection_metadat
             payload = response.json()
             assert payload["recipe"] == {
                 "recipe_id": "ashwick_manor_dual_spines",
-                "schema_version": 1,
+                "schema_version": 2,
                 "seed": seed,
+                "cast_mode": "automatic",
+                "story_source": "fallback",
+                "story_status": "ready",
             }
             assert "selected_case_id" not in json.dumps(payload["recipe"])
             titles_by_seed[seed] = payload["game"]["case_title"]
@@ -127,16 +142,26 @@ def test_recipe_selection_survives_save_load_without_public_spine_id(tmp_path):
             json={"recipe_id": "ashwick_manor_dual_spines", "seed": 42},
         ).json()
         title = started["game"]["case_title"]
+        selected_cast = _public_cast_ids(started)
+        assert len(selected_cast) == 8
         assert client.post("/api/game/saves/v1", json={"filename": "seeded"}).status_code == 200
 
-        client.post("/api/game/new", json={})
+        replacement = client.post(
+            "/api/game/new",
+            json={"recipe_id": "ashwick_manor_dual_spines", "seed": 43},
+        ).json()
+        assert _public_cast_ids(replacement) != selected_cast
         loaded = client.post("/api/game/saves/v1/seeded.json/load")
         assert loaded.status_code == 200
         assert loaded.json()["game"]["case_title"] == title
+        assert _public_cast_ids(loaded.json()) == selected_cast
         assert loaded.json()["recipe"] == {
             "recipe_id": "ashwick_manor_dual_spines",
-            "schema_version": 1,
+            "schema_version": 2,
             "seed": 42,
+            "cast_mode": "automatic",
+            "story_source": "fallback",
+            "story_status": "ready",
         }
 
 

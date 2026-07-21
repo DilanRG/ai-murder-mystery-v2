@@ -25,6 +25,7 @@ class StartGameRequest(BaseModel):
     location_id: str | None = Field(default=None, min_length=1, max_length=64)
     recipe_id: str | None = Field(default=None, min_length=1, max_length=64)
     seed: StrictInt | None = Field(default=None, ge=0, le=MAX_RECIPE_SEED)
+    character_ids: tuple[str, ...] | None = Field(default=None, min_length=8, max_length=8)
 
     @model_validator(mode="after")
     def validate_mode(self) -> "StartGameRequest":
@@ -35,6 +36,10 @@ class StartGameRequest(BaseModel):
                 raise ValueError("recipe and fixed-content fields cannot be combined")
         elif self.seed is not None:
             raise ValueError("a seed requires a recipe_id")
+        elif self.character_ids is not None:
+            raise ValueError("manual character selection requires a recipe_id")
+        if self.character_ids is not None and len(set(self.character_ids)) != 8:
+            raise ValueError("manual character selection requires eight unique IDs")
         return self
 
 
@@ -81,6 +86,7 @@ async def new_game(request: StartGameRequest) -> dict[str, object]:
             game = await _service().start_recipe_async(
                 recipe_id=request.recipe_id,
                 seed=request.seed,
+                character_ids=request.character_ids,
             )
         else:
             game = await _service().start_async(

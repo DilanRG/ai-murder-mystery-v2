@@ -19,7 +19,7 @@ from game.persistence import (
     snapshot_engine,
     write_save,
 )
-from game.recipes import resolve_case_recipe
+from game.recipes import resolve_case_recipe, resolve_materialized_case_recipe
 
 
 def make_engine() -> GameEngine:
@@ -40,6 +40,7 @@ def test_save_round_trip_restores_runtime_without_embedded_truth(tmp_path: Path)
         "location_id",
         "case_recipe",
         "action_history",
+        "story_presentation",
         "runtime",
     }
     assert payload["schema_version"] == 2
@@ -144,8 +145,7 @@ def test_impossible_early_ended_save_is_rejected() -> None:
 
 
 def test_seeded_recipe_round_trip_is_reproducible_and_old_v1_save_still_loads() -> None:
-    selection = resolve_case_recipe("ashwick_manor_dual_spines", 42)
-    case = load_case(selection.selected_case_id)
+    selection, case = resolve_materialized_case_recipe("ashwick_manor_dual_spines", 42)
     location = load_location("ashwick_manor")
     engine = GameEngine.create(case, location, recipe_selection=selection)
 
@@ -161,8 +161,7 @@ def test_seeded_recipe_round_trip_is_reproducible_and_old_v1_save_still_loads() 
 
 
 def test_tampered_recipe_selection_is_rejected() -> None:
-    selection = resolve_case_recipe("ashwick_manor_dual_spines", 0)
-    case = load_case(selection.selected_case_id)
+    selection, case = resolve_materialized_case_recipe("ashwick_manor_dual_spines", 0)
     location = load_location("ashwick_manor")
     engine = GameEngine.create(case, location, recipe_selection=selection)
 

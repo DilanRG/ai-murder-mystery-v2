@@ -30,8 +30,9 @@ from game.recipes import (
     ASSEMBLIES_DIR,
     CaseRecipeSelection,
     load_case_recipe,
-    resolve_case_recipe,
+    resolve_materialized_case_recipe,
 )
+from game.story_director import generate_story_presentation
 from game.portrayal import (
     ConstrainedPortrayalCoordinator,
     OpenRouterPortrayalAdapter,
@@ -77,16 +78,28 @@ class GameService:
         )
         return self.engine.view()
 
-    def start_recipe(self, *, recipe_id: str, seed: int) -> PlayerGameView:
-        """Resolve a seed to one complete authored spine, then start it."""
+    def start_recipe(
+        self,
+        *,
+        recipe_id: str,
+        seed: int,
+        character_ids: tuple[str, ...] | None = None,
+    ) -> PlayerGameView:
+        """Resolve a seed to a complete authored spine and compatible cast."""
 
-        selection = resolve_case_recipe(recipe_id, seed)
+        selection, case = resolve_materialized_case_recipe(
+            recipe_id,
+            seed,
+            selected_character_ids=character_ids,
+        )
         recipe = load_case_recipe(recipe_id)
-        return self.start(
-            case_id=selection.selected_case_id,
-            location_id=recipe.location_package_id,
+        location = load_location(recipe.location_package_id)
+        self.engine = GameEngine.create(
+            case,
+            location,
             recipe_selection=selection,
         )
+        return self.engine.view()
 
     async def start_async(
         self,
@@ -99,11 +112,31 @@ class GameService:
         async with self._action_lock:
             return self.start(case_id=case_id, location_id=location_id)
 
-    async def start_recipe_async(self, *, recipe_id: str, seed: int) -> PlayerGameView:
+    async def start_recipe_async(
+        self,
+        *,
+        recipe_id: str,
+        seed: int,
+        character_ids: tuple[str, ...] | None = None,
+    ) -> PlayerGameView:
         """Replace the session with a reproducible recipe selection under the lock."""
 
         async with self._action_lock:
-            return self.start_recipe(recipe_id=recipe_id, seed=seed)
+            selection, case = resolve_materialized_case_recipe(
+                recipe_id,
+                seed,
+                selected_character_ids=character_ids,
+            )
+            recipe = load_case_recipe(recipe_id)
+            location = load_location(recipe.location_package_id)
+            presentation = await generate_story_presentation(self.llm, case, location)
+            self.engine = GameEngine.create(
+                case,
+                location,
+                recipe_selection=selection,
+                story_presentation=presentation,
+            )
+            return self.engine.view()
 
     def state(self) -> PlayerGameView:
         return self._require_engine().view()
@@ -225,15 +258,32 @@ class GameService:
         recipes = []
         for recipe_id in list_content_ids(ASSEMBLIES_DIR):
             recipe = load_case_recipe(recipe_id)
+            cast_variations = 1
+            for slot in recipe.cast_slots:
+                cast_variations *= len(slot.candidate_card_ids)
+            total_variations = len(recipe.case_ids) * cast_variations
+            character_pool_size = sum(
+                len(slot.candidate_card_ids) for slot in recipe.cast_slots
+            )
             recipes.append(
                 {
                     "id": recipe.id,
                     "name": "Fresh authored Ashwick mystery",
                     "description": (
-                        f"A seed selects one of {len(recipe.case_ids)} complete, validated mysteries."
+                        f"A seed selects one of {len(recipe.case_ids)} complete mysteries "
+                        f"and a compatible eight-person cast from {character_pool_size} cards."
                     ),
                     "location_package_id": recipe.location_package_id,
-                    "variation_count": len(recipe.case_ids),
+                    "variation_count": total_variations,
+                    "cast_variation_count": cast_variations,
+                    "character_pool_size": character_pool_size,
+                    "cast_groups": [
+                        {
+                            "id": f"ensemble_{index + 1}",
+                            "candidate_character_ids": list(slot.candidate_card_ids),
+                        }
+                        for index, slot in enumerate(recipe.cast_slots)
+                    ],
                 }
             )
         return {
@@ -265,6 +315,9 @@ class GameService:
             "recipe_id": selection.recipe_id,
             "schema_version": selection.schema_version,
             "seed": selection.seed,
+            "cast_mode": selection.cast_mode,
+            "story_source": self.engine.story_presentation.source,
+            "story_status": "ready",
         }
 
     def debrief(self) -> dict[str, object]:
@@ -282,7 +335,7 @@ class GameService:
         )
         unique_evidence_ids = list(dict.fromkeys(evidence_ids))
         return {
-            "case_title": case.title,
+            "case_title": engine.view().case_title,
             "outcome": engine.view().result.model_dump(mode="json") if engine.view().result else None,
             "solution": {
                 "culprit_id": solution.culprit_id,
@@ -319,7 +372,10 @@ class GameService:
 
     @staticmethod
     def _display_name(character_id: str) -> str:
-        return " ".join(part.capitalize() for part in character_id.split("_"))
+        try:
+            return load_character_card(character_id).data.name
+        except (OSError, ValueError):
+            return " ".join(part.capitalize() for part in character_id.split("_"))
 
     @staticmethod
     def _public_emotional_state(runtime_state: str) -> str:

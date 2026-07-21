@@ -24,6 +24,7 @@ BACKEND = ROOT / "backend"
 STATIC = BACKEND / "static"
 SPEC_FILE = ROOT / "build" / "murder-mystery.spec"
 SMOKE_SCRIPT = ROOT / "build" / "smoke_packaged.py"
+BUILD_REQUIREMENTS = BACKEND / "requirements-build.lock"
 DIST = ROOT / "dist"
 
 
@@ -59,8 +60,18 @@ def step_pyinstaller() -> Path:
     try:
         import PyInstaller  # noqa: F401
     except ImportError:
-        print("  Installing PyInstaller...")
-        run([sys.executable, "-m", "pip", "install", "pyinstaller"])
+        print("  Installing hash-locked build dependencies...")
+        run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--require-hashes",
+                "-r",
+                str(BUILD_REQUIREMENTS),
+            ]
+        )
 
     exe_name = "ai-murder-mystery" + (".exe" if platform.system() == "Windows" else "")
     exe_path = DIST / exe_name

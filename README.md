@@ -6,13 +6,13 @@ The current build is a complete playable vertical slice. It needs no API key and
 
 ## What is playable
 
-- Two complete, hand-authored Ashwick Manor crime spines selected reproducibly from a player-visible seed.
-- Eight Character Card V3 characters plus a local JSON import, validation, draft, and export editor.
+- Two complete Ashwick Manor crime spines combined with automatic or manual eight-person casts, yielding 13,122 validated cast/story combinations.
+- Twenty-four Character Card V3 characters plus a local JSON import, validation, draft, and export editor.
 - Discovery, room-to-room investigation, body examination, searches, evidence review, and limited interviews.
 - A sourced notebook with facts, notes, timeline entries, contradictions, and suspects.
 - Ten-minute deterministic turns with NPC activity resolved from one immutable turn-start snapshot, including bounded private exchanges and evolving suspicion.
 - Replay-verified v2 local JSON saves, safe legacy-v1 resume, timeout, supported accusation, and post-game debrief.
-- Optional OpenRouter dialogue portrayal and NPC intent selection, both constrained to choices the engine has already authorized.
+- Optional OpenRouter story direction, dialogue portrayal, and NPC intent selection, all bounded by content the engine has already authorized.
 - Distinct, versioned noir portrait placeholders for the full cast, with accessible text fallbacks.
 - Responsive desktop and mobile browser UI.
 
@@ -24,7 +24,7 @@ Requirements: Python 3.12+ and Node.js 20+.
 cd backend
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python -m pip install --require-hashes -r requirements.txt
 
 cd ..\frontend
 npm install
@@ -44,7 +44,7 @@ From the repository root, after installing the backend dependencies:
 .\backend\.venv\Scripts\python.exe build\build.py
 ```
 
-The build produces `dist/ai-murder-mystery.exe` on Windows (or the corresponding extensionless binary on macOS/Linux). A build is considered successful only after the produced executable starts headlessly, loads all eight characters and both authored cases, advances a turn, and writes and reloads a v2 save. Use `--skip-frontend` only when `backend/static` is already current; `--skip-smoke` is available for build diagnostics, not release publishing.
+The build produces `dist/ai-murder-mystery.exe` on Windows (or the corresponding extensionless binary on macOS/Linux). A build is considered successful only after the produced executable starts headlessly, loads all 24 characters and both authored cases, advances a turn, and writes and reloads a v2 save. Use `--skip-frontend` only when `backend/static` is already current; `--skip-smoke` is available for build diagnostics, not release publishing.
 
 ## Test
 
@@ -54,12 +54,13 @@ $env:PYTHONDONTWRITEBYTECODE='1'
 .\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
 ```
 
-The 140-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
+The 181-test suite includes rules tests, transport-level truth-redaction tests, full solve paths for both authored mysteries, 24-card cast reachability, manual/automatic start contracts, recipe reproducibility, replay and tamper checks, constrained-AI boundaries, concurrent cancellation, release contracts, and adversarial input/state-atomicity cases. New boundaries are developed red-to-green and selectively mutation-tested so a passing test has demonstrated that it can catch the regression it claims to cover.
 
 ## Optional AI layer
 
-The core game is deterministic. In Settings, an OpenRouter key and model can optionally be supplied for two bounded jobs:
+The validated case engine is playable without a provider. In Settings, an OpenRouter key and model can optionally be supplied for three bounded jobs:
 
+- Direct a newly selected cast's public title, opening, atmosphere, room flavour, and social tensions without changing case truth.
 - Restyle an already-approved interview claim in character voice.
 - Select one opaque, engine-authored NPC action option for each living character in a single turn batch.
 
@@ -69,8 +70,8 @@ In a source checkout, the key is stored locally in `backend/user_config.json`, s
 
 ## Project map
 
-- `backend/game/` — canonical models, seeded recipes, turn engine, public projections, saves, card library, and portrayal boundary.
-- `backend/content/` — two Ashwick cases, their assembly recipe, the manor, and CCv3 cards.
+- `backend/game/` — canonical models, seeded cast/story recipes, bounded story director, turn engine, public projections, saves, card library, and portrayal boundary.
+- `backend/content/` — two Ashwick cases, their 24-card assembly recipe, the manor, and CCv3 cards.
 - `backend/routers/` — FastAPI transport.
 - `frontend/` — vanilla JavaScript/Vite interface.
 - `backend/tests/` — unit, contract, adversarial, and playthrough coverage.

@@ -23,6 +23,7 @@ from game.actions import (
     SearchIntent,
     parse_player_intent,
 )
+from game.content import load_character_card
 from game.accusation import evaluate_accusation_support
 from game.models import (
     ActionHistoryEntry,
@@ -55,6 +56,11 @@ from game.npc_planning import (
 from game.validator import validate_case
 from game.public_assets import portrait_url
 from game.recipes import CaseRecipeSelection
+from game.story_director import (
+    StoryPresentationPatch,
+    fallback_story_presentation,
+    validate_story_presentation,
+)
 from game.views import (
     PlayerGameView,
     PublicCharacterView,
@@ -67,6 +73,7 @@ from game.views import (
     PublicRoomView,
     PublicSceneActionView,
     PublicStatementView,
+    PublicStoryPresentationView,
     PublicTimelineEntryView,
     TurnResultView,
 )
@@ -101,6 +108,7 @@ class GameEngine:
         location: LocationPackage,
         *,
         recipe_selection: CaseRecipeSelection | None = None,
+        story_presentation: StoryPresentationPatch | None = None,
     ) -> None:
         report = validate_case(case, location)
         if not report.valid:
@@ -108,6 +116,11 @@ class GameEngine:
         self.case = case
         self.location = location
         self.recipe_selection = recipe_selection
+        self.story_presentation = (
+            fallback_story_presentation(case, location)
+            if story_presentation is None
+            else validate_story_presentation(story_presentation, case, location)
+        )
         self.action_history: list[ActionHistoryEntry] | None = []
         self.runtime = self._initial_runtime()
 
@@ -118,8 +131,14 @@ class GameEngine:
         location: LocationPackage,
         *,
         recipe_selection: CaseRecipeSelection | None = None,
+        story_presentation: StoryPresentationPatch | None = None,
     ) -> "GameEngine":
-        return cls(case, location, recipe_selection=recipe_selection)
+        return cls(
+            case,
+            location,
+            recipe_selection=recipe_selection,
+            story_presentation=story_presentation,
+        )
 
     def _initial_runtime(self) -> WorldRuntimeState:
         characters = {
@@ -204,7 +223,7 @@ class GameEngine:
         room = self.location.rooms[self.runtime.player_room_id]
         exits = sorted(self._unlocked_destinations(room.id))
         present = [
-            self._character_view(character_id)
+            self._character_view(character_id, expose_emotion=True)
             for character_id in sorted(self.runtime.characters)
             if self.runtime.characters[character_id].alive
             and self.runtime.characters[character_id].current_room_id == room.id
@@ -225,7 +244,21 @@ class GameEngine:
         ]
         interview = self.runtime.active_interview
         return PlayerGameView(
-            case_title=self.case.title,
+            case_title=self.story_presentation.title,
+            story=PublicStoryPresentationView(
+                source=self.story_presentation.source,
+                tagline=self.story_presentation.tagline,
+                public_opening=self.story_presentation.public_opening,
+                atmosphere=self.story_presentation.atmosphere,
+                character_tensions={
+                    item.character_id: item.public_hook
+                    for item in self.story_presentation.character_tensions
+                },
+                room_flavour={
+                    item.room_id: item.text
+                    for item in self.story_presentation.room_flavour
+                },
+            ),
             phase=self.runtime.phase.value,
             turn=self.runtime.turn,
             in_game_minute=self.runtime.in_game_minute,
@@ -233,7 +266,14 @@ class GameEngine:
             player_room=PublicRoomView(
                 id=room.id,
                 name=room.name,
-                description=room.description,
+                description=next(
+                    (
+                        item.text
+                        for item in self.story_presentation.room_flavour
+                        if item.room_id == room.id
+                    ),
+                    room.description,
+                ),
                 exits=exits,
                 searchable_objects=[
                     {"id": object_id, "name": self.location.searchable_objects[object_id].name}
@@ -337,6 +377,7 @@ class GameEngine:
         clone.case = self.case
         clone.location = self.location
         clone.recipe_selection = self.recipe_selection
+        clone.story_presentation = self.story_presentation
         clone.action_history = (
             [entry.model_copy(deep=True) for entry in self.action_history]
             if self.action_history is not None
@@ -670,8 +711,10 @@ class GameEngine:
             | set(intent.opportunity_evidence_ids)
             | set(intent.timeline_evidence_ids)
         )
-        selected = submitted_evidence if submitted_evidence else set(self.runtime.player_knowledge.discovered_evidence_ids)
-        selected &= self.runtime.player_knowledge.discovered_evidence_ids
+        selected = (
+            submitted_evidence
+            & self.runtime.player_knowledge.discovered_evidence_ids
+        )
         solution = self.case.solution
         support_flags = evaluate_accusation_support(
             self.case,
@@ -1062,13 +1105,31 @@ class GameEngine:
             ],
         )
 
-    def _character_view(self, character_id: str) -> PublicCharacterView:
+    def _character_view(
+        self,
+        character_id: str,
+        *,
+        expose_emotion: bool = False,
+    ) -> PublicCharacterView:
         overlay = self.case.overlays[character_id]
+        public_hook = next(
+            (
+                item.public_hook
+                for item in self.story_presentation.character_tensions
+                if item.character_id == character_id
+            ),
+            overlay.public_relationship_to_victim,
+        )
         return PublicCharacterView(
             id=character_id,
             name=self._name(character_id),
-            description=overlay.public_relationship_to_victim,
+            description=public_hook,
             portrait_url=portrait_url(character_id),
+            emotional_state=(
+                self.runtime.characters[character_id].emotional_state
+                if expose_emotion
+                else ""
+            ),
         )
 
     def _evidence_view(self, evidence_id: str) -> PublicEvidenceView:
@@ -1083,14 +1144,13 @@ class GameEngine:
         item = self.location.items[item_id]
         return PublicItemView(id=item_id, name=item.name, description=item.description)
 
-    @staticmethod
-    def _statement_view(statement: StatementRecord) -> PublicStatementView:
+    def _statement_view(self, statement: StatementRecord) -> PublicStatementView:
         return PublicStatementView(
             id=statement.id,
             turn=statement.turn,
             minute=statement.minute,
             speaker_id=statement.speaker_id,
-            speaker_name=" ".join(part.capitalize() for part in statement.speaker_id.split("_")),
+            speaker_name=self._name(statement.speaker_id),
             text=statement.claim,
             topic=statement.topic,
         )
@@ -1118,7 +1178,10 @@ class GameEngine:
         )
 
     def _name(self, character_id: str) -> str:
-        return " ".join(part.capitalize() for part in character_id.split("_"))
+        try:
+            return load_character_card(character_id).data.name
+        except (OSError, ValueError):
+            return " ".join(part.capitalize() for part in character_id.split("_"))
 
     @staticmethod
     def _time_label(minute: int) -> str:

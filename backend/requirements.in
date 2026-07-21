@@ -1,0 +1,8 @@
+# Direct runtime dependencies. Compile with:
+# uv pip compile requirements.in --universal --python-version 3.12 --generate-hashes -o requirements.txt
+fastapi==0.135.1
+uvicorn[standard]==0.41.0
+httpx==0.28.1
+pydantic==2.12.5
+python-multipart==0.0.22
+aiofiles==25.1.0

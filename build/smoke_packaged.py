@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -70,35 +71,112 @@ def _wait_for_health(base_url: str, process: subprocess.Popen[object]) -> None:
     raise RuntimeError(f"packaged server did not become healthy: {last_error}")
 
 
+def _cleanup_data_dir(data_dir: Path, *, attempts: int = 50, delay: float = 0.1) -> None:
+    """Remove smoke data after Windows releases terminated process handles.
+
+    ``taskkill /T`` can return a fraction before Windows releases every handle.
+    That must not turn a successful executable verification into a false build
+    failure.  We retry for five seconds and retain the directory as a diagnostic
+    if another process still owns it.
+    """
+
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(data_dir)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as error:
+            if attempt + 1 == attempts:
+                print(
+                    f"[WARN] Could not remove packaged-smoke data {data_dir}: {error}",
+                    file=sys.stderr,
+                )
+                return
+            time.sleep(delay)
+
+
+def _public_cast_ids(payload: dict[str, Any]) -> set[str]:
+    game = payload.get("game", {})
+    cast_ids = {
+        str(suspect["id"])
+        for suspect in game.get("suspects", [])
+    }
+    opening = game.get("opening")
+    if isinstance(opening, dict):
+        cast_ids.add(str(opening["victim_id"]))
+    return cast_ids
+
+
 def smoke(executable: Path) -> None:
     if not executable.is_file():
         raise FileNotFoundError(f"packaged executable was not found: {executable}")
 
-    with tempfile.TemporaryDirectory(prefix="ashwick-packaged-smoke-") as data_dir:
+    data_dir = Path(tempfile.mkdtemp(prefix="ashwick-packaged-smoke-"))
+    try:
         port = _free_port()
         base_url = f"http://127.0.0.1:{port}"
         environment = dict(os.environ)
-        environment["ASHWICK_TRUST_DATA_DIR"] = data_dir
-        log_path = Path(data_dir) / "server.log"
+        environment["ASHWICK_TRUST_DATA_DIR"] = str(data_dir)
         creation_flags = (
             subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         )
-        with log_path.open("w+", encoding="utf-8") as log:
-            process = subprocess.Popen(
-                [str(executable), "--no-browser", "--port", str(port)],
-                cwd=ROOT,
-                env=environment,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                creationflags=creation_flags,
-            )
+        process = subprocess.Popen(
+            [str(executable), "--no-browser", "--port", str(port)],
+            cwd=ROOT,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=creation_flags,
+        )
+        try:
             try:
                 _wait_for_health(base_url, process)
                 catalog = _request_json(base_url, "/api/game/catalog")
-                if len(catalog.get("characters", [])) != 8:
-                    raise RuntimeError("packaged catalog did not load all eight CCv3 cards")
-                if catalog.get("recipes", [{}])[0].get("variation_count") != 2:
-                    raise RuntimeError("packaged catalog did not load both case spines")
+                if len(catalog.get("characters", [])) != 24:
+                    raise RuntimeError("packaged catalog did not load all 24 CCv3 cards")
+                recipe = catalog.get("recipes", [{}])[0]
+                if recipe.get("variation_count") != 13_122:
+                    raise RuntimeError("packaged catalog did not load all cast/story combinations")
+                if recipe.get("character_pool_size") != 24:
+                    raise RuntimeError("packaged catalog character pool metadata is incomplete")
+
+                automatic = _request_json(
+                    base_url,
+                    "/api/game/new",
+                    {"recipe_id": recipe["id"], "seed": 42},
+                )
+                if len(_public_cast_ids(automatic)) != 8:
+                    raise RuntimeError("packaged automatic story did not freeze an eight-card cast")
+                if automatic.get("recipe", {}).get("cast_mode") != "automatic":
+                    raise RuntimeError("packaged automatic story lost its cast-selection mode")
+                story = automatic.get("game", {}).get("story", {})
+                if not story.get("public_opening") or not story.get("atmosphere"):
+                    raise RuntimeError("packaged recipe story has no generated presentation")
+
+                groups = recipe.get("cast_groups", [])
+                if len(groups) != 8:
+                    raise RuntimeError("packaged manual cast groups are incomplete")
+                manual_cast = [
+                    group["candidate_character_ids"][1]
+                    for group in groups
+                ]
+                manual = _request_json(
+                    base_url,
+                    "/api/game/new",
+                    {
+                        "recipe_id": recipe["id"],
+                        "seed": 43,
+                        "character_ids": manual_cast,
+                    },
+                )
+                if _public_cast_ids(manual) != set(manual_cast):
+                    raise RuntimeError("packaged manual story did not use the selected cast exactly")
+                if manual.get("recipe", {}).get("cast_mode") != "manual":
+                    raise RuntimeError("packaged manual story lost its cast-selection mode")
 
                 for case_id in ("ashwick_sample", "ashwick_quiet_vow"):
                     started = _request_json(
@@ -123,7 +201,7 @@ def smoke(executable: Path) -> None:
                 )
                 if saved.get("schema_version") != 2:
                     raise RuntimeError("packaged game did not write a v2 save")
-                save_path = Path(data_dir) / "saves" / "packaged-smoke.json"
+                save_path = data_dir / "saves" / "packaged-smoke.json"
                 if not save_path.is_file():
                     raise RuntimeError("packaged save was not written to user data")
                 loaded = _request_json(
@@ -133,13 +211,6 @@ def smoke(executable: Path) -> None:
                 )
                 if loaded.get("status") != "loaded":
                     raise RuntimeError("packaged v2 save did not reload")
-            except Exception:
-                log.flush()
-                log.seek(0)
-                output = log.read()[-4_000:]
-                if output:
-                    print(output, file=sys.stderr)
-                raise
             finally:
                 if sys.platform == "win32" and process.poll() is None:
                     subprocess.run(
@@ -155,6 +226,16 @@ def smoke(executable: Path) -> None:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
+        except Exception:
+            output = process.stdout.read()[-4_000:] if process.stdout else ""
+            if output:
+                print(output, file=sys.stderr)
+            raise
+        finally:
+            if process.stdout is not None:
+                process.stdout.close()
+    finally:
+        _cleanup_data_dir(data_dir)
 
 
 def main() -> None:
