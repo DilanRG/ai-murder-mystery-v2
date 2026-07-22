@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any, Literal, Mapping, Sequence
 
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
+    EXPECTED_REPLACED_PAIR_ID,
+    EXPECTED_REVISION7_PAIR_IDS,
     PRIVATE_ARTIFACT_ROOT,
     ExperimentSafetyError,
     validate_manifest,
@@ -102,6 +105,8 @@ def _validate_selected_outcome(
         or outcome.get("cast_ids") != pair["cast_ids"]
     ):
         raise ExperimentSafetyError("Admitted generation outcome differs from its frozen cell.")
+    if pair["pair_id"] == "R1" and outcome.get("reserve_replaces_pair_id") != EXPECTED_REPLACED_PAIR_ID:
+        raise ExperimentSafetyError("Reserve outcome lacks the frozen P1 replacement provenance.")
     path = _private_artifact_path(outcome.get("canonical_artifact"), artifact_root)
     try:
         envelope = SaveEnvelope.model_validate_json(path.read_text(encoding="utf-8"))
@@ -139,7 +144,28 @@ def select_first_admitted_cases(
     """Select first admitted Pro and Flash strictly in frozen manifest order."""
 
     validate_manifest(manifest)
-    if generation_results.get("git_sha") != git_sha:
+    manifest_digest = sha256(
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    expected_activation = {
+        "reserve_pair_id": "R1",
+        "replaces_pair_id": EXPECTED_REPLACED_PAIR_ID,
+        "invalidated_cell": "P1",
+        "reason": "revision_6_controller_interruption",
+    }
+    if (
+        generation_results.get("git_sha") != git_sha
+        or generation_results.get("experiment_revision") != manifest["manifest_revision"]
+        or generation_results.get("manifest_sha256") != manifest_digest
+        or generation_results.get("pair_ids") != list(EXPECTED_REVISION7_PAIR_IDS)
+        or generation_results.get("reserve_activation") != expected_activation
+        or generation_results.get("status") != "completed"
+    ):
         raise ExperimentSafetyError("Generation results belong to a different code revision.")
     outcomes = generation_results.get("outcomes")
     if not isinstance(outcomes, list):
@@ -153,9 +179,26 @@ def select_first_admitted_cases(
             raise ExperimentSafetyError("Generation results contain a duplicate cell.")
         indexed[key] = raw
 
+    pairs_by_id = {
+        str(pair["pair_id"]): pair
+        for pair in [*manifest["generation_pairs"], manifest["reserve_pair"]]
+    }
+    expected_cells = [
+        (pair_id, str(model_key))
+        for pair_id in EXPECTED_REVISION7_PAIR_IDS
+        for model_key in pairs_by_id[pair_id]["model_order"]
+    ]
+    if list(indexed) != expected_cells:
+        raise ExperimentSafetyError("Generation results do not contain the exact frozen matrix.")
+    for model_key in ("pro", "flash"):
+        reserve_outcome = indexed[("R1", model_key)]
+        if reserve_outcome.get("reserve_replaces_pair_id") != EXPECTED_REPLACED_PAIR_ID:
+            raise ExperimentSafetyError("Both reserve cells require frozen P1 replacement provenance.")
+
     selected: dict[str, SelectedGeneratedCase] = {}
     for model_key in ("pro", "flash"):
-        for pair in manifest["generation_pairs"]:
+        for pair_id in EXPECTED_REVISION7_PAIR_IDS:
+            pair = pairs_by_id[pair_id]
             outcome = indexed.get((str(pair["pair_id"]), model_key))
             if outcome is not None and outcome.get("admitted") is True:
                 selected[model_key] = _validate_selected_outcome(

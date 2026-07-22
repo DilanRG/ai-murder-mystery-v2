@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,7 @@ def _observer(tmp_path: Path) -> DeepSeekRequestObserver:
     return DeepSeekRequestObserver(
         ledger=DeepSeekExperimentLedger(tmp_path / "ledger.jsonl"),
         metrics_path=tmp_path / "requests.jsonl",
-        context=RunContext(6, "sha", "run", "preflight"),
+        context=RunContext(7, "sha", "run", "preflight"),
     )
 
 
@@ -68,6 +69,26 @@ def test_verified_response_is_settled_and_sanitized(tmp_path: Path) -> None:
     assert observer.last_record["accounting_mode"] == "direct_token_meter"
     assert "content" not in observer.last_record
     assert observer.ledger.snapshot()["settled_usd"] > 0
+    intents = [
+        json.loads(line)
+        for line in (tmp_path / "request_intents.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert intents == [
+        {
+            "experiment_revision": 7,
+            "git_sha": "sha",
+            "pair_id": "",
+            "phase": "preflight",
+            "request_id": intents[0]["request_id"],
+            "requested_model": PRO_MODEL_SLUG,
+            "run_id": "run",
+            "schema_version": 1,
+            "started_at": "2026-07-21T00:00:00+00:00",
+            "task_role": "byok_preflight",
+            "transport_request_id": "transport-request",
+        }
+    ]
+    assert "content" not in intents[0]
 
 
 def test_non_direct_request_is_refused_before_reservation(tmp_path: Path) -> None:

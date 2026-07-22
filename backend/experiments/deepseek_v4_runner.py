@@ -25,8 +25,8 @@ EXPECTED_MODELS = {
     "flash": "deepseek-v4-flash",
 }
 EXPECTED_RESOLVED_MODELS = dict(EXPECTED_MODELS)
-EXPECTED_MANIFEST_REVISION = 6
-EXPECTED_GIT_CHECKPOINT = "5a239f4c104e1be53658768fcdd47078e1963075"
+EXPECTED_MANIFEST_REVISION = 7
+EXPECTED_GIT_CHECKPOINT = "0166ca14c80a5e84c1322e93667d71eea1461aa6"
 EXPECTED_GATEWAY = "deepseek_direct"
 EXPECTED_ROUTING = None
 EXPECTED_ROLE_MAX_TOKENS = {
@@ -38,6 +38,74 @@ EXPECTED_ROLE_MAX_TOKENS = {
     "private_interview_selection": 80,
     "portrayal": 220,
 }
+EXPECTED_GENERATION_PAIRS = [
+    {
+        "pair_id": "P1",
+        "seed": 2026072101,
+        "model_order": ["flash", "pro"],
+        "cast_ids": [
+            "captain_marcus_drake",
+            "celia_marlowe",
+            "countess_beatrice_harrow",
+            "dr_celestine_moreau",
+            "edgar_blackwood",
+            "inspector_elena_hayes",
+            "lady_helena_wren",
+            "zara_okonkwo",
+        ],
+    },
+    {
+        "pair_id": "P2",
+        "seed": 2026072102,
+        "model_order": ["pro", "flash"],
+        "cast_ids": [
+            "chef_armand_dubois",
+            "chef_kenji_watanabe",
+            "chef_luca_bianchi",
+            "commander_elias_ward",
+            "dr_amara_sen",
+            "inspector_maeve_quinn",
+            "major_hugo_st_clair",
+            "thomas_vale",
+        ],
+    },
+    {
+        "pair_id": "P3",
+        "seed": 2026072103,
+        "model_order": ["flash", "pro"],
+        "cast_ids": [
+            "dr_imogen_frost",
+            "gabriel_cross",
+            "ines_costa",
+            "inspector_nadia_singh",
+            "lady_vivienne_ashford",
+            "leila_haddad",
+            "naomi_price",
+            "sabrina_voss",
+        ],
+    },
+]
+EXPECTED_RESERVE_PAIR = {
+    "pair_id": "R1",
+    "seed": 2026072104,
+    "model_order": ["pro", "flash"],
+    "cast_ids": [
+        "captain_marcus_drake",
+        "chef_kenji_watanabe",
+        "commander_elias_ward",
+        "dr_imogen_frost",
+        "gabriel_cross",
+        "inspector_elena_hayes",
+        "leila_haddad",
+        "naomi_price",
+    ],
+    "activation_rule": (
+        "Use only as a balanced replacement for a failed original pair; retain original "
+        "failures in the report and stay below the hard operational stop."
+    ),
+}
+EXPECTED_REVISION7_PAIR_IDS = ("P2", "P3", "R1")
+EXPECTED_REPLACED_PAIR_ID = "P1"
 
 
 class ExperimentSafetyError(RuntimeError):
@@ -74,15 +142,15 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Reject changes that would make the paired measurement unfair or unsafe."""
 
     if manifest.get("manifest_revision") != EXPECTED_MANIFEST_REVISION:
-        raise ExperimentSafetyError("Only frozen manifest revision 6 is accepted.")
+        raise ExperimentSafetyError("Only frozen manifest revision 7 is accepted.")
     if manifest.get("git_checkpoint") != EXPECTED_GIT_CHECKPOINT:
         raise ExperimentSafetyError("Manifest must retain the revision-4 direct-provider checkpoint.")
     if (
-        manifest.get("supersedes_revision") != 5
+        manifest.get("supersedes_revision") != 6
         or manifest.get("gateway") != EXPECTED_GATEWAY
         or manifest.get("model_fallbacks") != []
     ):
-        raise ExperimentSafetyError("Manifest revision 6 must require direct DeepSeek without fallback.")
+        raise ExperimentSafetyError("Manifest revision 7 must require direct DeepSeek without fallback.")
     if manifest.get("models") != EXPECTED_MODELS:
         raise ExperimentSafetyError("Manifest model slugs must be the exact DeepSeek V4 pair.")
     if manifest.get("resolved_models") != EXPECTED_RESOLVED_MODELS:
@@ -144,16 +212,13 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         raise ExperimentSafetyError("Direct DeepSeek settlement prices must remain frozen.")
 
     pairs = manifest.get("generation_pairs")
-    if not isinstance(pairs, list) or [pair.get("pair_id") for pair in pairs] != ["P1", "P2", "P3"]:
-        raise ExperimentSafetyError("Manifest must declare P1, P2, and P3 in frozen order.")
+    if pairs != EXPECTED_GENERATION_PAIRS:
+        raise ExperimentSafetyError("Manifest generation pairs differ from the frozen catalog.")
+    if manifest.get("reserve_pair") != EXPECTED_RESERVE_PAIR:
+        raise ExperimentSafetyError("Manifest reserve pair differs from the frozen catalog.")
     all_seeds: set[int] = set()
     for pair in [*pairs, manifest.get("reserve_pair")]:
         _validate_pair(pair, all_seeds)
-    reserve = manifest["reserve_pair"]
-    if reserve.get("pair_id") != "R1":
-        raise ExperimentSafetyError("Manifest reserve pair must be R1.")
-    if [pair.get("model_order") for pair in pairs] != [["flash", "pro"], ["pro", "flash"], ["flash", "pro"]]:
-        raise ExperimentSafetyError("Manifest must retain the declared alternating model order.")
 
 
 def _validate_pair(pair: Any, all_seeds: set[int]) -> None:

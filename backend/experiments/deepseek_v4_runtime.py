@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -73,10 +74,13 @@ class DeepSeekRequestObserver:
         ledger: DeepSeekExperimentLedger,
         metrics_path: Path,
         context: RunContext,
+        record_observer: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> None:
         self.ledger = ledger
         self.metrics_path = metrics_path
+        self.intent_path = metrics_path.with_name("request_intents.jsonl")
         self.context = context
+        self.record_observer = record_observer
         self._reservations: dict[str, Reservation] = {}
         self._lock = threading.Lock()
         self.last_record: dict[str, Any] | None = None
@@ -109,6 +113,33 @@ class DeepSeekRequestObserver:
             allow_fallbacks=False,
         )
         self._reservations[request_id] = reservation
+        intent_record = {
+            "schema_version": 1,
+            "experiment_revision": self.context.experiment_revision,
+            "git_sha": self.context.git_sha,
+            "run_id": self.context.run_id,
+            "phase": self.context.phase,
+            "pair_id": self.context.pair_id,
+            "request_id": reservation.request_id,
+            "transport_request_id": request_id,
+            "task_role": str(data.get("task_role", "")),
+            "requested_model": model,
+            "started_at": str(data.get("started_at", "")),
+        }
+        try:
+            encoded = (
+                json.dumps(intent_record, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            self.intent_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._lock:
+                with self.intent_path.open("ab") as handle:
+                    handle.write(encoded)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+        except OSError as error:
+            raise ExperimentSafetyError(
+                "Could not durably record the measured request intent."
+            ) from error
 
     async def _settle_or_record_failure(self, data: Mapping[str, Any]) -> None:
         transport_request_id = str(data.get("request_id", ""))
@@ -256,6 +287,8 @@ class DeepSeekRequestObserver:
                 handle.flush()
             self.last_record = dict(record)
             self.records.append(dict(record))
+            if self.record_observer is not None:
+                self.record_observer(dict(record))
 
 
 class SequentialMeasuredClient:

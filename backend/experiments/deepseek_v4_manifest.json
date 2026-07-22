@@ -1,10 +1,10 @@
 {
   "experiment_id": "deepseek-v4-phase1",
-  "manifest_revision": 6,
+  "manifest_revision": 7,
   "frozen_at": "2026-07-22",
-  "git_checkpoint": "5a239f4c104e1be53658768fcdd47078e1963075",
-  "supersedes_revision": 5,
-  "revision_reason": "Replace the repeatedly rejected one-shot case document with four schema-validated stages sharing a cache-stable prefix; preserve identical stage limits for Pro and Flash.",
+  "git_checkpoint": "0166ca14c80a5e84c1322e93667d71eea1461aa6",
+  "supersedes_revision": 6,
+  "revision_reason": "Invalidate the operationally interrupted revision-6 P1 cell, add explicit durable pair selection and predeclared reserve activation, and preserve the staged prompt, schema, limits, and fairness settings unchanged.",
   "invalidated_preflight_attempts": [
     {
       "revision": 1,
@@ -35,6 +35,12 @@
       "count": 2,
       "provider_generation_ids_returned": 2,
       "reason": "Both direct preflights passed, but the one-shot generation contract was superseded after Flash produced three candidates that all failed admission."
+    },
+    {
+      "revision": 6,
+      "count": 6,
+      "provider_generation_ids_returned": 6,
+      "reason": "Exact direct preflights passed, but the first P1/Flash core stage was followed by a controller timeout and an unresolved second reservation. P1 is retained as an invalidated operational cell and the predeclared reserve replaces it under revision 7."
     }
   ],
   "location_package_id": "ashwick_manor",

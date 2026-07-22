@@ -36,6 +36,7 @@ chroma_data/
 # Artifacts
 .gemini/
 .private/
+.codex-remote-attachments/
 
 # Misc
 .agent/

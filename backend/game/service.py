@@ -8,6 +8,7 @@ they never hand the canonical case or runtime models to a client.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +74,7 @@ class GameService:
         scenario_llm: Any | None = None,
         npc_llm: Any | None = None,
         portrayal_llm: Any | None = None,
+        generation_attempt_observer: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         self.save_root = Path(save_root)
         # ``llm`` remains the production/default provider for compatibility.
@@ -85,6 +87,7 @@ class GameService:
         self.engine: GameEngine | None = None
         self._generation_metadata: dict[str, object] | None = None
         self._generation_attempt_diagnostics: list[dict[str, object]] = []
+        self._generation_attempt_observer = generation_attempt_observer
         self._runtime_diagnostics: list[dict[str, object]] = []
         self._action_lock = asyncio.Lock()
 
@@ -121,6 +124,20 @@ class GameService:
         if self._portrayal_llm is not None:
             return self._portrayal_llm
         return self._npc_provider()
+
+    def set_generation_attempt_observer(
+        self,
+        observer: Callable[[dict[str, object]], None] | None,
+    ) -> None:
+        """Attach an experiment-only durable observer without changing game truth."""
+
+        self._generation_attempt_observer = observer
+
+    def _record_generation_attempt(self, record: dict[str, object]) -> None:
+        snapshot = dict(record)
+        self._generation_attempt_diagnostics.append(snapshot)
+        if self._generation_attempt_observer is not None:
+            self._generation_attempt_observer(dict(snapshot))
 
     def start(
         self,
@@ -234,7 +251,7 @@ class GameService:
                 location=location,
                 seed=seed,
                 difficulty=difficulty,
-                attempt_observer=self._generation_attempt_diagnostics.append,
+                attempt_observer=self._record_generation_attempt,
             )
             candidate = GameEngine.create(
                 generated.case,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -28,7 +29,7 @@ GIT_SHA = "d" * 40
 def _preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 6,
+            "experiment_revision": 7,
             "git_sha": GIT_SHA,
             "model": model,
             "actual_model": model,
@@ -67,7 +68,7 @@ def _admitted_outcome(
     path = root / relative_path
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(snapshot_engine(engine).model_dump_json(indent=2), encoding="utf-8")
-    return {
+    outcome = {
         "pair_id": pair["pair_id"],
         "model_key": model_key,
         "model": EXPECTED_MODELS[model_key],
@@ -78,18 +79,73 @@ def _admitted_outcome(
         "case_fingerprint": case_content_fingerprint(generated.case),
         "canonical_artifact": str(relative_path),
     }
+    if pair["pair_id"] == "R1":
+        outcome["reserve_replaces_pair_id"] = "P1"
+    return outcome
 
 
-def test_selector_uses_first_admitted_manifest_pair_not_results_order(tmp_path: Path) -> None:
-    manifest = load_manifest()
-    p1, p2, p3 = manifest["generation_pairs"]
-    pro_later = _admitted_outcome(tmp_path, pair=p2, model_key="pro")
-    pro_first = _admitted_outcome(tmp_path, pair=p1, model_key="pro")
-    flash_first = _admitted_outcome(tmp_path, pair=p3, model_key="flash")
-    results = {
-        "git_sha": GIT_SHA,
-        "outcomes": [pro_later, flash_first, pro_first],
+def _generation_results(
+    root: Path,
+    *,
+    manifest: dict[str, object],
+    admitted_cells: set[tuple[str, str]],
+) -> dict[str, object]:
+    pairs_by_id = {
+        pair["pair_id"]: pair
+        for pair in [*manifest["generation_pairs"], manifest["reserve_pair"]]
     }
+    outcomes: list[dict[str, object]] = []
+    for pair_id in ("P2", "P3", "R1"):
+        pair = pairs_by_id[pair_id]
+        for model_key in pair["model_order"]:
+            if (pair_id, model_key) in admitted_cells:
+                outcome = _admitted_outcome(root, pair=pair, model_key=model_key)
+            else:
+                outcome = {
+                    "pair_id": pair_id,
+                    "model_key": model_key,
+                    "model": EXPECTED_MODELS[model_key],
+                    "seed": pair["seed"],
+                    "cast_ids": pair["cast_ids"],
+                    "location_id": "ashwick_manor",
+                    "admitted": False,
+                    "failure_code": "invalid_generated_case",
+                }
+                if pair_id == "R1":
+                    outcome["reserve_replaces_pair_id"] = "P1"
+            outcomes.append(outcome)
+    manifest_digest = sha256(
+        json.dumps(
+            manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema_version": 2,
+        "experiment_revision": 7,
+        "git_sha": GIT_SHA,
+        "manifest_sha256": manifest_digest,
+        "pair_ids": ["P2", "P3", "R1"],
+        "reserve_activation": {
+            "reserve_pair_id": "R1",
+            "replaces_pair_id": "P1",
+            "invalidated_cell": "P1",
+            "reason": "revision_6_controller_interruption",
+        },
+        "status": "completed",
+        "outcomes": outcomes,
+    }
+
+
+def test_selector_uses_first_admitted_revision7_pair_order(tmp_path: Path) -> None:
+    manifest = load_manifest()
+    results = _generation_results(
+        tmp_path,
+        manifest=manifest,
+        admitted_cells={("P2", "pro"), ("P3", "flash"), ("R1", "pro")},
+    )
 
     selected = select_first_admitted_cases(
         manifest=manifest,
@@ -98,7 +154,7 @@ def test_selector_uses_first_admitted_manifest_pair_not_results_order(tmp_path: 
         artifact_root=tmp_path,
     )
 
-    assert selected["pro"].pair_id == "P1"
+    assert selected["pro"].pair_id == "P2"
     assert selected["flash"].pair_id == "P3"
     cells = build_crossed_cells(selected)
     assert [
@@ -112,18 +168,57 @@ def test_selector_uses_first_admitted_manifest_pair_not_results_order(tmp_path: 
     ]
 
 
+def test_selector_uses_activated_reserve_after_original_pairs(tmp_path: Path) -> None:
+    manifest = load_manifest()
+    results = _generation_results(
+        tmp_path,
+        manifest=manifest,
+        admitted_cells={("R1", "pro"), ("R1", "flash")},
+    )
+
+    selected = select_first_admitted_cases(
+        manifest=manifest,
+        generation_results=results,
+        git_sha=GIT_SHA,
+        artifact_root=tmp_path,
+    )
+
+    assert selected["pro"].pair_id == "R1"
+    assert selected["flash"].pair_id == "R1"
+
+
+def test_selector_rejects_reserve_without_both_p1_replacement_markers(
+    tmp_path: Path,
+) -> None:
+    manifest = load_manifest()
+    results = _generation_results(
+        tmp_path,
+        manifest=manifest,
+        admitted_cells={("R1", "pro"), ("R1", "flash")},
+    )
+    results["outcomes"][-1].pop("reserve_replaces_pair_id")
+
+    with pytest.raises(ExperimentSafetyError, match="Both reserve cells"):
+        select_first_admitted_cases(
+            manifest=manifest,
+            generation_results=results,
+            git_sha=GIT_SHA,
+            artifact_root=tmp_path,
+        )
+
+
 def test_crossed_sessions_restore_pristine_truth_and_change_only_runtime_model(
     tmp_path: Path,
 ) -> None:
     manifest = load_manifest()
-    pair = manifest["generation_pairs"][0]
-    outcomes = [
-        _admitted_outcome(tmp_path, pair=pair, model_key="pro"),
-        _admitted_outcome(tmp_path, pair=pair, model_key="flash"),
-    ]
+    results = _generation_results(
+        tmp_path,
+        manifest=manifest,
+        admitted_cells={("P2", "pro"), ("P2", "flash")},
+    )
     selected = select_first_admitted_cases(
         manifest=manifest,
-        generation_results={"git_sha": GIT_SHA, "outcomes": outcomes},
+        generation_results=results,
         git_sha=GIT_SHA,
         artifact_root=tmp_path,
     )
@@ -175,23 +270,17 @@ def test_crossed_sessions_restore_pristine_truth_and_change_only_runtime_model(
 
 def test_selector_rejects_canonical_artifact_path_escape(tmp_path: Path) -> None:
     manifest = load_manifest()
-    pair = manifest["generation_pairs"][0]
-    outcome = {
-        "pair_id": pair["pair_id"],
-        "model_key": "pro",
-        "model": EXPECTED_MODELS["pro"],
-        "seed": pair["seed"],
-        "cast_ids": pair["cast_ids"],
-        "location_id": "ashwick_manor",
-        "admitted": True,
-        "case_fingerprint": "0" * 64,
-        "canonical_artifact": "../outside.json",
-    }
+    results = _generation_results(
+        tmp_path,
+        manifest=manifest,
+        admitted_cells={("P2", "pro"), ("P2", "flash")},
+    )
+    results["outcomes"][0]["canonical_artifact"] = "../outside.json"
 
     with pytest.raises(ExperimentSafetyError, match="private root"):
         select_first_admitted_cases(
             manifest=manifest,
-            generation_results={"git_sha": GIT_SHA, "outcomes": [outcome]},
+            generation_results=results,
             git_sha=GIT_SHA,
             artifact_root=tmp_path,
         )

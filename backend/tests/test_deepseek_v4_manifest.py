@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 
 import pytest
@@ -15,6 +16,7 @@ from experiments.deepseek_v4_runner import (
     execute_with_verified_preflights,
     load_manifest,
     resolve_clean_git_sha,
+    validate_manifest,
     verify_preflights,
 )
 
@@ -22,7 +24,7 @@ from experiments.deepseek_v4_runner import (
 def _verified_preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 6,
+            "experiment_revision": 7,
             "model": slug,
             "actual_model": slug,
             "upstream_provider": "deepseek",
@@ -40,8 +42,8 @@ def _verified_preflights() -> dict[str, object]:
 def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     manifest = load_manifest()
 
-    assert manifest["manifest_revision"] == 6
-    assert manifest["git_checkpoint"] == "5a239f4c104e1be53658768fcdd47078e1963075"
+    assert manifest["manifest_revision"] == 7
+    assert manifest["git_checkpoint"] == "0166ca14c80a5e84c1322e93667d71eea1461aa6"
     assert manifest["gateway"] == "deepseek_direct"
     assert manifest["model_fallbacks"] == []
     assert manifest["runtime_settings"]["sampler_defaults"]["top_k"] is None
@@ -89,6 +91,31 @@ def test_dry_run_is_sanitized_and_makes_no_provider_calls() -> None:
     assert summary["provider_calls_made"] == 0
     assert summary["pairs"] == ["P1", "P2", "P3"]
     assert "key" not in json.dumps(summary).lower()
+
+
+@pytest.mark.parametrize(
+    ("target", "field", "value"),
+    [
+        ("P2", "seed", 999),
+        ("P3", "cast_ids", ["tampered"] * 8),
+        ("R1", "model_order", ["flash", "pro"]),
+        ("R1", "activation_rule", "silently retry anything"),
+    ],
+)
+def test_runtime_rejects_any_frozen_pair_catalog_tampering(
+    target: str,
+    field: str,
+    value: object,
+) -> None:
+    manifest = deepcopy(load_manifest())
+    if target == "R1":
+        manifest["reserve_pair"][field] = value
+    else:
+        pair = next(pair for pair in manifest["generation_pairs"] if pair["pair_id"] == target)
+        pair[field] = value
+
+    with pytest.raises(ExperimentSafetyError, match="frozen catalog"):
+        validate_manifest(manifest)
 
 
 def test_execution_refuses_unverified_or_non_opted_in_traffic() -> None:
