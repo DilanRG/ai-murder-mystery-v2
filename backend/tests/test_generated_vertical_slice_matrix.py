@@ -104,7 +104,7 @@ def _start_generated(
     )
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert provider.scenario_calls == 5
+    assert provider.scenario_calls == 6
     assert provider.scenario_cast == selected
     public_cast = {
         payload["game"]["opening"]["victim_id"]:
@@ -147,7 +147,7 @@ def test_normal_generation_accepts_an_arbitrary_exact_manual_cast(tmp_path) -> N
         )
 
     assert payload["generation"]["cast_mode"] == "manual"
-    assert provider.scenario_calls == 5
+    assert provider.scenario_calls == 6
 
 
 @pytest.mark.parametrize("seed", AUTO_SEEDS)
@@ -216,7 +216,7 @@ def test_authored_projection_can_save_reload_after_turn_six_and_win(
         main._session.llm = None
         loaded = client.post(f"/api/game/saves/v1/generated-{seed}.json/load")
         assert loaded.status_code == 200
-        assert provider.scenario_calls == 5 and provider.calls == calls_before_reload
+        assert provider.scenario_calls == 6 and provider.calls == calls_before_reload
 
         accusation = client.post(
             "/api/game/action",
@@ -231,7 +231,9 @@ def test_authored_projection_can_save_reload_after_turn_six_and_win(
             },
         )
         assert accusation.status_code == 200
-        assert accusation.json()["game"]["result"]["solved"] is True
+        assert accusation.json()["game"]["result"]["solved"] is True, json.dumps(
+            accusation.json()["game"]["result"], sort_keys=True
+        )
         debrief = client.get("/api/game/debrief")
         assert debrief.status_code == 200
         assert debrief.json()["solution"]["culprit_id"] == culprit_id
@@ -263,4 +265,4 @@ def test_authored_projection_timeout_is_an_unsolved_debrief(tmp_path) -> None:
         debrief = client.get("/api/game/debrief")
         assert debrief.status_code == 200
         assert debrief.json()["outcome"] == game["result"]
-        assert provider.scenario_calls == 5
+        assert provider.scenario_calls == 6

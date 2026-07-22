@@ -25,16 +25,17 @@ EXPECTED_MODELS = {
     "flash": "deepseek-v4-flash",
 }
 EXPECTED_RESOLVED_MODELS = dict(EXPECTED_MODELS)
-EXPECTED_MANIFEST_REVISION = 8
+EXPECTED_MANIFEST_REVISION = 9
 EXPECTED_GIT_CHECKPOINT = "0166ca14c80a5e84c1322e93667d71eea1461aa6"
 EXPECTED_GATEWAY = "deepseek_direct"
 EXPECTED_ROUTING = None
-EXPECTED_PROMPT_REVISION = "procedural-case-generation-staged-v3"
-EXPECTED_SCHEMA_REVISION = "procedural-case-schema-staged-v3"
+EXPECTED_PROMPT_REVISION = "procedural-case-generation-staged-v5"
+EXPECTED_SCHEMA_REVISION = "procedural-case-schema-staged-v5"
 EXPECTED_ROLE_MAX_TOKENS = {
     "case_generation_core": 20_000,
-    "case_generation_evidence_inventory": 20_000,
-    "case_generation_solution": 8_000,
+    "case_generation_proof_blueprint": 12_000,
+    "case_generation_evidence_realization": 16_000,
+    "case_generation_misdirection": 8_000,
     "case_generation_overlays": 24_000,
     "case_generation_presentation": 8_000,
     "private_npc_action": 80,
@@ -107,10 +108,10 @@ EXPECTED_RESERVE_PAIR = {
         "failures in the report and stay below the hard operational stop."
     ),
 }
-EXPECTED_REVISION8_PAIR_IDS = ("P2", "P3", "R1")
-# Revision 8 deliberately retains the Revision 7 zero-admission baseline matrix.
-# Keep this historical name available to the generation and crossed-result readers.
-EXPECTED_REVISION7_PAIR_IDS = EXPECTED_REVISION8_PAIR_IDS
+EXPECTED_REVISION9_PAIR_IDS = ("P2", "P3", "R1")
+# Revision 9 retains the Revision 7/8 zero-admission P2/P3/R1 comparison matrix.
+# Keep the historical alias for readers that report the original baseline provenance.
+EXPECTED_REVISION7_PAIR_IDS = EXPECTED_REVISION9_PAIR_IDS
 EXPECTED_REPLACED_PAIR_ID = "P1"
 
 
@@ -148,15 +149,15 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Reject changes that would make the paired measurement unfair or unsafe."""
 
     if manifest.get("manifest_revision") != EXPECTED_MANIFEST_REVISION:
-        raise ExperimentSafetyError("Only frozen manifest revision 8 is accepted.")
+        raise ExperimentSafetyError("Only frozen manifest revision 9 is accepted.")
     if manifest.get("git_checkpoint") != EXPECTED_GIT_CHECKPOINT:
         raise ExperimentSafetyError("Manifest must retain the revision-4 direct-provider checkpoint.")
     if (
-        manifest.get("supersedes_revision") != 7
+        manifest.get("supersedes_revision") != 8
         or manifest.get("gateway") != EXPECTED_GATEWAY
         or manifest.get("model_fallbacks") != []
     ):
-        raise ExperimentSafetyError("Manifest revision 8 must require direct DeepSeek without fallback.")
+        raise ExperimentSafetyError("Manifest revision 9 must require direct DeepSeek without fallback.")
     if manifest.get("models") != EXPECTED_MODELS:
         raise ExperimentSafetyError("Manifest model slugs must be the exact DeepSeek V4 pair.")
     if manifest.get("resolved_models") != EXPECTED_RESOLVED_MODELS:
@@ -167,7 +168,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         manifest.get("prompt_revision") != EXPECTED_PROMPT_REVISION
         or manifest.get("schema_revision") != EXPECTED_SCHEMA_REVISION
     ):
-        raise ExperimentSafetyError("Manifest must use the frozen staged-v3 prompt and schema revisions.")
+        raise ExperimentSafetyError("Manifest must use the frozen staged-v5 prompt and schema revisions.")
 
     settings = manifest.get("runtime_settings")
     if not isinstance(settings, Mapping) or settings.get("reasoning_effort") != "high":
@@ -184,11 +185,14 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         raise ExperimentSafetyError("Identical sampler defaults are required.")
     expected_roles = {
         "case_generation_core": (EXPECTED_ROLE_MAX_TOKENS["case_generation_core"], 0.55),
-        "case_generation_evidence_inventory": (
-            EXPECTED_ROLE_MAX_TOKENS["case_generation_evidence_inventory"], 0.55
+        "case_generation_proof_blueprint": (
+            EXPECTED_ROLE_MAX_TOKENS["case_generation_proof_blueprint"], 0.55
         ),
-        "case_generation_solution": (
-            EXPECTED_ROLE_MAX_TOKENS["case_generation_solution"], 0.55
+        "case_generation_evidence_realization": (
+            EXPECTED_ROLE_MAX_TOKENS["case_generation_evidence_realization"], 0.55
+        ),
+        "case_generation_misdirection": (
+            EXPECTED_ROLE_MAX_TOKENS["case_generation_misdirection"], 0.55
         ),
         "case_generation_overlays": (EXPECTED_ROLE_MAX_TOKENS["case_generation_overlays"], 0.55),
         "case_generation_presentation": (EXPECTED_ROLE_MAX_TOKENS["case_generation_presentation"], 0.2),

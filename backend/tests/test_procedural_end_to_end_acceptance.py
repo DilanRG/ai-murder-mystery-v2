@@ -141,7 +141,7 @@ def test_generated_case_remains_solvable_after_autonomous_activity_and_replays(
         route = next(
             route
             for route in engine.case.solution.evidence_routes
-            if route.id == "lantern_documentary_route"
+            if route.id == "route_1"
         )
         selected_evidence = [
             *route.method_evidence_ids,
@@ -199,6 +199,6 @@ def test_generated_case_remains_solvable_after_autonomous_activity_and_replays(
         assert loaded.status_code == 200, loaded.text
         assert loaded.json()["game"] == accused["game"]
 
-    # Four staged calls generated the scenario; subsequent calls were deliberately
+    # Six staged calls generated the scenario; subsequent calls were deliberately
     # malformed local planner responses.  No external provider credit is used.
     assert provider.calls > 1

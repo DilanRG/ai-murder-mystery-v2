@@ -122,8 +122,9 @@ def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
         if role.startswith("case_generation_")
     } == {
         "case_generation_core": 20_000,
-        "case_generation_evidence_inventory": 20_000,
-        "case_generation_solution": 8_000,
+        "case_generation_proof_blueprint": 12_000,
+        "case_generation_evidence_realization": 16_000,
+        "case_generation_misdirection": 8_000,
         "case_generation_overlays": 24_000,
         "case_generation_presentation": 8_000,
     }

@@ -242,22 +242,289 @@ def make_dummy_generated_document(
     }
 
 
-def generated_stage_response(
+def generated_stage_payloads(
     document: dict[str, object],
-    task_role: str,
-) -> dict[str, object]:
-    """Return the provider payload for one bounded scenario-generation stage.
-
-    Test providers keep a complete deterministic document as their fixture data,
-    while the production boundary now asks for four conceptual phases with
-    two independently validated evidence deltas. Keeping the projection here prevents fixtures from silently
-    exercising the retired one-shot protocol.
-    """
+) -> dict[str, dict[str, object]]:
+    """Project one valid fixture across the Revision 9 immutable stage seams."""
 
     case = document["case"]
     assert isinstance(case, dict)
-    if task_role == "case_generation_core":
-        return {
+    facts = case["facts"]
+    timeline = deepcopy(case["timeline"])
+    evidence = case["evidence"]
+    solution = case["solution"]
+    assert isinstance(facts, dict)
+    assert isinstance(timeline, list)
+    assert isinstance(evidence, dict)
+    assert isinstance(solution, dict)
+    routes = solution["evidence_routes"]
+    assert isinstance(routes, list)
+    location = load_location("ashwick_manor")
+    timeline_fact_ids = {
+        fact_id for event in timeline for fact_id in event["fact_ids"]
+    }
+    synthetic_index = 0
+    for source in evidence.values():
+        if not source["is_red_herring"]:
+            continue
+        missing = [
+            fact_id for fact_id in source["fact_ids"] if fact_id not in timeline_fact_ids
+        ]
+        if not missing:
+            continue
+        synthetic_index += 1
+        slot = location.evidence_slots[source["initial_slot_id"]]
+        related_actor_ids = list(
+            dict.fromkeys(
+                character_id
+                for fact_id in missing
+                for character_id in facts[fact_id]["related_character_ids"]
+            )
+        )
+        scheduled_source = next(
+            (
+                (character_id, entry)
+                for character_id in related_actor_ids
+                for entry in case["overlays"][character_id]["schedule"]
+                if entry["room_id"] == slot.room_id
+            ),
+            None,
+        )
+        if scheduled_source is None:
+            scheduled_source = next(
+                (
+                    (character_id, entry)
+                    for character_id in related_actor_ids
+                    for entry in case["overlays"][character_id]["schedule"]
+                ),
+                None,
+            )
+        assert scheduled_source is not None
+        source_actor_id, source_schedule = scheduled_source
+        timeline.append(
+            {
+                "id": f"timeline_fixture_misdirection_{synthetic_index}",
+                "minute": source_schedule["start_minute"],
+                "event_type": "observation",
+                "room_id": source_schedule["room_id"],
+                "actor_ids": [source_actor_id],
+                "summary": "A non-murder secret left a misleading but explainable trace.",
+                "fact_ids": missing,
+                "observed_by": [],
+            }
+        )
+        timeline_fact_ids.update(missing)
+    timeline.sort(key=lambda event: (event["minute"], event["id"]))
+    for event in timeline:
+        if event["id"] == "timeline_vivienne_arrives_library":
+            event["fact_ids"] = list(
+                dict.fromkeys([*event["fact_ids"], "fact_financial_exposure"])
+            )
+
+    def event_for(fact_ids: list[str]) -> dict[str, object]:
+        for event in timeline:
+            if set(fact_ids) <= set(event["fact_ids"]):
+                return event
+        raise AssertionError(f"fixture lacks one source event for {fact_ids!r}")
+
+    def event_for_or_attach(fact_ids: list[str]) -> dict[str, object]:
+        try:
+            return event_for(fact_ids)
+        except AssertionError:
+            source = next(
+                event
+                for event in timeline
+                if set(fact_ids) & set(event["fact_ids"])
+            )
+            source["fact_ids"] = list(
+                dict.fromkeys([*source["fact_ids"], *fact_ids])
+            )
+            return source
+
+    proof_routes: list[dict[str, object]] = []
+    realizations: dict[str, dict[str, object]] = {}
+    used_axis_channels: dict[str, set[tuple[object, ...]]] = {
+        "method": set(),
+        "motive": set(),
+        "opportunity": set(),
+    }
+    synthetic_proof_index = 0
+
+    def channel_for(source: dict[str, object], event: dict[str, object]) -> tuple[object, ...]:
+        return (
+            source["kind"],
+            event["minute"],
+            event["room_id"],
+            tuple(sorted([*event["actor_ids"], *event["observed_by"]])),
+            event["event_type"],
+        )
+
+    def independent_source_event(
+        axis: str,
+        source: dict[str, object],
+        claim_fact_ids: list[str],
+    ) -> dict[str, object]:
+        nonlocal synthetic_proof_index
+        base = event_for_or_attach(claim_fact_ids)
+        channel = channel_for(source, base)
+        if channel not in used_axis_channels[axis]:
+            used_axis_channels[axis].add(channel)
+            return base
+        synthetic_proof_index += 1
+        minute = min(
+            case["investigation_start_minute"] - 1,
+            base["minute"] + synthetic_proof_index,
+        )
+        if minute == base["minute"]:
+            minute = max(0, base["minute"] - synthetic_proof_index)
+        alternate = {
+            "id": f"timeline_fixture_proof_origin_{synthetic_proof_index}",
+            "minute": minute,
+            "event_type": "observation",
+            "room_id": base["room_id"],
+            "actor_ids": list(base["actor_ids"]),
+            "summary": (
+                "A separate canonical object interaction creates an independent "
+                f"{axis} evidence channel."
+            ),
+            "fact_ids": list(claim_fact_ids),
+            "observed_by": list(base["observed_by"]),
+        }
+        timeline.append(alternate)
+        used_axis_channels[axis].add(channel_for(source, alternate))
+        return alternate
+
+    for route_index, route in enumerate(routes[:2], start=1):
+        route_id = f"route_{route_index}"
+        claims: dict[str, dict[str, object]] = {}
+        for axis, category_names, pick_last in (
+            ("method", {"means"}, False),
+            ("motive", {"motive"}, True),
+            ("opportunity", {"opportunity", "timeline"}, False),
+        ):
+            evidence_id = route[f"{axis}_evidence_ids"][0]
+            source = evidence[evidence_id]
+            candidates = [
+                fact_id
+                for fact_id in source["fact_ids"]
+                if facts[fact_id]["category"] in category_names
+            ]
+            if axis == "opportunity":
+                candidates = list(dict.fromkeys([*candidates, *route["timeline_fact_ids"]]))
+                claim_fact_ids = candidates
+            else:
+                claim_fact_ids = candidates if pick_last else [candidates[0]]
+            source_event = independent_source_event(axis, source, claim_fact_ids)
+            claim = {
+                "claim": f"Route {route_index} {axis} claim grounded in accepted facts.",
+                "fact_ids": claim_fact_ids,
+                "source_event_ids": [source_event["id"]],
+                "evidence_role_summary": f"Concrete {source['kind']} support for {axis}.",
+                "required_form": source["kind"],
+            }
+            claims[axis] = claim
+            if source["initial_slot_id"]:
+                discovery = {"kind": "slot", "target_id": source["initial_slot_id"]}
+            elif "examine:body" in source["discoverable_via"]:
+                discovery = {"kind": "body", "target_id": "body"}
+            else:
+                interview_routes = [
+                    value.split(":", 1)[1]
+                    for value in source["discoverable_via"]
+                    if value.startswith("interview:")
+                ]
+                discovery = (
+                    {"kind": "interview", "target_id": interview_routes[0]}
+                    if interview_routes
+                    else {"kind": "body", "target_id": "body"}
+                )
+            role_id = f"{route_id}_{axis}"
+            realizations[role_id] = {
+                "role_id": role_id,
+                "route_id": route_id,
+                "axis": axis,
+                "name": source["name"],
+                "description": source["description"],
+                "kind": source["kind"],
+                "supported_fact_ids": claim_fact_ids,
+                "source_event_id": source_event["id"],
+                "causal_origin": f"The accepted {source_event['id']} event produced this evidence.",
+                "relevant_actor_ids": source_event["actor_ids"],
+                "occurred_minute": source_event["minute"],
+                "discovery": discovery,
+                "prerequisite_role_ids": [],
+                "difficulty": source["difficulty"],
+                "manipulable": source["manipulable"],
+                "essential": True,
+            }
+        proof_routes.append(
+            {
+                "label": route["label"],
+                **claims,
+                "timeline_fact_ids": list(claims["opportunity"]["fact_ids"]),
+                "independence_rationale": (
+                    "This route uses its own three evidence roles and provenance chain."
+                ),
+            }
+        )
+
+    timeline.sort(key=lambda event: (event["minute"], event["id"]))
+
+    red_sources = [
+        (evidence_id, item)
+        for evidence_id, item in evidence.items()
+        if item["is_red_herring"]
+    ][:2]
+    innocents = [
+        character_id
+        for character_id in case["overlays"]
+        if character_id not in {case["murder"]["murderer_id"], case["murder"]["victim_id"]}
+    ]
+    misdirection: dict[str, dict[str, object]] = {}
+    for index, (_evidence_id, source) in enumerate(red_sources, start=1):
+        key = f"misdirection_{index}"
+        source_event = event_for(list(source["fact_ids"]))
+        if source["initial_slot_id"]:
+            discovery = {"kind": "slot", "target_id": source["initial_slot_id"]}
+        else:
+            discovery = {"kind": "body", "target_id": "body"}
+        implications = list(source["implicates_character_ids"])
+        exonerations = (
+            [next(value for value in innocents if value not in implications)]
+            if index == 1
+            else []
+        )
+        secret_fact_ids = [
+            fact_id
+            for fact_id in source["fact_ids"]
+            if facts[fact_id]["category"] == "secret"
+        ]
+        misdirection[key] = {
+            "misdirection_id": key,
+            "name": source["name"],
+            "description": source["description"],
+            "kind": source["kind"],
+            "fact_ids": source["fact_ids"],
+            "source_event_id": source_event["id"],
+            "causal_origin": source["red_herring_explanation"],
+            "relevant_actor_ids": source_event["actor_ids"],
+            "occurred_minute": source_event["minute"],
+            "discovery": discovery,
+            "prerequisite_role_ids": [],
+            "implicates_character_ids": implications,
+            "exonerates_character_ids": exonerations,
+            "contradiction_fact_ids": list(source["fact_ids"]) if index == 1 else [],
+            "secondary_secret_fact_ids": secret_fact_ids,
+            "red_herring_explanation": source["red_herring_explanation"],
+            "difficulty": source["difficulty"],
+            "manipulable": source["manipulable"],
+        }
+
+    overlays = deepcopy(case["overlays"])
+    for overlay in overlays.values():
+        overlay["supporting_evidence_ids"] = []
+    return {
+        "case_generation_core": {
             "schema_version": 1,
             **{
                 key: case[key]
@@ -270,50 +537,38 @@ def generated_stage_response(
                     "opening",
                 )
             },
-        }
-    solution = case["solution"]
-    route_support_ids = {
-        evidence_id
-        for route in solution["evidence_routes"]
-        for axis in (
-            "method_evidence_ids",
-            "motive_evidence_ids",
-            "opportunity_evidence_ids",
-        )
-        for evidence_id in route[axis]
-    }
-    red_herring_ids = [
-        evidence_id
-        for evidence_id, item in case["evidence"].items()
-        if item["is_red_herring"]
-    ][:2]
-    inventory_ids = route_support_ids | set(red_herring_ids)
-    if task_role == "case_generation_evidence_inventory":
-        evidence = {
-            evidence_id: deepcopy(item)
-            for evidence_id, item in case["evidence"].items()
-            if evidence_id in inventory_ids
-        }
-        culprit_id = solution["culprit_id"]
-        for evidence_id in route_support_ids:
-            evidence[evidence_id]["implicates_character_ids"] = [culprit_id]
-        return {
+            "timeline": timeline,
+        },
+        "case_generation_proof_blueprint": {
             "schema_version": 1,
-            "evidence": evidence,
-        }
-    if task_role == "case_generation_solution":
-        return {"schema_version": 1, "solution": solution}
-    if task_role == "case_generation_overlays":
-        overlays = deepcopy(case["overlays"])
-        for overlay in overlays.values():
-            overlay["supporting_evidence_ids"] = [
-                evidence_id
-                for evidence_id in overlay["supporting_evidence_ids"]
-                if evidence_id in inventory_ids
-            ]
-        return {"schema_version": 1, "overlays": overlays}
-    if task_role == "case_generation_presentation":
-        return {"schema_version": 1, "presentation": document["presentation"]}
+            "culprit_id": solution["culprit_id"],
+            "routes": proof_routes,
+        },
+        "case_generation_evidence_realization": {
+            "schema_version": 1,
+            "realizations": realizations,
+        },
+        "case_generation_misdirection": {
+            "schema_version": 1,
+            "misdirection": misdirection,
+        },
+        "case_generation_overlays": {"schema_version": 1, "overlays": overlays},
+        "case_generation_presentation": {
+            "schema_version": 1,
+            "presentation": document["presentation"],
+        },
+    }
+
+
+def generated_stage_response(
+    document: dict[str, object],
+    task_role: str,
+) -> dict[str, object]:
+    """Return the provider payload for one bounded scenario-generation stage."""
+
+    payloads = generated_stage_payloads(document)
+    if task_role in payloads:
+        return deepcopy(payloads[task_role])
     raise AssertionError(f"unexpected scenario stage: {task_role}")
 
 

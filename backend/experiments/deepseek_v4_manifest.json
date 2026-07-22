@@ -1,10 +1,10 @@
 {
   "experiment_id": "deepseek-v4-phase1",
-  "manifest_revision": 8,
+  "manifest_revision": 9,
   "frozen_at": "2026-07-22",
   "git_checkpoint": "0166ca14c80a5e84c1322e93667d71eea1461aa6",
-  "supersedes_revision": 7,
-  "revision_reason": "Retain the Revision 7 zero-admission P2/P3/R1 baseline and its P1-to-R1 reserve provenance while splitting Stage 2 into separate evidence-inventory and solution roles; preserve all fairness and budget controls unchanged.",
+  "supersedes_revision": 8,
+  "revision_reason": "Revision 7's monolithic baseline admitted 0/6 cells. Revision 8's partial protocol was intentionally operationally stopped and superseded after two settled P2 Pro core rejections and one unresolved third intent, before any Stage 2 result. Revision 9 adopts the owner-specified Stage 2A proof blueprint, 2B evidence realization/provenance, and 2C misdirection split while retaining the P2/P3/R1 matrix, fairness controls, direct models, budget, and R1 provenance.",
   "invalidated_preflight_attempts": [
     {
       "revision": 1,
@@ -44,8 +44,8 @@
     }
   ],
   "location_package_id": "ashwick_manor",
-  "prompt_revision": "procedural-case-generation-staged-v3",
-  "schema_revision": "procedural-case-schema-staged-v3",
+  "prompt_revision": "procedural-case-generation-staged-v5",
+  "schema_revision": "procedural-case-schema-staged-v5",
   "models": {
     "pro": "deepseek-v4-pro",
     "flash": "deepseek-v4-flash"
@@ -65,8 +65,9 @@
     },
     "roles": {
       "case_generation_core": {"max_tokens": 20000, "temperature": 0.55, "json_mode": true},
-      "case_generation_evidence_inventory": {"max_tokens": 20000, "temperature": 0.55, "json_mode": true},
-      "case_generation_solution": {"max_tokens": 8000, "temperature": 0.55, "json_mode": true},
+      "case_generation_proof_blueprint": {"max_tokens": 12000, "temperature": 0.55, "json_mode": true},
+      "case_generation_evidence_realization": {"max_tokens": 16000, "temperature": 0.55, "json_mode": true},
+      "case_generation_misdirection": {"max_tokens": 8000, "temperature": 0.55, "json_mode": true},
       "case_generation_overlays": {"max_tokens": 24000, "temperature": 0.55, "json_mode": true},
       "case_generation_presentation": {"max_tokens": 8000, "temperature": 0.2, "json_mode": true},
       "private_npc_action": {"max_tokens": 80, "temperature": 0.0, "json_mode": true},

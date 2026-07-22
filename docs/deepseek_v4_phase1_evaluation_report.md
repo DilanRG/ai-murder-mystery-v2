@@ -1,6 +1,6 @@
 # DeepSeek V4 Phase 1 Evaluation Report
 
-**Status:** Incomplete — Revision 7 completed with zero admissions; Revision 8 split-stage evaluator verified offline
+**Status:** Incomplete — Revision 7 completed with zero admissions; Revision 8 preserved partial; Revision 9 Stage 2A/2B/2C verified offline
 **Experiment date:** 2026-07-21 to 2026-07-22
 **Product:** AI Murder Mystery Game
 **Frozen input manifest:** [`backend/experiments/deepseek_v4_manifest.json`](../backend/experiments/deepseek_v4_manifest.json)
@@ -27,7 +27,11 @@ Formal Revision 7 generation cost was USD 0.28581340. Cumulative locally settled
 
 The failure concentration is unambiguous. Stage 2 repeatedly violated exact discovery routes, declared-fact provenance, method/motive/opportunity category links, route-local timeline support, culprit uniqueness, evidence-count bounds, or evidence/redundancy-group independence. Pro also had several `length` completions that spent the full allowance on reasoning or truncated JSON. Flash was materially faster and cheaper in this sample, but neither model produced an admissible case, so no deployment or NPC-runtime recommendation is justified from Revision 7.
 
-Revision 8 addresses only this demonstrated boundary. It retains the four conceptual ownership phases and replaces the single Stage 2 provider response with an exactly-eight-item evidence inventory followed by a small exactly-two-route solution delta. Legal slot/search mappings and axis/independence rules are explicit. The assembled evidence contract and whole-case validator are unchanged. Provider-free verification is 392 passing backend tests, 16 passing frontend tests, a successful Vite production build, and a successful packaged Windows smoke test; Revision 8 has not yet made a provider call.
+Revision 8 was started at exact Git SHA `80a55425ea4fef6b7bb06df3de82e9331c0d7f4f` and is preserved as a superseded partial result. Exact Pro/Flash preflights passed for USD 0.00002013. P2/Pro made two settled core attempts: one consumed the 20,000-token allowance on reasoning and returned no JSON; the second returned a document rejected for incompatible weapon/method and opportunity. They cost USD 0.03571806. A third P2/Pro core request was reserved and locally stopped when the experiment contract changed; it remains operationally unresolved and is not a model-quality result or completed cell.
+
+Revision 9 retains the four conceptual ownership phases and splits Stage 2 by reasoning responsibility: 2A proves two abstract independent routes from accepted Stage 1 facts/events; 2B realizes six concrete evidence roles with causal provenance and executable discovery; 2C adds only causally explained misdirection and connective structure after both true routes pass. The host assigns mechanical IDs and exact engine actions but does not invent evidence meaning. Each delta receives local and cross-stage validation, and the assembled evidence contract plus whole-case validator remain unchanged. Provider-free verification is 395 passing backend tests, 16 passing frontend tests, a successful Vite production build, and a passing packaged Windows smoke test.
+
+The Revision 7 archive does not contain normalized accepted Stage 1 documents and exact content fingerprints, so none can be reused under the declared provenance rule. Revision 9 must regenerate Stage 1; reconstructing it from metrics or manually editing truth is forbidden.
 
 A post-hoc audit also corrected the Revision 6 history below. The shell controller timed out, but its background process continued and settled nine generation requests: three P1/Flash core rejections, plus a P1/Pro core accepted on attempt three followed by three evidence rejections. Those records and costs remain preserved. Because the controller boundary was operationally invalid, they are excluded from the formal Revision 7 comparison denominator; the recovered request dispositions are reported as post-hoc validation evidence, not as completed model-quality cells.
 
@@ -104,8 +108,8 @@ Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
 ## Current remaining work
 
-1. Commit and push Revision 8 on `experiment`, then record both tiny direct DeepSeek preflights against the exact clean SHA.
-2. Execute the same six P2/P3/R1 model cells under the frozen Revision 8 inventory/solution split, retaining every rejection and stopping on incomplete safety state or the budget threshold.
+1. Commit and push Revision 9 on `experiment`, then record both tiny direct DeepSeek preflights against the exact clean SHA.
+2. Execute the same six P2/P3/R1 model cells under the frozen Revision 9 Stage 2A/2B/2C split, retaining every rejection and stopping on incomplete safety state or the budget threshold.
 3. Only if at least one Pro and one Flash case pass the complete validator, select the first admitted cases and run crossed Phase A cells A-D through the restricted player interface.
 4. Freeze Phase A transcripts/reports and inspect post-game truth/action/knowledge audits. Phase B begins only after the declared Phase A gate passes.
 5. Fix only demonstrated in-scope defects, run the frozen adversarial surface, then rerun ordinary intended play.
@@ -124,6 +128,6 @@ Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
 ## Limitations
 
-- The current sample contains no successful real-provider response.
+- The current sample contains successful direct-provider responses but no whole-case admission from either model.
 - Shared Codex subagents can technically access the workspace. The restricted HTTP handoff provides blindness by explicit access contract and transcript evidence, not operating-system isolation. A separate container/user with no workspace mount is required for hard isolation.
 - Codex development and player-subagent compute are excluded from the DeepSeek external API budget.

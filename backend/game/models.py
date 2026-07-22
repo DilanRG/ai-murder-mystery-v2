@@ -448,6 +448,22 @@ class CanonicalTimelineEvent(FrozenModel):
     observed_by: tuple[str, ...] = Field(default_factory=tuple)
 
 
+class EvidenceProvenance(FrozenModel):
+    """Canonical causal origin retained for generated-case audit and replay."""
+
+    source_event_id: str = Field(min_length=1, max_length=100)
+    causal_origin: str = Field(min_length=1, max_length=800)
+    relevant_actor_ids: tuple[str, ...] = Field(min_length=1, max_length=8)
+    occurred_minute: int = Field(ge=0)
+    source_room_id: str = Field(min_length=1, max_length=100)
+    form: EvidenceKind
+    route_id: str | None = Field(default=None, max_length=100)
+    evidence_role: Literal["method", "motive", "opportunity", "misdirection"]
+    supported_claim_fact_ids: tuple[str, ...] = Field(min_length=1, max_length=16)
+    contradiction_fact_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
+    secondary_secret_fact_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
+
+
 class EvidenceDefinition(FrozenModel):
     id: str
     name: str
@@ -465,6 +481,7 @@ class EvidenceDefinition(FrozenModel):
     essential: bool = False
     redundancy_group: str
     prerequisite_evidence_ids: tuple[str, ...] = Field(default_factory=tuple)
+    provenance: EvidenceProvenance | None = None
 
 
 class MurderTruth(FrozenModel):

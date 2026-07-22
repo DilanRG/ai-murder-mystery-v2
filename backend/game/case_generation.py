@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 import hashlib
-from itertools import product
 import json
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -24,12 +23,15 @@ from game.models import (
     CaseDefinition,
     CharacterCaseOverlay,
     EvidenceDefinition,
+    EvidenceKind,
+    EvidenceProvenance,
     EvidenceRouteDefinition,
     FactDefinition,
     FrozenModel,
     LocationPackage,
     LieDefinition,
     MurderTruth,
+    SearchDifficulty,
     SolutionRequirements,
 )
 from game.recipes import case_content_fingerprint
@@ -123,27 +125,107 @@ class GeneratedEvidenceSolutionStage(FrozenModel):
     solution: GeneratedSolutionRequirements
 
 
-class GeneratedEvidenceInventoryDeltaStage(FrozenModel):
-    """Stage 2A: a bounded, directly discoverable evidence inventory."""
+class GeneratedProofClaimBlueprint(FrozenModel):
+    """One abstract claim and the Stage 1 truth that can support it."""
+
+    claim: str = Field(min_length=1, max_length=600)
+    fact_ids: tuple[str, ...] = Field(min_length=1, max_length=8)
+    source_event_ids: tuple[str, ...] = Field(min_length=1, max_length=8)
+    evidence_role_summary: str = Field(min_length=1, max_length=500)
+    required_form: EvidenceKind
+
+
+class GeneratedProofRouteBlueprint(FrozenModel):
+    """Stage 2A reasoning for one independently complete proof route."""
+
+    label: str = Field(min_length=1, max_length=160)
+    method: GeneratedProofClaimBlueprint
+    motive: GeneratedProofClaimBlueprint
+    opportunity: GeneratedProofClaimBlueprint
+    timeline_fact_ids: tuple[str, ...] = Field(min_length=1, max_length=16)
+    independence_rationale: str = Field(min_length=1, max_length=800)
+
+
+class GeneratedProofRouteBlueprintStage(FrozenModel):
+    """Stage 2A: two abstract routes, without concrete evidence objects."""
 
     schema_version: Literal[1] = 1
-    evidence: dict[str, EvidenceDefinition] = Field(min_length=8, max_length=8)
-
-
-class GeneratedExactSolutionRequirements(GeneratedSolutionRequirements):
-    """Generated Stage 2B solutions use the only feasible bounded route count."""
-
-    evidence_routes: tuple[EvidenceRouteDefinition, ...] = Field(
+    culprit_id: str = Field(min_length=1, max_length=100)
+    routes: tuple[GeneratedProofRouteBlueprint, ...] = Field(
         min_length=2,
         max_length=2,
     )
 
 
-class GeneratedSolutionDeltaStage(FrozenModel):
-    """Stage 2B: solution axes and two routes over an accepted inventory."""
+class GeneratedDiscoveryBinding(FrozenModel):
+    """Structured discovery source compiled to an exact engine action."""
+
+    kind: Literal["slot", "interview", "body"]
+    target_id: str = Field(min_length=1, max_length=100)
+
+
+class GeneratedEvidenceRealization(FrozenModel):
+    """Stage 2B concrete evidence for one accepted proof role."""
+
+    role_id: str = Field(min_length=1, max_length=100)
+    route_id: str = Field(min_length=1, max_length=100)
+    axis: Literal["method", "motive", "opportunity"]
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=1_000)
+    kind: EvidenceKind
+    supported_fact_ids: tuple[str, ...] = Field(min_length=1, max_length=16)
+    source_event_id: str = Field(min_length=1, max_length=100)
+    causal_origin: str = Field(min_length=1, max_length=800)
+    relevant_actor_ids: tuple[str, ...] = Field(min_length=1, max_length=8)
+    occurred_minute: int = Field(ge=0)
+    discovery: GeneratedDiscoveryBinding
+    prerequisite_role_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=5)
+    difficulty: SearchDifficulty = SearchDifficulty.CAREFUL
+    manipulable: bool = False
+    essential: bool = True
+
+
+class GeneratedEvidenceRealizationStage(FrozenModel):
+    """Stage 2B: exactly one realization for every accepted proof role."""
 
     schema_version: Literal[1] = 1
-    solution: GeneratedExactSolutionRequirements
+    realizations: dict[str, GeneratedEvidenceRealization] = Field(
+        min_length=6,
+        max_length=6,
+    )
+
+
+class GeneratedMisdirectionEvidence(FrozenModel):
+    """One Stage 2C red herring with a canonical innocent explanation."""
+
+    misdirection_id: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=1_000)
+    kind: EvidenceKind
+    fact_ids: tuple[str, ...] = Field(min_length=1, max_length=16)
+    source_event_id: str = Field(min_length=1, max_length=100)
+    causal_origin: str = Field(min_length=1, max_length=800)
+    relevant_actor_ids: tuple[str, ...] = Field(min_length=1, max_length=8)
+    occurred_minute: int = Field(ge=0)
+    discovery: GeneratedDiscoveryBinding
+    prerequisite_role_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=5)
+    implicates_character_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=7)
+    exonerates_character_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=7)
+    contradiction_fact_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
+    secondary_secret_fact_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=16)
+    red_herring_explanation: str = Field(min_length=1, max_length=800)
+    difficulty: SearchDifficulty = SearchDifficulty.CAREFUL
+    manipulable: bool = False
+
+
+class GeneratedMisdirectionConnectiveStage(FrozenModel):
+    """Stage 2C: two misleading but causally coherent connective items."""
+
+    schema_version: Literal[1] = 1
+    misdirection: dict[str, GeneratedMisdirectionEvidence] = Field(
+        min_length=2,
+        max_length=2,
+    )
 
 
 class GeneratedOverlayKnowledgeStage(FrozenModel):
@@ -371,16 +453,166 @@ def assemble_generated_case_blueprint(
     )
 
 
-def assemble_evidence_solution_stage(
-    inventory: GeneratedEvidenceInventoryDeltaStage,
-    solution: GeneratedSolutionDeltaStage,
-) -> GeneratedEvidenceSolutionStage:
-    """Compile the two provider deltas into the unchanged Stage 2 contract."""
+def _proof_role_contracts(
+    blueprint: GeneratedProofRouteBlueprintStage,
+) -> dict[str, tuple[str, str, GeneratedProofClaimBlueprint, GeneratedProofRouteBlueprint]]:
+    """Assign mechanical route/role IDs without authoring evidence meaning."""
 
+    contracts: dict[
+        str,
+        tuple[str, str, GeneratedProofClaimBlueprint, GeneratedProofRouteBlueprint],
+    ] = {}
+    for route_index, route in enumerate(blueprint.routes, start=1):
+        route_id = f"route_{route_index}"
+        for axis in ("method", "motive", "opportunity"):
+            role_id = f"{route_id}_{axis}"
+            contracts[role_id] = (route_id, axis, getattr(route, axis), route)
+    return contracts
+
+
+def _compile_discovery_binding(
+    binding: GeneratedDiscoveryBinding,
+    *,
+    location: LocationPackage,
+) -> tuple[str | None, tuple[str, ...]]:
+    if binding.kind == "slot":
+        slot = location.evidence_slots[binding.target_id]
+        return binding.target_id, (f"search:{slot.object_id}",)
+    if binding.kind == "interview":
+        return None, (f"interview:{binding.target_id}",)
+    return None, ("examine:body",)
+
+
+def assemble_evidence_solution_stage(
+    blueprint: GeneratedProofRouteBlueprintStage,
+    realization: GeneratedEvidenceRealizationStage,
+    connective: GeneratedMisdirectionConnectiveStage,
+    *,
+    core: GeneratedCrimeTimelineStage,
+    location: LocationPackage,
+) -> GeneratedEvidenceSolutionStage:
+    """Compile immutable 2A/2B/2C deltas into the unchanged final contract."""
+
+    contracts = _proof_role_contracts(blueprint)
+    role_to_evidence_id = {
+        role_id: f"evidence_{role_id}" for role_id in contracts
+    }
+    evidence: dict[str, EvidenceDefinition] = {}
+    for role_id, (route_id, axis, claim, _route) in contracts.items():
+        item = realization.realizations[role_id]
+        evidence_id = role_to_evidence_id[role_id]
+        initial_slot_id, discoverable_via = _compile_discovery_binding(
+            item.discovery,
+            location=location,
+        )
+        source_event = next(event for event in core.timeline if event.id == item.source_event_id)
+        evidence[evidence_id] = EvidenceDefinition(
+            id=evidence_id,
+            name=item.name,
+            kind=item.kind,
+            description=item.description,
+            initial_slot_id=initial_slot_id,
+            fact_ids=item.supported_fact_ids,
+            implicates_character_ids=(core.murder.murderer_id,),
+            exonerates_character_ids=(),
+            is_red_herring=False,
+            red_herring_explanation="",
+            discoverable_via=discoverable_via,
+            difficulty=item.difficulty,
+            manipulable=item.manipulable,
+            essential=item.essential,
+            redundancy_group=f"proof_{role_id}",
+            prerequisite_evidence_ids=tuple(
+                role_to_evidence_id[prerequisite_id]
+                for prerequisite_id in item.prerequisite_role_ids
+            ),
+            provenance=EvidenceProvenance(
+                source_event_id=item.source_event_id,
+                causal_origin=item.causal_origin,
+                relevant_actor_ids=item.relevant_actor_ids,
+                occurred_minute=item.occurred_minute,
+                source_room_id=source_event.room_id,
+                form=item.kind,
+                route_id=route_id,
+                evidence_role=axis,
+                supported_claim_fact_ids=item.supported_fact_ids,
+            ),
+        )
+    for index, connective_id in enumerate(sorted(connective.misdirection), start=1):
+        item = connective.misdirection[connective_id]
+        evidence_id = f"evidence_misdirection_{index}"
+        initial_slot_id, discoverable_via = _compile_discovery_binding(
+            item.discovery,
+            location=location,
+        )
+        source_event = next(event for event in core.timeline if event.id == item.source_event_id)
+        evidence[evidence_id] = EvidenceDefinition(
+            id=evidence_id,
+            name=item.name,
+            kind=item.kind,
+            description=item.description,
+            initial_slot_id=initial_slot_id,
+            fact_ids=item.fact_ids,
+            implicates_character_ids=item.implicates_character_ids,
+            exonerates_character_ids=item.exonerates_character_ids,
+            is_red_herring=True,
+            red_herring_explanation=item.red_herring_explanation,
+            discoverable_via=discoverable_via,
+            difficulty=item.difficulty,
+            manipulable=item.manipulable,
+            essential=False,
+            redundancy_group=f"misdirection_{index}",
+            prerequisite_evidence_ids=tuple(
+                role_to_evidence_id[prerequisite_id]
+                for prerequisite_id in item.prerequisite_role_ids
+            ),
+            provenance=EvidenceProvenance(
+                source_event_id=item.source_event_id,
+                causal_origin=item.causal_origin,
+                relevant_actor_ids=item.relevant_actor_ids,
+                occurred_minute=item.occurred_minute,
+                source_room_id=source_event.room_id,
+                form=item.kind,
+                route_id=None,
+                evidence_role="misdirection",
+                supported_claim_fact_ids=item.fact_ids,
+                contradiction_fact_ids=item.contradiction_fact_ids,
+                secondary_secret_fact_ids=item.secondary_secret_fact_ids,
+            ),
+        )
+    routes: list[EvidenceRouteDefinition] = []
+    for route_index, route in enumerate(blueprint.routes, start=1):
+        route_id = f"route_{route_index}"
+        routes.append(
+            EvidenceRouteDefinition(
+                id=route_id,
+                label=route.label,
+                method_evidence_ids=(role_to_evidence_id[f"{route_id}_method"],),
+                motive_evidence_ids=(role_to_evidence_id[f"{route_id}_motive"],),
+                opportunity_evidence_ids=(
+                    role_to_evidence_id[f"{route_id}_opportunity"],
+                ),
+                timeline_fact_ids=route.timeline_fact_ids,
+            )
+        )
     return GeneratedEvidenceSolutionStage(
-        evidence=inventory.evidence,
-        solution=GeneratedSolutionRequirements.model_validate(
-            solution.solution.model_dump(mode="python")
+        evidence=evidence,
+        solution=GeneratedSolutionRequirements(
+            culprit_id=core.murder.murderer_id,
+            method_evidence_ids=tuple(route.method_evidence_ids[0] for route in routes),
+            motive_evidence_ids=tuple(route.motive_evidence_ids[0] for route in routes),
+            opportunity_evidence_ids=tuple(
+                route.opportunity_evidence_ids[0] for route in routes
+            ),
+            timeline_fact_ids=tuple(
+                dict.fromkeys(
+                    fact_id
+                    for route in routes
+                    for fact_id in route.timeline_fact_ids
+                )
+            ),
+            independent_evidence_groups_required=3,
+            evidence_routes=tuple(routes),
         ),
     )
 
@@ -511,10 +743,15 @@ def _system_prompt() -> str:
 
     schemas = {
         "case_generation_core": GeneratedCrimeTimelineStage.model_json_schema(),
-        "case_generation_evidence_inventory": (
-            GeneratedEvidenceInventoryDeltaStage.model_json_schema()
+        "case_generation_proof_blueprint": (
+            GeneratedProofRouteBlueprintStage.model_json_schema()
         ),
-        "case_generation_solution": GeneratedSolutionDeltaStage.model_json_schema(),
+        "case_generation_evidence_realization": (
+            GeneratedEvidenceRealizationStage.model_json_schema()
+        ),
+        "case_generation_misdirection": (
+            GeneratedMisdirectionConnectiveStage.model_json_schema()
+        ),
         "case_generation_overlays": GeneratedOverlayKnowledgeStage.model_json_schema(),
         "case_generation_presentation": GeneratedPresentationStage.model_json_schema(),
     }
@@ -883,157 +1120,367 @@ def _validate_evidence_stage(
     _reject_stage("evidence", issues)
 
 
-def _validate_evidence_inventory_stage(
-    stage: GeneratedEvidenceInventoryDeltaStage,
+def _validate_proof_blueprint_stage(
+    stage: GeneratedProofRouteBlueprintStage,
+    *,
+    core: GeneratedCrimeTimelineStage,
+) -> None:
+    """Validate two complete abstract routes before evidence realization spend."""
+
+    issues: list[str] = []
+    facts = core.facts
+    events = {event.id: event for event in core.timeline}
+    if stage.culprit_id != core.murder.murderer_id:
+        issues.append("proof blueprint culprit must equal the Stage 1 murderer")
+    claims_by_axis: dict[str, list[GeneratedProofClaimBlueprint]] = {
+        "method": [],
+        "motive": [],
+        "opportunity": [],
+    }
+    for route_index, route in enumerate(stage.routes, start=1):
+        route_facts: set[str] = set()
+        for axis, claim, categories in (
+            ("method", route.method, {"means"}),
+            ("motive", route.motive, {"motive"}),
+            ("opportunity", route.opportunity, {"opportunity", "timeline"}),
+        ):
+            fact_ids = set(claim.fact_ids)
+            event_ids = set(claim.source_event_ids)
+            if len(fact_ids) != len(claim.fact_ids) or len(event_ids) != len(
+                claim.source_event_ids
+            ):
+                issues.append(f"route {route_index} {axis} repeats a reference")
+            if fact_ids - set(facts):
+                issues.append(f"route {route_index} {axis} names an unknown fact")
+            if event_ids - set(events):
+                issues.append(f"route {route_index} {axis} names an unknown event")
+            if any(
+                facts[fact_id].category.value not in categories
+                for fact_id in fact_ids & set(facts)
+            ):
+                issues.append(f"route {route_index} {axis} uses the wrong fact category")
+            if any(
+                not fact_ids <= set(events[event_id].fact_ids)
+                for event_id in event_ids & set(events)
+            ):
+                issues.append(
+                    f"route {route_index} {axis} is not fully grounded in every "
+                    "declared Stage 1 event"
+                )
+            if not any(
+                core.murder.murderer_id in facts[fact_id].related_character_ids
+                for fact_id in fact_ids & set(facts)
+            ):
+                issues.append(
+                    f"route {route_index} {axis} does not support the Stage 1 culprit"
+                )
+            route_facts.update(fact_ids)
+            claims_by_axis[axis].append(claim)
+        timeline_fact_ids = set(route.timeline_fact_ids)
+        if timeline_fact_ids - set(facts) or any(
+            facts[fact_id].category.value not in {"opportunity", "timeline"}
+            for fact_id in timeline_fact_ids & set(facts)
+        ):
+            issues.append(f"route {route_index} has invalid timeline facts")
+        if not timeline_fact_ids <= route_facts:
+            issues.append(f"route {route_index} timeline facts lack a required evidence role")
+    for axis, claims in claims_by_axis.items():
+        if len(claims) != 2:
+            continue
+        left, right = claims
+        left_channels = {
+            (
+                events[event_id].minute,
+                events[event_id].room_id,
+                tuple(sorted((*events[event_id].actor_ids, *events[event_id].observed_by))),
+                events[event_id].event_type.value,
+            )
+            for event_id in left.source_event_ids
+            if event_id in events
+        }
+        right_channels = {
+            (
+                events[event_id].minute,
+                events[event_id].room_id,
+                tuple(sorted((*events[event_id].actor_ids, *events[event_id].observed_by))),
+                events[event_id].event_type.value,
+            )
+            for event_id in right.source_event_ids
+            if event_id in events
+        }
+        if left.required_form == right.required_form and left_channels & right_channels:
+            issues.append(
+                f"proof routes reuse the same {axis} causal channel; corresponding "
+                "roles must use a different evidence form or disjoint Stage 1 events"
+            )
+    _reject_stage("proof blueprint", issues)
+
+
+def _reachable_searchable_object_ids(location: LocationPackage) -> set[str]:
+    """Derive executable container access from the location graph and item slots."""
+
+    reachable = {
+        object_id
+        for object_id, searchable in location.searchable_objects.items()
+        if searchable.requires_item_id is None
+    }
+    discovered_items: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for item_id, item in location.items.items():
+            if item_id in discovered_items or item.initial_slot_id is None:
+                continue
+            slot = location.evidence_slots.get(item.initial_slot_id)
+            if slot is not None and slot.object_id in reachable:
+                discovered_items.add(item_id)
+                changed = True
+        for object_id, searchable in location.searchable_objects.items():
+            if (
+                object_id not in reachable
+                and searchable.requires_item_id in discovered_items
+            ):
+                reachable.add(object_id)
+                changed = True
+    return reachable
+
+
+def _discovery_binding_issue(
+    binding: GeneratedDiscoveryBinding,
     *,
     core: GeneratedCrimeTimelineStage,
     character_ids: tuple[str, ...],
     location: LocationPackage,
-) -> None:
-    """Validate Stage 2A before spending on solution-route construction."""
-
-    cast = set(character_ids)
-    facts = set(core.facts)
-    evidence_ids = set(stage.evidence)
-    issues: list[str] = []
-    red_herrings = 0
-    slot_occupancy: dict[str, int] = {}
-    for key, item in stage.evidence.items():
-        if key != item.id:
-            issues.append(f"evidence key {key!r} differs from id {item.id!r}")
-        if not item.fact_ids or set(item.fact_ids) - facts:
-            issues.append(f"evidence {key!r} must reference only declared facts")
+    reachable_objects: set[str],
+) -> str | None:
+    if binding.kind == "slot":
+        slot = location.evidence_slots.get(binding.target_id)
+        if slot is None:
+            return "uses an unknown evidence slot"
+        if slot.object_id not in reachable_objects:
+            return "uses a container that is not executable from the location item graph"
+        return None
+    if binding.kind == "interview":
         if (
-            set(item.implicates_character_ids) | set(item.exonerates_character_ids)
-        ) - cast:
-            issues.append(f"evidence {key!r} names an unknown character")
-        if item.initial_slot_id and item.initial_slot_id not in location.evidence_slots:
-            issues.append(f"evidence {key!r} uses an unknown slot")
-        elif item.initial_slot_id:
-            slot_occupancy[item.initial_slot_id] = (
-                slot_occupancy.get(item.initial_slot_id, 0) + 1
-            )
-            object_id = location.evidence_slots[item.initial_slot_id].object_id
-            search_routes = {
-                route for route in item.discoverable_via if route.startswith("search:")
-            }
-            if search_routes != {f"search:{object_id}"}:
-                issues.append(
-                    f"slotted evidence {key!r} must use its containing object's search route"
-                )
-        for route in item.discoverable_via:
-            try:
-                route_kind, target_id = route.split(":", 1)
-            except ValueError:
-                issues.append(f"evidence {key!r} has an invalid discovery route")
-                continue
-            if not (
-                (route_kind == "search" and target_id in location.searchable_objects)
-                or (
-                    route_kind == "interview"
-                    and target_id in cast
-                    and target_id != core.murder.victim_id
-                )
-                or (route_kind == "examine" and target_id == "body")
-            ):
-                issues.append(f"evidence {key!r} has an unresolvable discovery route")
-        if set(item.prerequisite_evidence_ids) - evidence_ids or key in set(
-            item.prerequisite_evidence_ids
+            binding.target_id not in set(character_ids)
+            or binding.target_id == core.murder.victim_id
         ):
-            issues.append(f"evidence {key!r} has an invalid prerequisite")
-        if item.is_red_herring:
-            red_herrings += 1
-            if not item.red_herring_explanation.strip():
-                issues.append(f"red herring {key!r} lacks an explanation")
-        elif not item.discoverable_via:
-            issues.append(f"route-support evidence {key!r} has no discovery route")
-    for slot_id, occupancy in slot_occupancy.items():
-        if occupancy > location.evidence_slots[slot_id].capacity:
-            issues.append(f"evidence slot {slot_id!r} exceeds its capacity")
+            return "uses an unavailable interview target"
+        return None
+    if binding.target_id != "body":
+        return "body discovery must target the literal body action"
+    return None
 
+
+def _validate_evidence_realization_stage(
+    stage: GeneratedEvidenceRealizationStage,
+    *,
+    blueprint: GeneratedProofRouteBlueprintStage,
+    core: GeneratedCrimeTimelineStage,
+    character_ids: tuple[str, ...],
+    location: LocationPackage,
+) -> None:
+    """Validate provenance and executable realization of all six proof roles."""
+
+    issues: list[str] = []
+    contracts = _proof_role_contracts(blueprint)
+    if set(stage.realizations) != set(contracts):
+        issues.append("evidence realization must cover exactly the six accepted proof roles")
+    events = {event.id: event for event in core.timeline}
+    cast = set(character_ids)
+    reachable_objects = _reachable_searchable_object_ids(location)
     visiting: set[str] = set()
     visited: set[str] = set()
 
-    def has_prerequisite_cycle(evidence_id: str) -> bool:
-        if evidence_id in visiting:
+    def has_cycle(role_id: str) -> bool:
+        if role_id in visiting:
             return True
-        if evidence_id in visited:
+        if role_id in visited or role_id not in stage.realizations:
             return False
-        visiting.add(evidence_id)
-        if any(
-            prerequisite_id in stage.evidence
-            and has_prerequisite_cycle(prerequisite_id)
-            for prerequisite_id in stage.evidence[evidence_id].prerequisite_evidence_ids
-        ):
+        visiting.add(role_id)
+        if any(has_cycle(value) for value in stage.realizations[role_id].prerequisite_role_ids):
             return True
-        visiting.remove(evidence_id)
-        visited.add(evidence_id)
+        visiting.remove(role_id)
+        visited.add(role_id)
         return False
 
-    if any(has_prerequisite_cycle(evidence_id) for evidence_id in sorted(evidence_ids)):
-        issues.append("evidence prerequisites must not contain a cycle")
-    if red_herrings != 2:
-        issues.append("the eight-item inventory must contain exactly two explained red herrings")
-
-    culprit_id = core.murder.murderer_id
-    eligible = {
-        evidence_id: item
-        for evidence_id, item in stage.evidence.items()
-        if not item.is_red_herring
-        and culprit_id in item.implicates_character_ids
-        and culprit_id not in item.exonerates_character_ids
-        and not item.prerequisite_evidence_ids
-    }
-
-    def supports_category(evidence_id: str, categories: set[str]) -> bool:
-        return any(
-            core.facts[fact_id].category.value in categories
-            for fact_id in stage.evidence[evidence_id].fact_ids
-            if fact_id in core.facts
+    for role_id, item in stage.realizations.items():
+        contract = contracts.get(role_id)
+        if contract is None:
+            continue
+        route_id, axis, claim, route = contract
+        if item.role_id != role_id or item.route_id != route_id or item.axis != axis:
+            issues.append(f"realization {role_id!r} rewrites its accepted proof ownership")
+        if set(item.supported_fact_ids) != set(claim.fact_ids):
+            issues.append(f"realization {role_id!r} changes its approved claim facts")
+        if item.kind != claim.required_form:
+            issues.append(f"realization {role_id!r} changes its approved evidence form")
+        if item.source_event_id not in set(claim.source_event_ids):
+            issues.append(f"realization {role_id!r} uses an unapproved source event")
+            continue
+        event = events.get(item.source_event_id)
+        if event is None:
+            issues.append(f"realization {role_id!r} names an unknown source event")
+            continue
+        if item.occurred_minute != event.minute:
+            issues.append(f"realization {role_id!r} changes its source-event time")
+        if not set(item.supported_fact_ids) <= set(event.fact_ids):
+            issues.append(
+                f"realization {role_id!r} claims facts absent from its selected source event"
+            )
+        event_characters = set(event.actor_ids) | set(event.observed_by)
+        if set(item.relevant_actor_ids) - cast or not set(item.relevant_actor_ids) <= event_characters:
+            issues.append(f"realization {role_id!r} has unsupported relevant actors")
+        discovery_issue = _discovery_binding_issue(
+            item.discovery,
+            core=core,
+            character_ids=character_ids,
+            location=location,
+            reachable_objects=reachable_objects,
         )
-
-    axis_candidates = (
-        [evidence_id for evidence_id in eligible if supports_category(evidence_id, {"means"})],
-        [evidence_id for evidence_id in eligible if supports_category(evidence_id, {"motive"})],
-        [
-            evidence_id
-            for evidence_id in eligible
-            if supports_category(evidence_id, {"opportunity", "timeline"})
-        ],
-    )
-    route_options: list[tuple[frozenset[str], frozenset[str]]] = []
-    for method_id, motive_id, opportunity_id in product(*axis_candidates):
-        route_ids = {method_id, motive_id, opportunity_id}
-        if len(route_ids) != 3:
-            continue
-        groups = {stage.evidence[evidence_id].redundancy_group for evidence_id in route_ids}
-        if len(groups) != 3:
-            continue
-        culprit_score = len(groups)
-        rival_score = max(
-            (
-                len(
-                    {
-                        stage.evidence[evidence_id].redundancy_group
-                        for evidence_id in route_ids
-                        if rival_id in stage.evidence[evidence_id].implicates_character_ids
-                    }
+        if discovery_issue:
+            issues.append(f"realization {role_id!r} {discovery_issue}")
+        prerequisite_ids = set(item.prerequisite_role_ids)
+        if role_id in prerequisite_ids or prerequisite_ids - set(contracts):
+            issues.append(f"realization {role_id!r} has an invalid prerequisite")
+        if any(contracts[value][0] != route_id for value in prerequisite_ids & set(contracts)):
+            issues.append(f"realization {role_id!r} depends on the other proof route")
+        if set(route.timeline_fact_ids) - {
+            fact_id
+            for candidate_id, candidate in stage.realizations.items()
+            if candidate_id in contracts and contracts[candidate_id][0] == route_id
+            for fact_id in candidate.supported_fact_ids
+        }:
+            issues.append(f"route {route_id!r} lacks realized support for its timeline facts")
+    if any(has_cycle(role_id) for role_id in stage.realizations):
+        issues.append("realized proof prerequisites must not contain a cycle")
+    for axis in ("method", "motive", "opportunity"):
+        left = stage.realizations.get(f"route_1_{axis}")
+        right = stage.realizations.get(f"route_2_{axis}")
+        if left is not None and right is not None and left.kind == right.kind:
+            left_event = events.get(left.source_event_id)
+            right_event = events.get(right.source_event_id)
+            if left_event is not None and right_event is not None and (
+                left_event.minute,
+                left_event.room_id,
+                tuple(sorted((*left_event.actor_ids, *left_event.observed_by))),
+                left_event.event_type.value,
+            ) == (
+                right_event.minute,
+                right_event.room_id,
+                tuple(sorted((*right_event.actor_ids, *right_event.observed_by))),
+                right_event.event_type.value,
+            ):
+                issues.append(
+                    f"realized proof routes reuse the same {axis} causal channel"
                 )
-                for rival_id in cast - {culprit_id}
-            ),
-            default=0,
+    route_discoveries = {
+        route_id: {
+            (item.discovery.kind, item.discovery.target_id)
+            for item in stage.realizations.values()
+            if item.route_id == route_id
+        }
+        for route_id in ("route_1", "route_2")
+    }
+    if route_discoveries["route_1"] & route_discoveries["route_2"]:
+        issues.append("realized proof routes must not share a discovery dependency")
+    _reject_stage("evidence realization", issues)
+
+
+def _validate_misdirection_stage(
+    stage: GeneratedMisdirectionConnectiveStage,
+    *,
+    blueprint: GeneratedProofRouteBlueprintStage,
+    realization: GeneratedEvidenceRealizationStage,
+    core: GeneratedCrimeTimelineStage,
+    character_ids: tuple[str, ...],
+    location: LocationPackage,
+) -> None:
+    """Validate misleading connective evidence without weakening either route."""
+
+    issues: list[str] = []
+    expected_ids = {"misdirection_1", "misdirection_2"}
+    if set(stage.misdirection) != expected_ids:
+        issues.append("misdirection must use exactly the two host-declared IDs")
+    contracts = _proof_role_contracts(blueprint)
+    events = {event.id: event for event in core.timeline}
+    cast = set(character_ids)
+    innocent_survivors = cast - {core.murder.murderer_id, core.murder.victim_id}
+    reachable_objects = _reachable_searchable_object_ids(location)
+    has_implication = False
+    has_exoneration = False
+    has_contradiction = False
+    has_secondary_secret = False
+    for key, item in stage.misdirection.items():
+        if item.misdirection_id != key:
+            issues.append(f"misdirection {key!r} rewrites its host ID")
+        event = events.get(item.source_event_id)
+        if event is None:
+            issues.append(f"misdirection {key!r} names an unknown source event")
+        else:
+            if item.occurred_minute != event.minute:
+                issues.append(f"misdirection {key!r} changes its source-event time")
+            if not set(item.fact_ids) <= set(event.fact_ids):
+                issues.append(f"misdirection {key!r} is not grounded in its source event")
+            if not set(item.relevant_actor_ids) <= (
+                set(event.actor_ids) | set(event.observed_by)
+            ):
+                issues.append(f"misdirection {key!r} has unsupported relevant actors")
+        if set(item.fact_ids) - set(core.facts):
+            issues.append(f"misdirection {key!r} names an unknown fact")
+        implications = set(item.implicates_character_ids)
+        exonerations = set(item.exonerates_character_ids)
+        if implications - innocent_survivors or exonerations - innocent_survivors:
+            issues.append(f"misdirection {key!r} may affect only living innocent suspects")
+        if implications & exonerations:
+            issues.append(f"misdirection {key!r} both implicates and exonerates one suspect")
+        if set(item.contradiction_fact_ids) - set(item.fact_ids):
+            issues.append(f"misdirection {key!r} has ungrounded contradiction links")
+        if set(item.secondary_secret_fact_ids) - set(item.fact_ids) or any(
+            core.facts[fact_id].category.value != "secret"
+            for fact_id in set(item.secondary_secret_fact_ids) & set(core.facts)
+        ):
+            issues.append(f"misdirection {key!r} has invalid secondary-secret links")
+        if set(item.prerequisite_role_ids) - set(contracts):
+            issues.append(f"misdirection {key!r} has an invalid prerequisite")
+        discovery_issue = _discovery_binding_issue(
+            item.discovery,
+            core=core,
+            character_ids=character_ids,
+            location=location,
+            reachable_objects=reachable_objects,
         )
-        if culprit_score >= 2 and culprit_score > rival_score:
-            route_options.append((frozenset(route_ids), frozenset(groups)))
-    if not any(
-        not (left_ids & right_ids or left_groups & right_groups)
-        for index, (left_ids, left_groups) in enumerate(route_options)
-        for right_ids, right_groups in route_options[index + 1 :]
+        if discovery_issue:
+            issues.append(f"misdirection {key!r} {discovery_issue}")
+        has_implication = has_implication or bool(implications)
+        has_exoneration = has_exoneration or bool(exonerations)
+        has_contradiction = has_contradiction or bool(item.contradiction_fact_ids)
+        has_secondary_secret = has_secondary_secret or bool(item.secondary_secret_fact_ids)
+    if not all(
+        (has_implication, has_exoneration, has_contradiction, has_secondary_secret)
     ):
         issues.append(
-            "evidence inventory cannot support two disjoint method/motive/opportunity routes"
+            "connective structure must include innocent implication, exoneration, "
+            "contradiction, and secondary-secret links"
         )
-    _reject_stage("evidence inventory", issues)
+    if not issues:
+        assembled = assemble_evidence_solution_stage(
+            blueprint,
+            realization,
+            stage,
+            core=core,
+            location=location,
+        )
+        try:
+            _validate_evidence_stage(
+                assembled,
+                core=core,
+                character_ids=character_ids,
+                location=location,
+            )
+        except GeneratedScenarioError as error:
+            issues.append(str(error))
+    _reject_stage("misdirection", issues)
 
 
 def _validate_overlay_stage(
@@ -1128,8 +1575,9 @@ async def _generate_stage(
     role: str,
     model_type: type[GeneratedCrimeTimelineStage]
     | type[GeneratedEvidenceSolutionStage]
-    | type[GeneratedEvidenceInventoryDeltaStage]
-    | type[GeneratedSolutionDeltaStage]
+    | type[GeneratedProofRouteBlueprintStage]
+    | type[GeneratedEvidenceRealizationStage]
+    | type[GeneratedMisdirectionConnectiveStage]
     | type[GeneratedOverlayKnowledgeStage]
     | type[GeneratedPresentationStage],
     instruction: str,
@@ -1268,7 +1716,7 @@ async def generate_validated_scenario(
     max_attempts: int = 3,
     attempt_observer: Callable[[dict[str, object]], None] | None = None,
 ) -> ValidatedGeneratedScenario:
-    """Generate four conceptual phases with two bounded Stage 2 deltas."""
+    """Generate four conceptual phases with three bounded Stage 2 deltas."""
 
     if llm is None:
         raise GeneratedScenarioError(
@@ -1301,95 +1749,120 @@ async def generate_validated_scenario(
         ),
         attempt_observer=attempt_observer,
     )
-    discovery_contract = {
-        "exact_evidence_count": 8,
-        "exact_red_herring_count": 2,
-        "required_route_support_count": 6,
-        "slot_search_routes": {
-            slot_id: f"search:{slot.object_id}"
-            for slot_id, slot in location.evidence_slots.items()
-        },
-        "legal_interview_routes": [
-            f"interview:{character_id}"
-            for character_id in character_ids
-            if character_id != core.murder.victim_id
-        ],
-        "legal_body_route": "examine:body",
-        "route_support_prerequisites": "must be empty",
-        "axis_fact_categories": {
-            "method": ["means"],
-            "motive": ["motive"],
-            "opportunity": ["opportunity", "timeline"],
-        },
-    }
-    evidence_inventory = await _generate_stage(
+    proof_blueprint = await _generate_stage(
         llm,
         prefix=prefix,
-        role="case_generation_evidence_inventory",
-        model_type=GeneratedEvidenceInventoryDeltaStage,
+        role="case_generation_proof_blueprint",
+        model_type=GeneratedProofRouteBlueprintStage,
         instruction=(
-            "Create exactly eight evidence items: exactly six non-red route supports and exactly "
-            "two explained red herrings. The six supports must make two disjoint complete routes "
-            "possible, with one distinct means, motive, and opportunity/timeline item per route. "
-            "Every support must implicate the murderer in a unique redundancy group, must not "
-            "exonerate the murderer, and must have no prerequisites. For slotted evidence, copy "
-            "the exact slot search route from discovery_contract and use no other search route. "
-            "Use only the literal legal interview/body routes supplied. Return evidence only."
+            "Design exactly two abstract and materially independent proof routes grounded only "
+            "in the accepted Stage 1 facts and events. Each route owns one method, motive, and "
+            "opportunity/timeline claim, its supporting fact/event IDs, one required evidence "
+            "form per claim, and an independence rationale. For each corresponding axis, use "
+            "a different evidence form or disjoint causal Stage 1 events so the routes cannot "
+            "collapse onto one proof channel. Every listed source event must independently "
+            "contain every fact claimed by that role. "
+            "Do not create evidence objects, placements, discovery actions, red herrings, or "
+            "player-facing prose. Return only the proof-route blueprint."
+        ),
+        upstream={"accepted_stage_1": core.model_dump(mode="json")},
+        max_tokens=12_000,
+        max_attempts=max_attempts,
+        validator=lambda value: _validate_proof_blueprint_stage(value, core=core),
+        attempt_observer=attempt_observer,
+    )
+    proof_contract = {
+        role_id: {
+            "route_id": route_id,
+            "axis": axis,
+            "claim": claim.model_dump(mode="json"),
+            "route_timeline_fact_ids": list(route.timeline_fact_ids),
+        }
+        for role_id, (route_id, axis, claim, route) in _proof_role_contracts(
+            proof_blueprint
+        ).items()
+    }
+    discovery_contract = {
+        "slot_ids": sorted(location.evidence_slots),
+        "interview_character_ids": sorted(
+            set(character_ids) - {core.murder.victim_id}
+        ),
+        "body_target_id": "body",
+        "host_compiles_actions": {
+            "slot": "search:<slot object_id>",
+            "interview": "interview:<character_id>",
+            "body": "examine:body",
+        },
+    }
+    realization = await _generate_stage(
+        llm,
+        prefix=prefix,
+        role="case_generation_evidence_realization",
+        model_type=GeneratedEvidenceRealizationStage,
+        instruction=(
+            "Instantiate exactly one concrete evidence item for each of the six immutable proof "
+            "roles. Preserve every role's route, axis, facts, source-event options, required "
+            "form, and independence meaning. Bind each item to one approved source event, causal "
+            "origin, relevant event actors, exact event minute, structured discovery binding, "
+            "same-route prerequisites, and canonical evidence semantics. Do not add red herrings, "
+            "innocent implications, exonerations, or new facts. Host code assigns canonical IDs "
+            "and exact engine action strings. Return only the realization delta."
         ),
         upstream={
-            "core": core.model_dump(mode="json"),
+            "accepted_stage_1": core.model_dump(mode="json"),
+            "accepted_proof_contract": proof_contract,
             "discovery_contract": discovery_contract,
         },
-        max_tokens=20_000,
+        max_tokens=16_000,
         max_attempts=max_attempts,
-        validator=lambda value: _validate_evidence_inventory_stage(
+        validator=lambda value: _validate_evidence_realization_stage(
             value,
+            blueprint=proof_blueprint,
             core=core,
             character_ids=character_ids,
             location=location,
         ),
         attempt_observer=attempt_observer,
     )
-    solution_delta = await _generate_stage(
+    connective = await _generate_stage(
         llm,
         prefix=prefix,
-        role="case_generation_solution",
-        model_type=GeneratedSolutionDeltaStage,
+        role="case_generation_misdirection",
+        model_type=GeneratedMisdirectionConnectiveStage,
         instruction=(
-            "Create the solution over the immutable accepted evidence inventory. Return exactly "
-            "two complete evidence routes. Each route must use one distinct method, motive, and "
-            "opportunity item; its timeline facts must be supported by facts linked from evidence "
-            "inside that same route. The two routes must share no evidence IDs or redundancy "
-            "groups, contain no red herrings, uniquely support the murderer, and use only the "
-            "axis fact categories in solution_contract. Return the solution only."
+            "Add exactly misdirection_1 and misdirection_2 after both true routes are immutable. "
+            "Each must be a discoverable, causally grounded red herring with a coherent innocent "
+            "explanation. Together they must add living-innocent implication, exoneration, a "
+            "contradiction opportunity, and evidence of an already-declared secondary secret. "
+            "Use only Stage 1 facts/events and prerequisites from accepted proof roles. Do not "
+            "rewrite or restate Stage 1, the proof blueprint, or true evidence realization."
         ),
         upstream={
-            "core": {
-                "murderer_id": core.murder.murderer_id,
-                "facts": {
-                    fact_id: {"category": fact.category.value}
-                    for fact_id, fact in core.facts.items()
-                },
-            },
-            "accepted_evidence_inventory": evidence_inventory.model_dump(mode="json"),
-            "solution_contract": {
-                "exact_route_count": 2,
-                "axis_fact_categories": discovery_contract["axis_fact_categories"],
-                "routes_must_not_share_evidence_or_redundancy_groups": True,
-                "route_timeline_facts_must_be_linked_by_that_route": True,
-            },
+            "accepted_stage_1": core.model_dump(mode="json"),
+            "accepted_proof_blueprint": proof_blueprint.model_dump(mode="json"),
+            "accepted_evidence_realization": realization.model_dump(mode="json"),
+            "allowed_prerequisite_role_ids": sorted(proof_contract),
+            "discovery_contract": discovery_contract,
         },
         max_tokens=8_000,
         max_attempts=max_attempts,
-        validator=lambda value: _validate_evidence_stage(
-            assemble_evidence_solution_stage(evidence_inventory, value),
+        validator=lambda value: _validate_misdirection_stage(
+            value,
+            blueprint=proof_blueprint,
+            realization=realization,
             core=core,
             character_ids=character_ids,
             location=location,
         ),
         attempt_observer=attempt_observer,
     )
-    evidence = assemble_evidence_solution_stage(evidence_inventory, solution_delta)
+    evidence = assemble_evidence_solution_stage(
+        proof_blueprint,
+        realization,
+        connective,
+        core=core,
+        location=location,
+    )
     def validate_complete_overlays(value: GeneratedOverlayKnowledgeStage) -> None:
         _validate_overlay_stage(
             value,

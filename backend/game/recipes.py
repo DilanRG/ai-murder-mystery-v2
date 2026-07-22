@@ -123,6 +123,12 @@ def case_content_fingerprint(case: CaseDefinition) -> str:
     """Hash canonical validated case JSON, independent of file whitespace/order."""
 
     document = case.model_dump(mode="json")
+    # Generated evidence retains explicit causal provenance. Preserve authored
+    # foundation fingerprints when the backwards-compatible optional field is
+    # absent, while generated cases keep it in canonical truth.
+    for evidence in document["evidence"].values():
+        if evidence.get("provenance") is None:
+            evidence.pop("provenance", None)
     # Evidence routes were added after the authored foundation was tagged. Keep
     # the legacy authored fingerprint byte-stable when that optional field is
     # empty, while generated cases retain their proof routes in canonical truth.

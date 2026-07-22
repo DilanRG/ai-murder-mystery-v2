@@ -17,7 +17,7 @@ from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
     EXPECTED_MANIFEST_REVISION,
     EXPECTED_REPLACED_PAIR_ID,
-    EXPECTED_REVISION8_PAIR_IDS,
+    EXPECTED_REVISION9_PAIR_IDS,
     PRIVATE_ARTIFACT_ROOT,
     ExperimentSafetyError,
     build_request,
@@ -121,7 +121,7 @@ def _execution_identity(
         "experiment_revision": int(manifest["manifest_revision"]),
         "git_sha": git_sha,
         "manifest_sha256": _manifest_digest(manifest),
-        "pair_ids": list(EXPECTED_REVISION8_PAIR_IDS),
+        "pair_ids": list(EXPECTED_REVISION9_PAIR_IDS),
         "reserve_activation": {
             "reserve_pair_id": "R1",
             "replaces_pair_id": EXPECTED_REPLACED_PAIR_ID,
@@ -139,7 +139,7 @@ def _verify_execution_identity(
 ) -> None:
     for key, value in expected.items():
         if document.get(key) != value:
-            raise ExperimentSafetyError(f"{description} differs from the frozen revision-8 plan.")
+            raise ExperimentSafetyError(f"{description} differs from the frozen revision-9 plan.")
 
 
 def _expected_cells(manifest: Mapping[str, Any]) -> list[tuple[str, str]]:
@@ -149,7 +149,7 @@ def _expected_cells(manifest: Mapping[str, Any]) -> list[tuple[str, str]]:
     }
     return [
         (pair_id, str(model_key))
-        for pair_id in EXPECTED_REVISION8_PAIR_IDS
+        for pair_id in EXPECTED_REVISION9_PAIR_IDS
         for model_key in pairs[pair_id]["model_order"]
     ]
 
@@ -260,13 +260,13 @@ async def run_generation_matrix(
 
     if reserve_replaces_pair_id != EXPECTED_REPLACED_PAIR_ID:
         raise ExperimentSafetyError(
-            "Revision 8 permits only the predeclared R1 replacement for interrupted pair P1."
+            "Revision 9 permits only the predeclared R1 replacement for interrupted pair P1."
         )
     declared_pairs = {
         str(pair["pair_id"]): pair
         for pair in [*manifest["generation_pairs"], manifest["reserve_pair"]]
     }
-    selected_pairs = [declared_pairs[pair_id] for pair_id in EXPECTED_REVISION8_PAIR_IDS]
+    selected_pairs = [declared_pairs[pair_id] for pair_id in EXPECTED_REVISION9_PAIR_IDS]
     reserve_pair_id = "R1"
 
     execution_identity = _execution_identity(manifest=manifest, git_sha=git_sha)
@@ -312,12 +312,12 @@ async def run_generation_matrix(
         experiment_revision=EXPECTED_MANIFEST_REVISION,
     ):
         raise ExperimentSafetyError(
-            "A revision-8 generation request intent exists without its execution plan; manual "
+            "A revision-9 generation request intent exists without its execution plan; manual "
             "reconciliation is required before provider traffic."
         )
     if progress_path.exists():
         raise ExperimentSafetyError(
-            "Generation results exist without a revision-8 execution plan; archive or reconcile "
+            "Generation results exist without a revision-9 execution plan; archive or reconcile "
             "them before provider traffic."
         )
 
@@ -351,7 +351,7 @@ async def run_generation_matrix(
             request = build_request(
                 manifest,
                 model_key,
-                task_role="case_generation_core",
+                task_role="case_generation_proof_blueprint",
             )
             run_id = f"generation-{pair_id}-{model_key}"
             plan["current_cell"] = {
@@ -520,7 +520,7 @@ async def run_generation_matrix(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the frozen revision-8 P2/P3/R1 DeepSeek matrix sequentially."
+        description="Run the frozen revision-9 P2/P3/R1 DeepSeek matrix sequentially."
     )
     parser.add_argument("--activate-reserve", action="store_true", required=True)
     parser.add_argument("--reserve-replaces", choices=("P1",), required=True)
@@ -533,7 +533,7 @@ async def main(argv: Sequence[str] | None = None) -> int:
     manifest = load_manifest()
     options = parse_args(argv)
     if not options.activate_reserve:
-        raise ExperimentSafetyError("Revision 8 requires explicit reserve activation.")
+        raise ExperimentSafetyError("Revision 9 requires explicit reserve activation.")
     git_sha = resolve_clean_git_sha()
     preflights = load_private_preflights(PRIVATE_ARTIFACT_ROOT / "verified_preflights.json")
     api_key = load_direct_api_key()

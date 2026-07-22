@@ -1,10 +1,4 @@
-"""Adversarial, provider-free coverage for staged canonical generation.
-
-These tests deliberately use the authored projection only as inert fixture data.
-They exercise the staged proposal boundary: a malformed or incompatible proposal
-must stop before it can become canonical truth, and accepted stage inputs must
-still pass the normal complete-document compiler.
-"""
+"""Falsifiable provider-free tests for Revision 9 staged canonical generation."""
 
 from __future__ import annotations
 
@@ -13,14 +7,15 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
-from conftest import make_dummy_generated_document
+from conftest import generated_stage_payloads, make_dummy_generated_document
 
 from game.case_generation import (
     GeneratedCrimeTimelineStage,
-    GeneratedEvidenceInventoryDeltaStage,
+    GeneratedEvidenceRealizationStage,
+    GeneratedMisdirectionConnectiveStage,
     GeneratedOverlayKnowledgeStage,
+    GeneratedProofRouteBlueprintStage,
     GeneratedScenarioError,
-    GeneratedSolutionDeltaStage,
     assemble_evidence_solution_stage,
     assemble_generated_case_blueprint,
     generate_validated_scenario,
@@ -29,7 +24,7 @@ from game.content import load_case, load_location
 
 
 class ScriptedStageLLM:
-    """A deterministic staged provider that records every chargeable request."""
+    """Deterministic staged provider that records every chargeable request."""
 
     def __init__(self, outputs_by_role: dict[str, list[str | Exception]]) -> None:
         self.outputs_by_role = {
@@ -47,76 +42,7 @@ class ScriptedStageLLM:
 
 
 def _stage_payloads() -> dict[str, dict[str, object]]:
-    """Split a valid full document exactly along the staged proposal seams."""
-
-    document = make_dummy_generated_document()
-    case = document["case"]
-    assert isinstance(case, dict)
-    solution = deepcopy(case["solution"])
-    route_support_ids = {
-        evidence_id
-        for route in solution["evidence_routes"]
-        for axis in (
-            "method_evidence_ids",
-            "motive_evidence_ids",
-            "opportunity_evidence_ids",
-        )
-        for evidence_id in route[axis]
-    }
-    red_herring_ids = [
-        evidence_id
-        for evidence_id, item in case["evidence"].items()
-        if item["is_red_herring"]
-    ][:2]
-    evidence_ids = route_support_ids | set(red_herring_ids)
-    evidence = {
-        evidence_id: deepcopy(item)
-        for evidence_id, item in case["evidence"].items()
-        if evidence_id in evidence_ids
-    }
-    culprit_id = solution["culprit_id"]
-    for evidence_id in route_support_ids:
-        evidence[evidence_id]["implicates_character_ids"] = [culprit_id]
-    assert len(evidence) == 8
-    overlays = deepcopy(case["overlays"])
-    for overlay in overlays.values():
-        overlay["supporting_evidence_ids"] = [
-            evidence_id
-            for evidence_id in overlay["supporting_evidence_ids"]
-            if evidence_id in evidence
-        ]
-    return {
-        "case_generation_core": {
-            "schema_version": 1,
-            **{
-                key: deepcopy(case[key])
-                for key in (
-                    "title",
-                    "investigation_start_minute",
-                    "murder",
-                    "facts",
-                    "timeline",
-                    "opening",
-                )
-            },
-        },
-        "case_generation_evidence_inventory": {
-            "schema_version": 1,
-            "evidence": evidence,
-        },
-        "case_generation_solution": {
-            "schema_version": 1,
-            "solution": solution,
-        },
-        "case_generation_overlays": {
-            "schema_version": 1,
-            "overlays": overlays,
-        },
-        "case_generation_presentation": {
-            "schema_version": 1,
-            "presentation": deepcopy(document["presentation"]),
-        },
-    }
+    return generated_stage_payloads(make_dummy_generated_document())
 
 
 def _json_stage_outputs(
@@ -129,23 +55,35 @@ def _roles(llm: ScriptedStageLLM) -> list[str]:
     return [str(call["task_role"]) for call in llm.calls]
 
 
-def test_stage_assembly_derives_fact_evidence_links_from_evidence_once() -> None:
+def _parse_truth_stages():
     payloads = _stage_payloads()
-    crime = GeneratedCrimeTimelineStage.model_validate(
-        payloads["case_generation_core"]
+    core = GeneratedCrimeTimelineStage.model_validate(payloads["case_generation_core"])
+    proof = GeneratedProofRouteBlueprintStage.model_validate(
+        payloads["case_generation_proof_blueprint"]
     )
-    inventory = GeneratedEvidenceInventoryDeltaStage.model_validate(
-        payloads["case_generation_evidence_inventory"]
+    realization = GeneratedEvidenceRealizationStage.model_validate(
+        payloads["case_generation_evidence_realization"]
     )
-    solution = GeneratedSolutionDeltaStage.model_validate(
-        payloads["case_generation_solution"]
+    connective = GeneratedMisdirectionConnectiveStage.model_validate(
+        payloads["case_generation_misdirection"]
     )
-    evidence = assemble_evidence_solution_stage(inventory, solution)
+    evidence = assemble_evidence_solution_stage(
+        proof,
+        realization,
+        connective,
+        core=core,
+        location=load_location("ashwick_manor"),
+    )
+    return payloads, core, evidence
+
+
+def test_stage_assembly_derives_links_and_retains_causal_provenance() -> None:
+    payloads, core, evidence = _parse_truth_stages()
     overlays = GeneratedOverlayKnowledgeStage.model_validate(
         payloads["case_generation_overlays"]
     )
 
-    blueprint = assemble_generated_case_blueprint(crime, evidence, overlays)
+    blueprint = assemble_generated_case_blueprint(core, evidence, overlays)
 
     expected = {
         fact_id: tuple(
@@ -155,12 +93,17 @@ def test_stage_assembly_derives_fact_evidence_links_from_evidence_once() -> None
                 if fact_id in item.fact_ids
             )
         )
-        for fact_id in crime.facts
+        for fact_id in core.facts
     }
     assert {
         fact_id: fact.related_evidence_ids
         for fact_id, fact in blueprint.facts.items()
     } == expected
+    assert all(item.provenance is not None for item in evidence.evidence.values())
+    assert {
+        item.provenance.evidence_role  # type: ignore[union-attr]
+        for item in evidence.evidence.values()
+    } == {"method", "motive", "opportunity", "misdirection"}
 
 
 @pytest.mark.asyncio
@@ -178,15 +121,16 @@ async def test_staged_generation_compiles_a_complete_canonical_case() -> None:
 
     assert result.case.seed == 901
     assert result.presentation.source == "llm"
+    assert len(result.case.evidence) == 8
     assert _roles(llm) == [
         "case_generation_core",
-        "case_generation_evidence_inventory",
-        "case_generation_solution",
+        "case_generation_proof_blueprint",
+        "case_generation_evidence_realization",
+        "case_generation_misdirection",
         "case_generation_overlays",
         "case_generation_presentation",
     ]
     assert all(call["json_mode"] is True for call in llm.calls)
-    assert all(int(call["max_tokens"]) > 0 for call in llm.calls)
 
 
 @pytest.mark.asyncio
@@ -206,16 +150,16 @@ async def test_staged_generation_uses_a_byte_identical_cacheable_prefix() -> Non
         tuple(message.content for message in call["messages"][:2])
         for call in llm.calls
     ]
-    assert len(prefixes) == 5
-    assert prefixes[1:] == [prefixes[0]] * 4
+    assert len(prefixes) == 6
+    assert prefixes[1:] == [prefixes[0]] * 5
 
 
 @pytest.mark.asyncio
-async def test_malformed_evidence_stage_stops_downstream_and_never_admits_partial_truth() -> None:
+async def test_malformed_proof_blueprint_stops_before_evidence_spend() -> None:
     source = load_case("ashwick_sample")
     payloads = _stage_payloads()
     outputs = _json_stage_outputs(payloads)
-    outputs["case_generation_evidence_inventory"] = ["{not json", "{still not json"]
+    outputs["case_generation_proof_blueprint"] = ["{not json", "{still not json"]
     llm = ScriptedStageLLM(outputs)
 
     with pytest.raises(GeneratedScenarioError, match="after 2 attempts"):
@@ -227,76 +171,19 @@ async def test_malformed_evidence_stage_stops_downstream_and_never_admits_partia
             max_attempts=2,
         )
 
-    # Core was accepted once, but no later-stage proposal may run and no
-    # partially merged document is returned from a failure path.
     assert _roles(llm) == [
         "case_generation_core",
-        "case_generation_evidence_inventory",
-        "case_generation_evidence_inventory",
+        "case_generation_proof_blueprint",
+        "case_generation_proof_blueprint",
     ]
 
 
 @pytest.mark.asyncio
-async def test_undiscoverable_route_support_stops_before_solution_spend() -> None:
+async def test_ungrounded_proof_claim_stops_before_realization() -> None:
     source = load_case("ashwick_sample")
     payloads = _stage_payloads()
-    inventory = payloads["case_generation_evidence_inventory"]
-    assert isinstance(inventory, dict)
-    evidence = inventory["evidence"]
-    assert isinstance(evidence, dict)
-    support = next(item for item in evidence.values() if not item["is_red_herring"])
-    support["discoverable_via"] = []
-    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
-
-    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
-        await generate_validated_scenario(
-            llm,
-            character_ids=source.character_ids,
-            location=load_location("ashwick_manor"),
-            seed=909,
-            max_attempts=1,
-        )
-
-    assert _roles(llm) == [
-        "case_generation_core",
-        "case_generation_evidence_inventory",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_cross_axis_evidence_route_is_rejected_before_overlay_spend() -> None:
-    source = load_case("ashwick_sample")
-    payloads = _stage_payloads()
-    solution = payloads["case_generation_solution"]["solution"]
-    assert isinstance(solution, dict)
-    routes = solution["evidence_routes"]
-    assert isinstance(routes, list)
-    routes[0]["method_evidence_ids"] = deepcopy(routes[0]["motive_evidence_ids"])
-    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
-
-    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
-        await generate_validated_scenario(
-            llm,
-            character_ids=source.character_ids,
-            location=load_location("ashwick_manor"),
-            seed=907,
-            max_attempts=1,
-        )
-
-    assert _roles(llm) == [
-        "case_generation_core",
-        "case_generation_evidence_inventory",
-        "case_generation_solution",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_overlay_stage_requires_the_exact_selected_cast_before_presentation() -> None:
-    source = load_case("ashwick_sample")
-    payloads = _stage_payloads()
-    overlays = payloads["case_generation_overlays"]["overlays"]
-    assert isinstance(overlays, dict)
-    overlays.pop(source.character_ids[-1])
+    proof = payloads["case_generation_proof_blueprint"]
+    proof["routes"][0]["method"]["source_event_ids"] = ["timeline_meeting"]  # type: ignore[index]
     llm = ScriptedStageLLM(_json_stage_outputs(payloads))
 
     with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
@@ -310,106 +197,138 @@ async def test_overlay_stage_requires_the_exact_selected_cast_before_presentatio
 
     assert _roles(llm) == [
         "case_generation_core",
-        "case_generation_evidence_inventory",
-        "case_generation_solution",
-        "case_generation_overlays",
+        "case_generation_proof_blueprint",
     ]
 
 
 @pytest.mark.asyncio
-async def test_only_the_rejected_stage_retries_with_feedback_and_retry_is_bounded() -> None:
+async def test_each_proof_source_event_must_independently_ground_its_claim() -> None:
     source = load_case("ashwick_sample")
     payloads = _stage_payloads()
-    outputs = _json_stage_outputs(payloads)
-    outputs["case_generation_evidence_inventory"] = [
-        json.dumps({"schema_version": 1, "facts": {}}),
-        json.dumps(payloads["case_generation_evidence_inventory"]),
-    ]
-    llm = ScriptedStageLLM(outputs)
-
-    result = await generate_validated_scenario(
-        llm,
-        character_ids=source.character_ids,
-        location=load_location("ashwick_manor"),
-        seed=905,
-        max_attempts=2,
+    proof = payloads["case_generation_proof_blueprint"]
+    claim = proof["routes"][0]["method"]  # type: ignore[index]
+    unrelated_event_id = next(
+        event["id"]
+        for event in payloads["case_generation_core"]["timeline"]
+        if not set(claim["fact_ids"]) <= set(event["fact_ids"])
     )
+    claim["source_event_ids"].append(unrelated_event_id)
+    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
 
-    assert result.case.id.startswith("generated_")
+    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
+        await generate_validated_scenario(
+            llm,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=9041,
+            max_attempts=1,
+        )
+
     assert _roles(llm) == [
         "case_generation_core",
-        "case_generation_evidence_inventory",
-        "case_generation_evidence_inventory",
-        "case_generation_solution",
-        "case_generation_overlays",
-        "case_generation_presentation",
+        "case_generation_proof_blueprint",
     ]
-    evidence_repair_messages = llm.calls[2]["messages"]
-    assert any(
-        "previous attempt was rejected" in message.content.lower()
-        for message in evidence_repair_messages[2:]
-    )
-    # Repair instructions are appended after the cache-stable first two messages.
-    assert tuple(message.content for message in llm.calls[1]["messages"][:2]) == tuple(
-        message.content for message in llm.calls[2]["messages"][:2]
-    )
 
 
 @pytest.mark.asyncio
-async def test_solution_retry_keeps_the_accepted_inventory_immutable() -> None:
+async def test_decorative_event_id_cannot_fake_an_independent_causal_channel() -> None:
     source = load_case("ashwick_sample")
     payloads = _stage_payloads()
-    invalid_solution = deepcopy(payloads["case_generation_solution"])
-    solution = invalid_solution["solution"]
-    assert isinstance(solution, dict)
-    routes = solution["evidence_routes"]
-    assert isinstance(routes, list)
-    routes[0]["method_evidence_ids"] = deepcopy(routes[0]["motive_evidence_ids"])
-    outputs = _json_stage_outputs(payloads)
-    outputs["case_generation_solution"] = [
-        json.dumps(invalid_solution),
-        json.dumps(payloads["case_generation_solution"]),
-    ]
-    llm = ScriptedStageLLM(outputs)
-
-    result = await generate_validated_scenario(
-        llm,
-        character_ids=source.character_ids,
-        location=load_location("ashwick_manor"),
-        seed=908,
-        max_attempts=2,
+    core = payloads["case_generation_core"]
+    proof = payloads["case_generation_proof_blueprint"]
+    left = proof["routes"][0]["method"]  # type: ignore[index]
+    right = proof["routes"][1]["method"]  # type: ignore[index]
+    source_event = next(
+        event
+        for event in core["timeline"]
+        if event["id"] == left["source_event_ids"][0]
     )
+    decorative = deepcopy(source_event)
+    decorative["id"] = "timeline_decorative_independence_claim"
+    decorative["fact_ids"] = list(
+        dict.fromkeys([*decorative["fact_ids"], *right["fact_ids"]])
+    )
+    core["timeline"].append(decorative)
+    core["timeline"].sort(key=lambda event: (event["minute"], event["id"]))
+    right["required_form"] = left["required_form"]
+    right["source_event_ids"] = [decorative["id"]]
+    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
 
-    assert result.case.id.startswith("generated_")
+    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
+        await generate_validated_scenario(
+            llm,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=9042,
+            max_attempts=1,
+        )
+
     assert _roles(llm) == [
         "case_generation_core",
-        "case_generation_evidence_inventory",
-        "case_generation_solution",
-        "case_generation_solution",
-        "case_generation_overlays",
-        "case_generation_presentation",
+        "case_generation_proof_blueprint",
     ]
-    first_payload = json.loads(llm.calls[2]["messages"][2].content)
-    repair_payload = json.loads(llm.calls[3]["messages"][2].content)
-    assert (
-        first_payload["accepted_upstream"]["accepted_evidence_inventory"]
-        == repair_payload["accepted_upstream"]["accepted_evidence_inventory"]
-    )
-    assert "previous attempt was rejected" in repair_payload["repair_feedback"].lower()
 
 
 @pytest.mark.asyncio
-async def test_public_spoiler_retries_only_presentation_after_truth_admission() -> None:
+async def test_realization_cannot_reassign_an_accepted_proof_role() -> None:
     source = load_case("ashwick_sample")
     payloads = _stage_payloads()
-    invalid_presentation = deepcopy(payloads["case_generation_presentation"])
-    invalid_presentation["presentation"]["public_opening"] = (  # type: ignore[index]
-        "The murderer and the weapon are already obvious."
+    realization = payloads["case_generation_evidence_realization"]["realizations"]
+    realization["route_1_method"]["route_id"] = "route_2"  # type: ignore[index]
+    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
+
+    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
+        await generate_validated_scenario(
+            llm,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=905,
+            max_attempts=1,
+        )
+
+    assert _roles(llm) == [
+        "case_generation_core",
+        "case_generation_proof_blueprint",
+        "case_generation_evidence_realization",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_realized_routes_cannot_share_one_discovery_dependency() -> None:
+    source = load_case("ashwick_sample")
+    payloads = _stage_payloads()
+    realizations = payloads["case_generation_evidence_realization"]["realizations"]
+    realizations["route_2_method"]["discovery"] = deepcopy(
+        realizations["route_1_method"]["discovery"]
     )
+    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
+
+    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
+        await generate_validated_scenario(
+            llm,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=9051,
+            max_attempts=1,
+        )
+
+    assert _roles(llm) == [
+        "case_generation_core",
+        "case_generation_proof_blueprint",
+        "case_generation_evidence_realization",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_realization_retry_keeps_the_accepted_proof_blueprint_immutable() -> None:
+    source = load_case("ashwick_sample")
+    payloads = _stage_payloads()
+    invalid = deepcopy(payloads["case_generation_evidence_realization"])
+    invalid["realizations"]["route_1_method"]["source_event_id"] = "unknown"  # type: ignore[index]
     outputs = _json_stage_outputs(payloads)
-    outputs["case_generation_presentation"] = [
-        json.dumps(invalid_presentation),
-        json.dumps(payloads["case_generation_presentation"]),
+    outputs["case_generation_evidence_realization"] = [
+        json.dumps(invalid),
+        json.dumps(payloads["case_generation_evidence_realization"]),
     ]
     llm = ScriptedStageLLM(outputs)
 
@@ -422,12 +341,87 @@ async def test_public_spoiler_retries_only_presentation_after_truth_admission() 
     )
 
     assert result.case.id.startswith("generated_")
-    assert _roles(llm) == [
-        "case_generation_core",
-        "case_generation_evidence_inventory",
-        "case_generation_solution",
-        "case_generation_overlays",
+    first = json.loads(llm.calls[2]["messages"][2].content)
+    repair = json.loads(llm.calls[3]["messages"][2].content)
+    assert first["accepted_upstream"]["accepted_proof_contract"] == repair[
+        "accepted_upstream"
+    ]["accepted_proof_contract"]
+    assert "previous attempt was rejected" in repair["repair_feedback"].lower()
+
+
+@pytest.mark.asyncio
+async def test_misdirection_cannot_target_culprit_or_rewrite_true_evidence() -> None:
+    source = load_case("ashwick_sample")
+    payloads = _stage_payloads()
+    invalid = deepcopy(payloads["case_generation_misdirection"])
+    invalid["misdirection"]["misdirection_1"]["implicates_character_ids"] = [  # type: ignore[index]
+        source.murder.murderer_id
+    ]
+    invalid["realizations"] = {}
+    outputs = _json_stage_outputs(payloads)
+    outputs["case_generation_misdirection"] = [json.dumps(invalid)]
+    llm = ScriptedStageLLM(outputs)
+
+    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
+        await generate_validated_scenario(
+            llm,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=907,
+            max_attempts=1,
+        )
+
+    assert _roles(llm)[-1] == "case_generation_misdirection"
+    assert "case_generation_overlays" not in _roles(llm)
+
+
+@pytest.mark.asyncio
+async def test_overlay_requires_the_exact_selected_cast_before_presentation() -> None:
+    source = load_case("ashwick_sample")
+    payloads = _stage_payloads()
+    overlays = payloads["case_generation_overlays"]["overlays"]
+    overlays.pop(source.character_ids[-1])  # type: ignore[union-attr]
+    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
+
+    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
+        await generate_validated_scenario(
+            llm,
+            character_ids=source.character_ids,
+            location=load_location("ashwick_manor"),
+            seed=908,
+            max_attempts=1,
+        )
+
+    assert _roles(llm)[-1] == "case_generation_overlays"
+    assert "case_generation_presentation" not in _roles(llm)
+
+
+@pytest.mark.asyncio
+async def test_public_spoiler_retries_only_presentation_after_truth_admission() -> None:
+    source = load_case("ashwick_sample")
+    payloads = _stage_payloads()
+    invalid = deepcopy(payloads["case_generation_presentation"])
+    invalid["presentation"]["public_opening"] = (  # type: ignore[index]
+        "The murderer and the weapon are already obvious."
+    )
+    outputs = _json_stage_outputs(payloads)
+    outputs["case_generation_presentation"] = [
+        json.dumps(invalid),
+        json.dumps(payloads["case_generation_presentation"]),
+    ]
+    llm = ScriptedStageLLM(outputs)
+
+    result = await generate_validated_scenario(
+        llm,
+        character_ids=source.character_ids,
+        location=load_location("ashwick_manor"),
+        seed=909,
+        max_attempts=2,
+    )
+
+    assert result.case.id.startswith("generated_")
+    assert _roles(llm)[-2:] == [
         "case_generation_presentation",
         "case_generation_presentation",
     ]
-    assert "previous attempt was rejected" in llm.calls[5]["messages"][2].content.lower()  # type: ignore[index]
+    assert "previous attempt was rejected" in llm.calls[-1]["messages"][2].content.lower()

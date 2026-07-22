@@ -247,8 +247,9 @@ async def test_invalid_generation_retries_with_feedback_then_accepts_dummy_case(
                 json.dumps(generated_stage_response(document, role))
                 for role in (
                     "case_generation_core",
-                    "case_generation_evidence_inventory",
-                    "case_generation_solution",
+                    "case_generation_proof_blueprint",
+                    "case_generation_evidence_realization",
+                    "case_generation_misdirection",
                     "case_generation_overlays",
                     "case_generation_presentation",
                 )
@@ -265,7 +266,7 @@ async def test_invalid_generation_retries_with_feedback_then_accepts_dummy_case(
     )
 
     assert result.case.seed == 295
-    assert len(llm.calls) == 6
+    assert len(llm.calls) == 7
     assert "previous attempt was rejected" in llm.calls[1]["messages"][2].content.lower()  # type: ignore[index]
     assert "inert story data" in llm.calls[0]["messages"][0].content.lower()  # type: ignore[index]
     assert all(call["json_mode"] is True for call in llm.calls)
