@@ -65,7 +65,7 @@ EXPECTED_MODELS = {
     "flash": "deepseek-v4-flash",
     "pro": "deepseek-v4-pro",
 }
-EXPERIMENT_REVISION = 13
+EXPERIMENT_REVISION = 14
 
 
 class Stage2ProviderPolicy(ExperimentPolicy):
@@ -270,10 +270,12 @@ def _client(
 ) -> LLMClient:
     if reasoning is None:
         task_limits = {
-            "stage2_semantic_2a_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
+            "stage2_semantic_2a_route_1_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
+            "stage2_semantic_2a_route_2_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
             "stage2_semantic_2b_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
             "stage2_semantic_2c_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
-            "stage2_semantic_2a_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
+            "stage2_semantic_2a_route_1_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
+            "stage2_semantic_2a_route_2_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
             "stage2_semantic_2b_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
             "stage2_semantic_2c_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
             "stage2_exact_model_preflight": 8,
@@ -281,7 +283,8 @@ def _client(
         max_tokens = STAGE2_SYNTAX_REPAIR_MAX_TOKENS
     else:
         task_limits = {
-            "stage2_semantic_2a": STAGE2A_MAX_TOKENS,
+            "stage2_semantic_2a_route_1": STAGE2A_MAX_TOKENS,
+            "stage2_semantic_2a_route_2": STAGE2A_MAX_TOKENS,
             "stage2_semantic_2b": STAGE2B_MAX_TOKENS,
             "stage2_semantic_2c": STAGE2C_MAX_TOKENS,
         }
@@ -302,12 +305,18 @@ def _client(
 
 def _reasoning_map() -> dict[str, str | None]:
     result: dict[str, str | None] = {
-        "stage2_semantic_2a": "high",
+        "stage2_semantic_2a_route_1": "high",
+        "stage2_semantic_2a_route_2": "high",
         "stage2_semantic_2b": "high",
         "stage2_semantic_2c": "high",
         "stage2_exact_model_preflight": None,
     }
-    for stage in ("stage2_semantic_2a", "stage2_semantic_2b", "stage2_semantic_2c"):
+    for stage in (
+        "stage2_semantic_2a_route_1",
+        "stage2_semantic_2a_route_2",
+        "stage2_semantic_2b",
+        "stage2_semantic_2c",
+    ):
         result[f"{stage}_syntax_repair"] = None
         result[f"{stage}_delta_repair"] = None
     return result
@@ -365,6 +374,8 @@ def _load_checkpoint_records(
     if not isinstance(records, list) or not all(isinstance(row, dict) for row in records):
         raise ExperimentSafetyError(f"{model_key} Stage 2 checkpoint records are malformed")
     expected_order = [
+        "stage2_semantic_2a_route_1",
+        "stage2_semantic_2a_route_2",
         "stage2_semantic_2a",
         "stage2_semantic_2b",
         "stage2_semantic_2c",
@@ -500,6 +511,8 @@ async def _run_model(
                 )
             return
         expected_order = [
+            "stage2_semantic_2a_route_1",
+            "stage2_semantic_2a_route_2",
             "stage2_semantic_2a",
             "stage2_semantic_2b",
             "stage2_semantic_2c",
@@ -544,6 +557,8 @@ async def _run_model(
                 str(record["stage"]): record
                 for record in accepted_stages
                 if record.get("stage") in {
+                    "stage2_semantic_2a_route_1",
+                    "stage2_semantic_2a_route_2",
                     "stage2_semantic_2a",
                     "stage2_semantic_2b",
                     "stage2_semantic_2c",
@@ -625,10 +640,20 @@ async def _run_model(
     }
 
 
-def _existing_results() -> dict[str, Any]:
+def _existing_results(
+    *,
+    manifest: Mapping[str, Any],
+    git_sha: str,
+) -> dict[str, Any]:
     if not RESULTS_PATH.is_file():
         return {"schema_version": 1, "status": "running", "model_results": []}
     value = _load_json(RESULTS_PATH, label="existing Stage 2 qualification results")
+    if (
+        value.get("experiment_revision") != EXPERIMENT_REVISION
+        or value.get("git_sha") != git_sha
+        or value.get("manifest_fingerprint") != _manifest_fingerprint(manifest)
+    ):
+        return {"schema_version": 1, "status": "running", "model_results": []}
     if not isinstance(value.get("model_results"), list):
         raise ExperimentSafetyError("Existing Stage 2 results are malformed")
     return value
@@ -645,7 +670,7 @@ async def run_paid_qualification(manifest: Mapping[str, Any]) -> dict[str, Any]:
         raise ExperimentSafetyError(
             "Stage 2 ledger has an unresolved reservation; accounting is not trustworthy"
         )
-    existing = _existing_results()
+    existing = _existing_results(manifest=manifest, git_sha=git_sha)
     existing_by_model = {
         item["model_key"]: item
         for item in existing["model_results"]
@@ -653,6 +678,7 @@ async def run_paid_qualification(manifest: Mapping[str, Any]) -> dict[str, Any]:
     }
     plan = {
         "schema_version": 1,
+        "experiment_revision": EXPERIMENT_REVISION,
         "status": "running",
         "created_at": existing.get("created_at", datetime.now(UTC).isoformat()),
         "updated_at": datetime.now(UTC).isoformat(),
@@ -707,6 +733,8 @@ async def run_paid_qualification(manifest: Mapping[str, Any]) -> dict[str, Any]:
             RESULTS_PATH,
             {
                 "schema_version": 1,
+                "experiment_revision": EXPERIMENT_REVISION,
+                "manifest_fingerprint": _manifest_fingerprint(manifest),
                 "status": "running",
                 "created_at": plan["created_at"],
                 "updated_at": datetime.now(UTC).isoformat(),
@@ -725,6 +753,8 @@ async def run_paid_qualification(manifest: Mapping[str, Any]) -> dict[str, Any]:
     status = "completed" if passed == {"flash", "pro"} else "completed_with_failures"
     results = {
         "schema_version": 1,
+        "experiment_revision": EXPERIMENT_REVISION,
+        "manifest_fingerprint": _manifest_fingerprint(manifest),
         "status": status,
         "created_at": plan["created_at"],
         "completed_at": datetime.now(UTC).isoformat(),

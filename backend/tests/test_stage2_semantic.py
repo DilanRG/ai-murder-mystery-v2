@@ -15,6 +15,7 @@ from game.models import EvidenceKind, LocationPackage
 from game.stage1_semantic import content_fingerprint
 from game.stage2_semantic import (
     CompiledStage2A,
+    Stage2ARouteDelta,
     Stage2ASemanticCandidate,
     Stage2BRealizationProposal,
     Stage2BSemanticCandidate,
@@ -29,7 +30,7 @@ from game.stage2_semantic import (
     build_discovery_affordance_catalogue,
     build_secondary_secret_catalogue,
     build_stage2_proof_support_catalogue,
-    build_stage2a_messages,
+    build_stage2a_route_messages,
     build_stage2b_messages,
     build_stage2c_messages,
     compile_stage2a_candidate,
@@ -41,12 +42,14 @@ from game.stage2_semantic import (
     generate_stage2_boundary,
     secondary_secret_catalogue_fingerprint,
     stage2a_affordance_assignment,
+    stage2a_route_delta_valid_example,
     stage2a_valid_example,
     stage2b_valid_example,
     stage2c_valid_example,
     validate_assembled_stage2,
     validate_stage2a_candidate,
     validate_stage2a_discovery_feasibility,
+    validate_stage2a_route_delta,
     validate_stage2b_candidate,
     validate_stage2c_candidate,
 )
@@ -164,7 +167,6 @@ def test_stage2a_rejects_reused_channel_pattern_presented_as_independent() -> No
             axis: getattr(right, axis).model_copy(
                 update={
                     "proposed_channel": getattr(left, axis).proposed_channel,
-                    "planned_discovery_mode": getattr(left, axis).planned_discovery_mode,
                     "support_alias": getattr(left, axis).support_alias,
                 }
             )
@@ -198,21 +200,33 @@ def test_stage2a_proves_an_independent_discovery_allocation_before_stage2b() -> 
     )
 
 
-def test_stage2a_rejects_channel_and_discovery_mode_mismatch() -> None:
+def test_stage2a_route_delta_binds_route_order_and_prior_fingerprint() -> None:
     f = _fixture()
-    candidate = f["candidate_a"]
-    left, right = candidate.routes
-    changed_method = left.method.model_copy(
-        update={
-            "proposed_channel": EvidenceKind.BEHAVIOURAL,
-            "planned_discovery_mode": "physical_search",
-        }
+    route_1 = stage2a_route_delta_valid_example(
+        f["support"], route_index=1
     )
-    changed = candidate.model_copy(
-        update={"routes": (left.model_copy(update={"method": changed_method}), right)}
-    )
-    assert "channel_discovery_mismatch" in _codes(
-        validate_stage2a_candidate(changed, catalogue=f["support"])
+    assert validate_stage2a_route_delta(
+        route_1,
+        expected_route_index=1,
+        catalogue=f["support"],
+    ).is_valid
+    route_2 = stage2a_route_delta_valid_example(
+        f["support"],
+        route_index=2,
+        accepted_route_1=route_1.route,
+        discovery_catalogue=f["discovery"],
+        core=f["core"],
+    ).model_copy(update={"route": f["candidate_a"].routes[1]})
+    stale = route_2.model_copy(update={"accepted_route_1_fingerprint": "0" * 64})
+    assert "stale_route_1_fingerprint" in _codes(
+        validate_stage2a_route_delta(
+            stale,
+            expected_route_index=2,
+            catalogue=f["support"],
+            accepted_route_1=route_1.route,
+            discovery_catalogue=f["discovery"],
+            core=f["core"],
+        )
     )
 
 
@@ -220,14 +234,19 @@ def test_stage2a_rejects_two_routes_dependent_on_the_single_body_action() -> Non
     f = _fixture()
     candidate = f["candidate_a"]
     left, right = candidate.routes
-    changed_method = right.method.model_copy(
-        update={
-            "proposed_channel": EvidenceKind.PHYSICAL,
-            "planned_discovery_mode": "body_inspection",
-        }
+    changed_left_opportunity = left.opportunity.model_copy(
+        update={"proposed_channel": EvidenceKind.BEHAVIOURAL}
+    )
+    changed_right_method = right.method.model_copy(
+        update={"proposed_channel": EvidenceKind.BEHAVIOURAL}
     )
     changed = candidate.model_copy(
-        update={"routes": (left, right.model_copy(update={"method": changed_method}))}
+        update={
+            "routes": (
+                left.model_copy(update={"opportunity": changed_left_opportunity}),
+                right.model_copy(update={"method": changed_right_method}),
+            )
+        }
     )
     report = validate_stage2a_discovery_feasibility(
         changed,
@@ -273,10 +292,7 @@ def test_stage2b_rejects_same_witness_as_mandatory_bottleneck() -> None:
         if role.route_id != right.route_id and role.axis == right.axis
     )
     roles[left.role_id] = left.model_copy(
-        update={
-            "proposed_channel": EvidenceKind.TESTIMONIAL,
-            "planned_discovery_mode": "voluntary_testimony",
-        }
+        update={"proposed_channel": EvidenceKind.TESTIMONIAL}
     )
     changed_a = stage_a.model_copy(update={"roles": roles})
     candidate = f["candidate_b"]
@@ -626,20 +642,28 @@ class _FakeLLM:
 
 
 @pytest.mark.asyncio
-async def test_accepted_stage2a_checkpoint_resumes_at_stage2b_without_duplicate_call() -> None:
+async def test_accepted_stage2a_route_checkpoint_resumes_without_duplicate_call() -> None:
     f = _fixture()
-    stage_2a_record: dict[str, object] = {}
+    route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
+    route_2 = stage2a_route_delta_valid_example(
+        f["support"],
+        route_index=2,
+        accepted_route_1=route_1.route,
+        discovery_catalogue=f["discovery"],
+        core=f["core"],
+    ).model_copy(update={"route": f["candidate_a"].routes[1]})
+    route_1_record: dict[str, object] = {}
     first_llm = _FakeLLM(
         [
             SimpleNamespace(
-                content=f["candidate_a"].model_dump_json(),
+                content=route_1.model_dump_json(),
                 finish_reason="stop",
             )
         ]
     )
 
-    def interrupt_after_stage_2a(record: dict[str, object]) -> None:
-        stage_2a_record.update(record)
+    def interrupt_after_route_1(record: dict[str, object]) -> None:
+        route_1_record.update(record)
         raise RuntimeError("simulated controller interruption")
 
     with pytest.raises(RuntimeError, match="simulated controller interruption"):
@@ -649,12 +673,13 @@ async def test_accepted_stage2a_checkpoint_resumes_at_stage2b_without_duplicate_
             core=f["core"],
             character_ids=f["case"].character_ids,
             location=f["location"],
-            accepted_stage_observer=interrupt_after_stage_2a,
+            accepted_stage_observer=interrupt_after_route_1,
         )
-    assert first_llm.calls == ["stage2_semantic_2a"]
+    assert first_llm.calls == ["stage2_semantic_2a_route_1"]
 
     resumed_llm = _FakeLLM(
         [
+            SimpleNamespace(content=route_2.model_dump_json(), finish_reason="stop"),
             SimpleNamespace(
                 content=f["candidate_b"].model_dump_json(),
                 finish_reason="stop",
@@ -671,21 +696,26 @@ async def test_accepted_stage2a_checkpoint_resumes_at_stage2b_without_duplicate_
         core=f["core"],
         character_ids=f["case"].character_ids,
         location=f["location"],
-        resume_stage_records={"stage2_semantic_2a": stage_2a_record},
+        resume_stage_records={"stage2_semantic_2a_route_1": route_1_record},
     )
     assert result.artifact.stage_3_readiness.is_valid
-    assert resumed_llm.calls == ["stage2_semantic_2b", "stage2_semantic_2c"]
+    assert resumed_llm.calls == [
+        "stage2_semantic_2a_route_2",
+        "stage2_semantic_2b",
+        "stage2_semantic_2c",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_tampered_stage_checkpoint_fails_before_provider_call() -> None:
     f = _fixture()
+    route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
     record = {
-        "stage": "stage2_semantic_2a",
+        "stage": "stage2_semantic_2a_route_1",
         "semantic_candidate_fingerprint": "0" * 64,
-        "compiled_fingerprint": content_fingerprint(f["stage_a"].model_dump(mode="json")),
-        "model_authored_document": f["candidate_a"].model_dump(mode="json"),
-        "document": f["stage_a"].model_dump(mode="json"),
+        "compiled_fingerprint": content_fingerprint(route_1.model_dump(mode="json")),
+        "model_authored_document": route_1.model_dump(mode="json"),
+        "document": route_1.model_dump(mode="json"),
     }
     llm = _FakeLLM([])
     with pytest.raises(Stage2SemanticError) as raised:
@@ -695,7 +725,7 @@ async def test_tampered_stage_checkpoint_fails_before_provider_call() -> None:
             core=f["core"],
             character_ids=f["case"].character_ids,
             location=f["location"],
-            resume_stage_records={"stage2_semantic_2a": record},
+            resume_stage_records={"stage2_semantic_2a_route_1": record},
         )
     assert raised.value.code == "checkpoint_invalid"
     assert llm.calls == []
@@ -710,10 +740,16 @@ async def test_truncated_output_is_never_patched() -> None:
             llm,
             repair_llm=llm,
             role="stage2_test",
-            messages=build_stage2a_messages(f["support"], f["discovery"]),
-            candidate_type=Stage2ASemanticCandidate,
-            validator=lambda value: validate_stage2a_candidate(value, catalogue=f["support"]),
-            compiler=lambda value: compile_stage2a_candidate(value, catalogue=f["support"], core=f["core"]),
+            messages=build_stage2a_route_messages(
+                f["support"], f["discovery"], route_index=1, core=f["core"]
+            ),
+            candidate_type=Stage2ARouteDelta,
+            validator=lambda value: validate_stage2a_route_delta(
+                value,
+                expected_route_index=1,
+                catalogue=f["support"],
+            ),
+            compiler=lambda value: value,
             max_tokens=100,
             immutable_paths=("/proof_support_catalogue_fingerprint",),
             max_initial_attempts=1,
@@ -734,10 +770,16 @@ async def test_malformed_output_is_classified_and_not_semantically_patched() -> 
             llm,
             repair_llm=llm,
             role="stage2_test",
-            messages=build_stage2a_messages(f["support"], f["discovery"]),
-            candidate_type=Stage2ASemanticCandidate,
-            validator=lambda value: validate_stage2a_candidate(value, catalogue=f["support"]),
-            compiler=lambda value: compile_stage2a_candidate(value, catalogue=f["support"], core=f["core"]),
+            messages=build_stage2a_route_messages(
+                f["support"], f["discovery"], route_index=1, core=f["core"]
+            ),
+            candidate_type=Stage2ARouteDelta,
+            validator=lambda value: validate_stage2a_route_delta(
+                value,
+                expected_route_index=1,
+                catalogue=f["support"],
+            ),
+            compiler=lambda value: value,
             max_tokens=100,
             immutable_paths=("/proof_support_catalogue_fingerprint",),
             max_initial_attempts=1,
@@ -759,8 +801,18 @@ def test_schema_prevents_host_from_inventing_missing_semantic_meaning() -> None:
 
 def test_prompts_expose_only_current_substage_schema() -> None:
     f = _fixture()
+    route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
     messages = [
-        build_stage2a_messages(f["support"], f["discovery"]),
+        build_stage2a_route_messages(
+            f["support"], f["discovery"], route_index=1, core=f["core"]
+        ),
+        build_stage2a_route_messages(
+            f["support"],
+            f["discovery"],
+            route_index=2,
+            accepted_route_1=route_1.route,
+            core=f["core"],
+        ),
         build_stage2b_messages(
             stage_2a=f["stage_a"],
             support_catalogue=f["support"],

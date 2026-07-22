@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "experiment_revision": 13,
+  "experiment_revision": 14,
   "branch": "stage2-semantic-compiler",
   "baseline_sha": "f87d267033b5069966b36fa632869e1a8f3379c6",
   "stage1_qualification_code_sha": "bbf7d1f46cfc138f442c298e0a57ead0a7bacab4",
-  "prompt_revision": "stage2-semantic-v2",
-  "schema_revision": "stage2-semantic-schema-v1",
+  "prompt_revision": "stage2-semantic-v3",
+  "schema_revision": "stage2-semantic-schema-v2",
   "transport": "deepseek_direct",
   "provider_fallbacks": false,
   "model_order": [

@@ -6,6 +6,7 @@ from copy import deepcopy
 import json
 import pytest
 
+from experiments import run_stage2_semantic_qualification as controller
 from experiments.deepseek_v4_runner import ExperimentSafetyError
 from experiments.run_stage2_semantic_qualification import (
     EXPERIMENT_REVISION,
@@ -55,10 +56,11 @@ def test_manifest_tampering_fails_closed(path: tuple[str, ...], value: object) -
 
 def test_only_declared_stage2_roles_can_reach_measured_controller() -> None:
     roles = _reasoning_map()
-    assert roles["stage2_semantic_2a"] == "high"
+    assert roles["stage2_semantic_2a_route_1"] == "high"
+    assert roles["stage2_semantic_2a_route_2"] == "high"
     assert roles["stage2_semantic_2b"] == "high"
     assert roles["stage2_semantic_2c"] == "high"
-    assert roles["stage2_semantic_2a_delta_repair"] is None
+    assert roles["stage2_semantic_2a_route_1_delta_repair"] is None
     assert roles["stage2_exact_model_preflight"] is None
     assert not any("stage3" in role or "overlay" in role for role in roles)
 
@@ -101,3 +103,45 @@ def test_checkpoint_provenance_and_stage_order_fail_closed(tmp_path) -> None:
             model=model,
             git_sha=git_sha,
         )
+
+    checkpoint["git_sha"] = git_sha
+    checkpoint["accepted_stage_records"] = [
+        {"stage": "stage2_semantic_2a_route_2"}
+    ]
+    path.write_text(json.dumps(checkpoint), encoding="utf-8")
+    with pytest.raises(ExperimentSafetyError, match="checkpoint order is invalid"):
+        _load_checkpoint_records(
+            path=path,
+            manifest=manifest,
+            model_key=model_key,
+            model=model,
+            git_sha=git_sha,
+        )
+
+
+def test_existing_results_are_exact_revision_commit_and_manifest_bound(
+    tmp_path, monkeypatch
+) -> None:
+    manifest = load_manifest()
+    git_sha = "a" * 40
+    results_path = tmp_path / "qualification_results.json"
+    stale = {
+        "schema_version": 1,
+        "experiment_revision": EXPERIMENT_REVISION - 1,
+        "git_sha": git_sha,
+        "manifest_fingerprint": _manifest_fingerprint(manifest),
+        "status": "completed_with_failures",
+        "model_results": [{"model_key": "flash", "status": "failed"}],
+    }
+    results_path.write_text(json.dumps(stale), encoding="utf-8")
+    monkeypatch.setattr(controller, "RESULTS_PATH", results_path)
+
+    assert controller._existing_results(manifest=manifest, git_sha=git_sha) == {
+        "schema_version": 1,
+        "status": "running",
+        "model_results": [],
+    }
+
+    stale["experiment_revision"] = EXPERIMENT_REVISION
+    results_path.write_text(json.dumps(stale), encoding="utf-8")
+    assert controller._existing_results(manifest=manifest, git_sha=git_sha) == stale

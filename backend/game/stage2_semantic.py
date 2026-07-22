@@ -43,8 +43,8 @@ from game.stage1_semantic import content_fingerprint
 from llm.client import LLMMessage, LLMProviderError
 
 
-STAGE2_PROMPT_REVISION = "stage2-semantic-v2"
-STAGE2_SCHEMA_REVISION = "stage2-semantic-schema-v1"
+STAGE2_PROMPT_REVISION = "stage2-semantic-v3"
+STAGE2_SCHEMA_REVISION = "stage2-semantic-schema-v2"
 STAGE2A_MAX_TOKENS = 5_000
 STAGE2B_MAX_TOKENS = 7_000
 STAGE2C_MAX_TOKENS = 4_000
@@ -73,12 +73,6 @@ class Stage2QualificationPolicy(FrozenModel):
 QUALIFICATION_POLICY = Stage2QualificationPolicy()
 Axis = Literal["method", "motive", "opportunity"]
 DiscoveryKind = Literal["search_slot", "inspect_body", "interview"]
-PlannedDiscoveryMode = Literal[
-    "physical_search",
-    "body_inspection",
-    "involuntary_record",
-    "voluntary_testimony",
-]
 
 
 class Stage2Issue(FrozenModel):
@@ -154,7 +148,6 @@ class Stage2ARoleBrief(FrozenModel):
     support_alias: str = Field(pattern=_ALIAS_RE.pattern)
     evidence_concept: str = Field(min_length=1, max_length=600)
     proposed_channel: EvidenceKind
-    planned_discovery_mode: PlannedDiscoveryMode
     causal_manifestation: str = Field(min_length=1, max_length=800)
     contribution: str = Field(min_length=1, max_length=600)
     limitation: str = Field(min_length=1, max_length=500)
@@ -178,6 +171,16 @@ class Stage2ASemanticCandidate(FrozenModel):
     routes: tuple[Stage2ARouteProposal, Stage2ARouteProposal]
 
 
+class Stage2ARouteDelta(FrozenModel):
+    """One compact provider-authored route inside the Stage 2A ownership boundary."""
+
+    schema_version: Literal[1] = 1
+    proof_support_catalogue_fingerprint: str = Field(min_length=64, max_length=64)
+    route_index: Literal[1, 2]
+    accepted_route_1_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    route: Stage2ARouteProposal
+
+
 class CompiledProofRole(FrozenModel):
     role_id: str = Field(min_length=1, max_length=100)
     role_ref: str = Field(pattern=_ALIAS_RE.pattern)
@@ -188,7 +191,6 @@ class CompiledProofRole(FrozenModel):
     canonical_event_id: str = Field(min_length=1, max_length=100)
     evidence_concept: str = Field(min_length=1, max_length=600)
     proposed_channel: EvidenceKind
-    planned_discovery_mode: PlannedDiscoveryMode
     causal_manifestation: str = Field(min_length=1, max_length=800)
     contribution: str = Field(min_length=1, max_length=600)
     limitation: str = Field(min_length=1, max_length=500)
@@ -798,6 +800,54 @@ def _issue(
     )
 
 
+def _validate_stage2a_route(
+    route: Stage2ARouteProposal,
+    *,
+    path: str,
+    catalogue: ProofSupportCatalogue,
+    issues: list[Stage2Issue],
+) -> tuple[EvidenceKind, EvidenceKind, EvidenceKind]:
+    if len(route.reasoning_chain) < 3:
+        _issue(
+            issues,
+            "route_logical_gap",
+            f"{path}/reasoning_chain",
+            "A route needs an explicit method, motive, and opportunity reasoning chain.",
+            f"{path}/reasoning_chain",
+        )
+    channels: list[EvidenceKind] = []
+    for axis in ("method", "motive", "opportunity"):
+        role = getattr(route, axis)
+        role_path = f"{path}/{axis}"
+        entry = catalogue.entries.get(role.support_alias)
+        if entry is None:
+            _issue(
+                issues,
+                "unknown_support_alias",
+                f"{role_path}/support_alias",
+                "The role selected an alias not offered by the host.",
+                f"{role_path}/support_alias",
+            )
+        elif entry.axis != axis:
+            _issue(
+                issues,
+                "wrong_axis_support",
+                f"{role_path}/support_alias",
+                "The selected support belongs to a different proof axis.",
+                f"{role_path}/support_alias",
+            )
+        elif role.proposed_channel not in entry.permitted_channels:
+            _issue(
+                issues,
+                "unsupported_evidence_channel",
+                f"{role_path}/proposed_channel",
+                "The selected support cannot use the proposed evidence channel.",
+                f"{role_path}/proposed_channel",
+            )
+        channels.append(role.proposed_channel)
+    return tuple(channels)  # type: ignore[return-value]
+
+
 def validate_stage2a_candidate(
     candidate: Stage2ASemanticCandidate,
     *,
@@ -816,106 +866,28 @@ def validate_stage2a_candidate(
     route_channels: list[tuple[EvidenceKind, EvidenceKind, EvidenceKind]] = []
     role_rows: dict[Axis, list[Stage2ARoleBrief]] = defaultdict(list)
     for route_index, route in enumerate(candidate.routes):
-        if len(route.reasoning_chain) < 3:
-            _issue(
-                issues,
-                "route_logical_gap",
-                f"/routes/{route_index}/reasoning_chain",
-                "A route needs an explicit method, motive, and opportunity reasoning chain.",
-                f"/routes/{route_index}/reasoning_chain",
-            )
-        channels: list[EvidenceKind] = []
+        channels = _validate_stage2a_route(
+            route,
+            path=f"/routes/{route_index}",
+            catalogue=catalogue,
+            issues=issues,
+        )
         for axis in ("method", "motive", "opportunity"):
             role = getattr(route, axis)
-            path = f"/routes/{route_index}/{axis}"
-            entry = catalogue.entries.get(role.support_alias)
-            if entry is None:
-                _issue(
-                    issues,
-                    "unknown_support_alias",
-                    f"{path}/support_alias",
-                    "The role selected an alias not offered by the host.",
-                    f"{path}/support_alias",
-                )
-            elif entry.axis != axis:
-                _issue(
-                    issues,
-                    "wrong_axis_support",
-                    f"{path}/support_alias",
-                    "The selected support belongs to a different proof axis.",
-                    f"{path}/support_alias",
-                )
-            elif role.proposed_channel not in entry.permitted_channels:
-                _issue(
-                    issues,
-                    "unsupported_evidence_channel",
-                    f"{path}/proposed_channel",
-                    "The selected support cannot use the proposed evidence channel.",
-                    f"{path}/proposed_channel",
-                )
-            if (
-                role.proposed_channel == EvidenceKind.TESTIMONIAL
-                and role.planned_discovery_mode != "voluntary_testimony"
-            ):
-                _issue(
-                    issues,
-                    "testimonial_access_misclassified",
-                    f"{path}/planned_discovery_mode",
-                    "Testimonial proof must declare voluntary testimony at Stage 2A.",
-                    f"{path}/planned_discovery_mode",
-                )
-            if (
-                role.proposed_channel != EvidenceKind.TESTIMONIAL
-                and role.planned_discovery_mode == "voluntary_testimony"
-            ):
-                _issue(
-                    issues,
-                    "channel_discovery_mismatch",
-                    f"{path}/planned_discovery_mode",
-                    "Only testimonial proof may plan voluntary testimony.",
-                    f"{path}/planned_discovery_mode",
-                )
-            if (
-                role.planned_discovery_mode == "involuntary_record"
-                and role.proposed_channel != EvidenceKind.DOCUMENTARY
-            ):
-                _issue(
-                    issues,
-                    "channel_discovery_mismatch",
-                    f"{path}/planned_discovery_mode",
-                    "Involuntary-record discovery requires documentary evidence.",
-                    f"{path}/proposed_channel",
-                    f"{path}/planned_discovery_mode",
-                )
-            if (
-                role.planned_discovery_mode == "body_inspection"
-                and role.proposed_channel
-                not in {EvidenceKind.PHYSICAL, EvidenceKind.BEHAVIOURAL}
-            ):
-                _issue(
-                    issues,
-                    "channel_discovery_mismatch",
-                    f"{path}/planned_discovery_mode",
-                    "Body inspection can realize only physical or behavioural evidence.",
-                    f"{path}/proposed_channel",
-                    f"{path}/planned_discovery_mode",
-                )
-            if (
-                role.planned_discovery_mode == "physical_search"
-                and role.proposed_channel
-                not in {EvidenceKind.PHYSICAL, EvidenceKind.DOCUMENTARY}
-            ):
-                _issue(
-                    issues,
-                    "channel_discovery_mismatch",
-                    f"{path}/planned_discovery_mode",
-                    "Physical search can realize only physical or documentary evidence.",
-                    f"{path}/proposed_channel",
-                    f"{path}/planned_discovery_mode",
-                )
-            channels.append(role.proposed_channel)
             role_rows[axis].append(role)
-        route_channels.append(tuple(channels))  # type: ignore[arg-type]
+        route_channels.append(channels)
+    if not any(
+        EvidenceKind.TESTIMONIAL not in channels for channels in route_channels
+    ):
+        _issue(
+            issues,
+            "missing_non_voluntary_route_blueprint",
+            "/routes",
+            "At least one route must avoid testimonial evidence entirely.",
+            "/routes/1/method/proposed_channel",
+            "/routes/1/motive/proposed_channel",
+            "/routes/1/opportunity/proposed_channel",
+        )
     if route_channels[0] == route_channels[1]:
         _issue(
             issues,
@@ -933,16 +905,133 @@ def validate_stage2a_candidate(
         if (
             left.support_alias == right.support_alias
             and left.proposed_channel == right.proposed_channel
-            and left.planned_discovery_mode == right.planned_discovery_mode
         ):
             _issue(
                 issues,
                 "shared_planned_proof_channel",
                 f"/routes/1/{axis}",
-                "Shared Stage 1 truth needs a distinct player-facing channel or discovery mode.",
+                "Shared Stage 1 truth needs a distinct player-facing evidence channel.",
                 f"/routes/1/{axis}/proposed_channel",
-                f"/routes/1/{axis}/planned_discovery_mode",
             )
+    return Stage2ValidationReport(phase="stage_2a", issues=tuple(issues))
+
+
+def stage2a_route_fingerprint(route: Stage2ARouteProposal) -> str:
+    return content_fingerprint(route.model_dump(mode="json"))
+
+
+def validate_stage2a_route_delta(
+    delta: Stage2ARouteDelta,
+    *,
+    expected_route_index: Literal[1, 2],
+    catalogue: ProofSupportCatalogue,
+    accepted_route_1: Stage2ARouteProposal | None = None,
+    discovery_catalogue: DiscoveryAffordanceCatalogue | None = None,
+    core: GeneratedCrimeTimelineStage | None = None,
+) -> Stage2ValidationReport:
+    issues: list[Stage2Issue] = []
+    if delta.proof_support_catalogue_fingerprint != proof_support_catalogue_fingerprint(catalogue):
+        _issue(
+            issues,
+            "stale_proof_support_catalogue",
+            "/proof_support_catalogue_fingerprint",
+            "The route delta is not bound to the supplied support catalogue.",
+        )
+    if delta.route_index != expected_route_index:
+        _issue(
+            issues,
+            "wrong_route_delta_index",
+            "/route_index",
+            "The route delta does not own this route position.",
+        )
+    expected_prior = (
+        None if accepted_route_1 is None else stage2a_route_fingerprint(accepted_route_1)
+    )
+    if delta.accepted_route_1_fingerprint != expected_prior:
+        _issue(
+            issues,
+            "stale_route_1_fingerprint",
+            "/accepted_route_1_fingerprint",
+            "The second route is not bound to the accepted first route.",
+        )
+    _validate_stage2a_route(
+        delta.route,
+        path="/route",
+        catalogue=catalogue,
+        issues=issues,
+    )
+    if expected_route_index == 1:
+        if any(
+            getattr(delta.route, axis).proposed_channel == EvidenceKind.TESTIMONIAL
+            for axis in ("method", "motive", "opportunity")
+        ):
+            _issue(
+                issues,
+                "route_1_must_be_non_voluntary",
+                "/route",
+                "Route 1 is the fixed fully non-voluntary blueprint.",
+                "/route/method/proposed_channel",
+                "/route/motive/proposed_channel",
+                "/route/opportunity/proposed_channel",
+            )
+        if not issues and discovery_catalogue is not None and core is not None:
+            try:
+                stage2a_route_delta_valid_example(
+                    catalogue,
+                    route_index=2,
+                    accepted_route_1=delta.route,
+                    discovery_catalogue=discovery_catalogue,
+                    core=core,
+                )
+            except Stage2SemanticError:
+                _issue(
+                    issues,
+                    "stage_2a_route_1_blocks_completion",
+                    "/route",
+                    "No materially independent executable second route can complete this first route.",
+                    *(
+                        f"/route/{axis}/{field}"
+                        for axis in ("method", "motive", "opportunity")
+                        for field in ("support_alias", "proposed_channel")
+                    ),
+                )
+        return Stage2ValidationReport(phase="stage_2a", issues=tuple(issues))
+    if issues or accepted_route_1 is None or discovery_catalogue is None or core is None:
+        return Stage2ValidationReport(phase="stage_2a", issues=tuple(issues))
+    combined = Stage2ASemanticCandidate(
+        proof_support_catalogue_fingerprint=delta.proof_support_catalogue_fingerprint,
+        routes=(accepted_route_1, delta.route),
+    )
+    combined_report = validate_stage2a_discovery_feasibility(
+        combined,
+        support_catalogue=catalogue,
+        discovery_catalogue=discovery_catalogue,
+        core=core,
+    )
+    fallback_paths = tuple(
+        f"/route/{axis}/{field}"
+        for axis in ("method", "motive", "opportunity")
+        for field in ("support_alias", "proposed_channel")
+    )
+    for issue in combined_report.issues:
+        mapped_paths = tuple(
+            f"/route{path[len('/routes/1') :]}"
+            for path in issue.allowed_paths
+            if path.startswith("/routes/1")
+        )
+        mapped_path = (
+            f"/route{issue.path[len('/routes/1') :]}"
+            if issue.path.startswith("/routes/1")
+            else "/route"
+        )
+        issues.append(
+            Stage2Issue(
+                code=issue.code,
+                path=mapped_path,
+                message=issue.message,
+                allowed_paths=mapped_paths or fallback_paths,
+            )
+        )
     return Stage2ValidationReport(phase="stage_2a", issues=tuple(issues))
 
 
@@ -953,26 +1042,21 @@ def _eligible_affordances_for_role(
     discovery_catalogue: DiscoveryAffordanceCatalogue,
 ) -> tuple[DiscoveryAffordance, ...]:
     support = support_catalogue.entries[role.support_alias]
-    mode_kind: dict[PlannedDiscoveryMode, DiscoveryKind] = {
-        "physical_search": "search_slot",
-        "body_inspection": "inspect_body",
-        "involuntary_record": "search_slot",
-        "voluntary_testimony": "interview",
+    allowed_kinds: dict[EvidenceKind, frozenset[DiscoveryKind]] = {
+        EvidenceKind.PHYSICAL: frozenset({"search_slot", "inspect_body"}),
+        EvidenceKind.DOCUMENTARY: frozenset({"search_slot"}),
+        EvidenceKind.TESTIMONIAL: frozenset({"interview"}),
+        EvidenceKind.BEHAVIOURAL: frozenset({"inspect_body"}),
     }
-    required_kind = mode_kind[role.planned_discovery_mode]
-    wants_voluntary = required_kind == "interview"
+    wants_voluntary = role.proposed_channel == EvidenceKind.TESTIMONIAL
     return tuple(
         affordance
         for affordance in sorted(
             discovery_catalogue.affordances.values(), key=lambda item: item.alias
         )
         if affordance.voluntary_disclosure == wants_voluntary
-        and affordance.kind == required_kind
+        and affordance.kind in allowed_kinds[role.proposed_channel]
         and role.proposed_channel in affordance.compatible_channels
-        and (
-            role.planned_discovery_mode != "involuntary_record"
-            or role.proposed_channel == EvidenceKind.DOCUMENTARY
-        )
         and (
             not wants_voluntary
             or affordance.witness_id in set(support.eligible_actor_ids)
@@ -1063,7 +1147,7 @@ def validate_stage2a_discovery_feasibility(
         f"/routes/{route_index}/{axis}/{field}"
         for route_index in range(2)
         for axis in ("method", "motive", "opportunity")
-        for field in ("proposed_channel", "planned_discovery_mode")
+        for field in ("support_alias", "proposed_channel")
     )
     return Stage2ValidationReport(
         phase="stage_2a",
@@ -1118,7 +1202,6 @@ def compile_stage2a_candidate(
                 canonical_event_id=entry.canonical_event_id,
                 evidence_concept=brief.evidence_concept,
                 proposed_channel=brief.proposed_channel,
-                planned_discovery_mode=brief.planned_discovery_mode,
                 causal_manifestation=brief.causal_manifestation,
                 contribution=brief.contribution,
                 limitation=brief.limitation,
@@ -2328,26 +2411,25 @@ def _role_examples(
         for axis in ("method", "motive", "opportunity")
     }
     left_channels = {
-        "method": (EvidenceKind.PHYSICAL, "physical_search"),
-        "motive": (EvidenceKind.DOCUMENTARY, "involuntary_record"),
-        "opportunity": (EvidenceKind.PHYSICAL, "body_inspection"),
+        "method": EvidenceKind.PHYSICAL,
+        "motive": EvidenceKind.DOCUMENTARY,
+        "opportunity": EvidenceKind.PHYSICAL,
     }
     right_channels = {
-        "method": (EvidenceKind.DOCUMENTARY, "involuntary_record"),
-        "motive": (EvidenceKind.PHYSICAL, "physical_search"),
-        "opportunity": (EvidenceKind.TESTIMONIAL, "voluntary_testimony"),
+        "method": EvidenceKind.DOCUMENTARY,
+        "motive": EvidenceKind.PHYSICAL,
+        "opportunity": EvidenceKind.TESTIMONIAL,
     }
     rows: list[dict[str, Stage2ARoleBrief]] = []
     for route_index, channels in enumerate((left_channels, right_channels), start=1):
         result: dict[str, Stage2ARoleBrief] = {}
         for axis in ("method", "motive", "opportunity"):
-            channel, mode = channels[axis]
+            channel = channels[axis]
             entry = by_axis[axis]
             result[axis] = Stage2ARoleBrief(
                 support_alias=entry.alias,
                 evidence_concept=f"Route {route_index} {axis} manifestation",
                 proposed_channel=channel,
-                planned_discovery_mode=mode,
                 causal_manifestation=f"A distinct route {route_index} trace persists from the accepted {axis} beat.",
                 contribution=f"This independently connects the locked actor to {axis}.",
                 limitation=f"This item alone does not establish the other two proof axes.",
@@ -2533,64 +2615,168 @@ def _messages(
     )
 
 
-def build_stage2a_messages(
+def _stage2a_realization_feasibility_view(
     support_catalogue: ProofSupportCatalogue,
     discovery_catalogue: DiscoveryAffordanceCatalogue,
-) -> tuple[LLMMessage, LLMMessage]:
-    realization_feasibility = {
+) -> dict[str, object]:
+    allowed_kinds: dict[EvidenceKind, frozenset[DiscoveryKind]] = {
+        EvidenceKind.PHYSICAL: frozenset({"search_slot", "inspect_body"}),
+        EvidenceKind.DOCUMENTARY: frozenset({"search_slot"}),
+        EvidenceKind.TESTIMONIAL: frozenset({"interview"}),
+        EvidenceKind.BEHAVIOURAL: frozenset({"inspect_body"}),
+    }
+    return {
         alias: {
-            channel.value: {
-                "physical_search": sum(
-                    1
-                    for affordance in discovery_catalogue.affordances.values()
-                    if affordance.kind == "search_slot"
-                    and channel in affordance.compatible_channels
-                ),
-                "body_inspection": sum(
-                    1
-                    for affordance in discovery_catalogue.affordances.values()
-                    if affordance.kind == "inspect_body"
-                    and channel in affordance.compatible_channels
-                ),
-                "involuntary_record": (
-                    sum(
-                        1
-                        for affordance in discovery_catalogue.affordances.values()
-                        if affordance.kind == "search_slot"
-                        and channel in affordance.compatible_channels
-                    )
-                    if channel == EvidenceKind.DOCUMENTARY
-                    else 0
-                ),
-                "voluntary_testimony": sum(
-                    1
-                    for affordance in discovery_catalogue.affordances.values()
-                    if affordance.kind == "interview"
-                    and channel in affordance.compatible_channels
-                    and affordance.witness_id in set(entry.eligible_actor_ids)
-                ),
-            }
+            channel.value: sum(
+                1
+                for affordance in discovery_catalogue.affordances.values()
+                if affordance.kind in allowed_kinds[channel]
+                and channel in affordance.compatible_channels
+                and (
+                    channel != EvidenceKind.TESTIMONIAL
+                    or affordance.witness_id in set(entry.eligible_actor_ids)
+                )
+                and (
+                    channel == EvidenceKind.TESTIMONIAL
+                    or entry.event_room_id in affordance.minimum_travel_minutes_by_room
+                )
+            )
             for channel in entry.permitted_channels
         }
         for alias, entry in support_catalogue.entries.items()
     }
+
+
+def stage2a_route_delta_valid_example(
+    support_catalogue: ProofSupportCatalogue,
+    *,
+    route_index: Literal[1, 2],
+    accepted_route_1: Stage2ARouteProposal | None = None,
+    discovery_catalogue: DiscoveryAffordanceCatalogue | None = None,
+    core: GeneratedCrimeTimelineStage | None = None,
+) -> Stage2ARouteDelta:
+    combined = stage2a_valid_example(support_catalogue)
+    prior = accepted_route_1 if route_index == 2 else None
+    fingerprint = proof_support_catalogue_fingerprint(support_catalogue)
+    if route_index == 1:
+        return Stage2ARouteDelta(
+            proof_support_catalogue_fingerprint=fingerprint,
+            route_index=1,
+            route=combined.routes[0],
+        )
+    if prior is None or discovery_catalogue is None or core is None:
+        raise ValueError("route 2 example requires route 1, discovery, and core")
+    by_axis = {
+        axis: tuple(
+            entry
+            for entry in sorted(
+                support_catalogue.entries.values(), key=lambda item: item.alias
+            )
+            if entry.axis == axis
+        )
+        for axis in ("method", "motive", "opportunity")
+    }
+    for entries in product(by_axis["method"], by_axis["motive"], by_axis["opportunity"]):
+        for channels in product(*(entry.permitted_channels for entry in entries)):
+            roles = {
+                axis: Stage2ARoleBrief(
+                    support_alias=entry.alias,
+                    evidence_concept=f"Independent route 2 {axis} manifestation",
+                    proposed_channel=channel,
+                    causal_manifestation=f"A separate accepted {axis} beat leaves this trace.",
+                    contribution=f"This independently connects the locked actor to {axis}.",
+                    limitation=f"This item alone does not establish the other two proof axes.",
+                )
+                for axis, entry, channel in zip(
+                    ("method", "motive", "opportunity"),
+                    entries,
+                    channels,
+                    strict=True,
+                )
+            }
+            route = Stage2ARouteProposal(
+                thesis="Route 2 combines three separate manifestations into a complete inference.",
+                reasoning_chain=(
+                    "The method manifestation explains how the death was caused.",
+                    "The motive manifestation explains why the locked actor acted.",
+                    "The opportunity manifestation connects that actor to the causal window.",
+                ),
+                method=roles["method"],
+                motive=roles["motive"],
+                opportunity=roles["opportunity"],
+                combined_inference="Together the roles independently support the locked actor.",
+                does_not_prove_alone="No single role proves method, motive, and opportunity.",
+                independence_rationale="This route uses support channels and executable dependencies distinct from route 1.",
+            )
+            delta = Stage2ARouteDelta(
+                proof_support_catalogue_fingerprint=fingerprint,
+                route_index=2,
+                accepted_route_1_fingerprint=stage2a_route_fingerprint(prior),
+                route=route,
+            )
+            if validate_stage2a_route_delta(
+                delta,
+                expected_route_index=2,
+                catalogue=support_catalogue,
+                accepted_route_1=prior,
+                discovery_catalogue=discovery_catalogue,
+                core=core,
+            ).is_valid:
+                return delta
+    raise Stage2SemanticError(
+        "accepted route 1 has no valid route 2 example",
+        code="stage_2a_route_1_blocks_completion",
+    )
+
+
+def build_stage2a_route_messages(
+    support_catalogue: ProofSupportCatalogue,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+    *,
+    route_index: Literal[1, 2],
+    accepted_route_1: Stage2ARouteProposal | None = None,
+    core: GeneratedCrimeTimelineStage,
+) -> tuple[LLMMessage, LLMMessage]:
+    if (route_index == 1) != (accepted_route_1 is None):
+        raise ValueError("route 2 requires exactly one accepted route 1")
+    context: dict[str, object] = {
+        "policy": QUALIFICATION_POLICY.model_dump(mode="json"),
+        "route_index": route_index,
+        "proof_support_catalogue": support_catalogue.provider_view(),
+        "executable_affordance_counts": _stage2a_realization_feasibility_view(
+            support_catalogue,
+            discovery_catalogue,
+        ),
+    }
+    if accepted_route_1 is not None:
+        context["accepted_route_1_fingerprint"] = stage2a_route_fingerprint(
+            accepted_route_1
+        )
+        context["accepted_route_1"] = accepted_route_1.model_dump(mode="json")
     return _messages(
-        task="Design exactly two complete, materially independent semantic proof routes.",
-        schema=Stage2ASemanticCandidate.model_json_schema(),
-        context={
-            "policy": QUALIFICATION_POLICY.model_dump(mode="json"),
-            "proof_support_catalogue": support_catalogue.provider_view(),
-            "realization_feasibility": realization_feasibility,
-        },
+        task=f"Design only semantic proof route {route_index} of 2.",
+        schema=Stage2ARouteDelta.model_json_schema(),
+        context=context,
         rules=(
             "Use only offered support aliases and the locked responsible_actor ref.",
-            "Give each route one method, motive, and opportunity role with a complete reasoning chain.",
+            "Give this route one method, motive, and opportunity role with a complete reasoning chain.",
             "Author evidence concepts and causal manifestations, not canonical facts or events.",
-            "Choose only channel/discovery-mode pairs whose realization count is nonzero.",
-            "Use materially distinct player-facing channels; shared background truth is allowed.",
+            "Choose only evidence channels whose executable-affordance count is nonzero; Stage 2B chooses the affordance.",
+            (
+                "Route 1 must use no testimonial channel so it is fully non-voluntary."
+                if route_index == 1
+                else "Route 2 must be materially independent of accepted route 1."
+            ),
             "Explain what each role and route does not prove alone.",
+            "Return concise final JSON and reserve output capacity for it.",
         ),
-        example=stage2a_valid_example(support_catalogue).model_dump(mode="json"),
+        example=stage2a_route_delta_valid_example(
+            support_catalogue,
+            route_index=route_index,
+            accepted_route_1=accepted_route_1,
+            discovery_catalogue=discovery_catalogue,
+            core=core,
+        ).model_dump(mode="json"),
     )
 
 
@@ -2604,7 +2790,6 @@ def build_stage2b_messages(
         role.role_ref: {
             "evidence_concept": role.evidence_concept,
             "channel": role.proposed_channel.value,
-            "planned_discovery_mode": role.planned_discovery_mode,
             "causal_manifestation": role.causal_manifestation,
             "support_summary": support_catalogue.entries[role.support_alias].safe_summary,
             "eligible_actor_refs": [
@@ -2625,7 +2810,7 @@ def build_stage2b_messages(
             "discovery_affordance_catalogue": discovery_catalogue.provider_view(),
         },
         rules=(
-            "Preserve every role's exact evidence concept, channel, and discovery mode.",
+            "Preserve every role's exact evidence concept and channel; choose its concrete offered affordance here.",
             "Use only offered role, actor, and discovery-affordance aliases.",
             "Explain causal creation, persistence, support, contradiction, alternatives, and limits.",
             "Do not invent interaction verbs, forensic actions, canonical references, scores, or red herrings.",
@@ -3173,17 +3358,117 @@ async def generate_stage2_boundary(
     secondary = build_secondary_secret_catalogue(core, character_ids=character_ids)
     resumed = dict(resume_stage_records or {})
     allowed_resume_stages = {
+        "stage2_semantic_2a_route_1",
+        "stage2_semantic_2a_route_2",
         "stage2_semantic_2a",
         "stage2_semantic_2b",
         "stage2_semantic_2c",
     }
     if set(resumed) - allowed_resume_stages:
         raise Stage2SemanticError("checkpoint contains an unknown stage", code="checkpoint_invalid")
+    if "stage2_semantic_2a_route_2" in resumed and "stage2_semantic_2a_route_1" not in resumed:
+        raise Stage2SemanticError("Stage 2A route 2 checkpoint lacks route 1", code="checkpoint_invalid")
+    if "stage2_semantic_2a" in resumed and not {
+        "stage2_semantic_2a_route_1",
+        "stage2_semantic_2a_route_2",
+    } <= set(resumed):
+        raise Stage2SemanticError("combined Stage 2A checkpoint lacks route deltas", code="checkpoint_invalid")
     if "stage2_semantic_2b" in resumed and "stage2_semantic_2a" not in resumed:
         raise Stage2SemanticError("Stage 2B checkpoint lacks Stage 2A", code="checkpoint_invalid")
     if "stage2_semantic_2c" in resumed and "stage2_semantic_2b" not in resumed:
         raise Stage2SemanticError("Stage 2C checkpoint lacks Stage 2B", code="checkpoint_invalid")
 
+    validate_route_1 = lambda value: validate_stage2a_route_delta(
+        value,
+        expected_route_index=1,
+        catalogue=support,
+        discovery_catalogue=discovery,
+        core=core,
+    )
+    compile_route = lambda value: value
+    if "stage2_semantic_2a_route_1" in resumed:
+        route_1_delta, _ = _resume_semantic_stage(
+            resumed["stage2_semantic_2a_route_1"],
+            role="stage2_semantic_2a_route_1",
+            candidate_type=Stage2ARouteDelta,
+            validator=validate_route_1,
+            compiler=compile_route,
+        )
+    else:
+        route_1_delta, _ = await _generate_semantic_stage(
+            llm,
+            repair_llm=repair_llm,
+            role="stage2_semantic_2a_route_1",
+            messages=build_stage2a_route_messages(
+                support,
+                discovery,
+                route_index=1,
+                core=core,
+            ),
+            candidate_type=Stage2ARouteDelta,
+            validator=validate_route_1,
+            compiler=compile_route,
+            max_tokens=STAGE2A_MAX_TOKENS,
+            immutable_paths=(
+                "/schema_version",
+                "/proof_support_catalogue_fingerprint",
+                "/route_index",
+                "/accepted_route_1_fingerprint",
+            ),
+            max_initial_attempts=max_initial_attempts,
+            max_delta_repairs=max_delta_repairs,
+            attempt_observer=attempt_observer,
+            accepted_stage_observer=accepted_stage_observer,
+        )
+
+    validate_route_2 = lambda value: validate_stage2a_route_delta(
+        value,
+        expected_route_index=2,
+        catalogue=support,
+        accepted_route_1=route_1_delta.route,
+        discovery_catalogue=discovery,
+        core=core,
+    )
+    if "stage2_semantic_2a_route_2" in resumed:
+        route_2_delta, _ = _resume_semantic_stage(
+            resumed["stage2_semantic_2a_route_2"],
+            role="stage2_semantic_2a_route_2",
+            candidate_type=Stage2ARouteDelta,
+            validator=validate_route_2,
+            compiler=compile_route,
+        )
+    else:
+        route_2_delta, _ = await _generate_semantic_stage(
+            llm,
+            repair_llm=repair_llm,
+            role="stage2_semantic_2a_route_2",
+            messages=build_stage2a_route_messages(
+                support,
+                discovery,
+                route_index=2,
+                accepted_route_1=route_1_delta.route,
+                core=core,
+            ),
+            candidate_type=Stage2ARouteDelta,
+            validator=validate_route_2,
+            compiler=compile_route,
+            max_tokens=STAGE2A_MAX_TOKENS,
+            immutable_paths=(
+                "/schema_version",
+                "/proof_support_catalogue_fingerprint",
+                "/route_index",
+                "/accepted_route_1_fingerprint",
+            ),
+            max_initial_attempts=max_initial_attempts,
+            max_delta_repairs=max_delta_repairs,
+            attempt_observer=attempt_observer,
+            accepted_stage_observer=accepted_stage_observer,
+        )
+
+    combined_candidate = Stage2ASemanticCandidate(
+        proof_support_catalogue_fingerprint=proof_support_catalogue_fingerprint(support),
+        routes=(route_1_delta.route, route_2_delta.route),
+    )
     validate_2a = lambda value: validate_stage2a_discovery_feasibility(
             value,
             support_catalogue=support,
@@ -3200,20 +3485,34 @@ async def generate_stage2_boundary(
             compiler=compile_2a,
         )
     else:
-        stage_2a_candidate, stage_2a = await _generate_semantic_stage(
-            llm,
-            repair_llm=repair_llm,
-            role="stage2_semantic_2a",
-            messages=build_stage2a_messages(support, discovery),
-            candidate_type=Stage2ASemanticCandidate,
-            validator=validate_2a,
-            compiler=compile_2a,
-            max_tokens=STAGE2A_MAX_TOKENS,
-            immutable_paths=("/schema_version", "/proof_support_catalogue_fingerprint"),
-            max_initial_attempts=max_initial_attempts,
-            max_delta_repairs=max_delta_repairs,
-            attempt_observer=attempt_observer,
-            accepted_stage_observer=accepted_stage_observer,
+        stage_2a_candidate = combined_candidate
+        report_2a = validate_2a(stage_2a_candidate)
+        if not report_2a.is_valid:
+            raise Stage2SemanticError(
+                "accepted Stage 2A route deltas failed combined validation",
+                code="stage_2a_combined_rejection",
+                issues=report_2a.issues,
+            )
+        stage_2a = compile_2a(stage_2a_candidate)
+        if accepted_stage_observer is not None:
+            accepted_stage_observer(
+                {
+                    "stage": "stage2_semantic_2a",
+                    "source": "host_assembled_route_deltas",
+                    "semantic_candidate_fingerprint": content_fingerprint(
+                        stage_2a_candidate.model_dump(mode="json")
+                    ),
+                    "compiled_fingerprint": content_fingerprint(
+                        stage_2a.model_dump(mode="json")
+                    ),
+                    "model_authored_document": stage_2a_candidate.model_dump(mode="json"),
+                    "document": stage_2a.model_dump(mode="json"),
+                }
+            )
+    if stage_2a_candidate != combined_candidate:
+        raise Stage2SemanticError(
+            "combined Stage 2A checkpoint differs from accepted route deltas",
+            code="checkpoint_invalid",
         )
 
     validate_2b = lambda value: validate_stage2b_candidate(
