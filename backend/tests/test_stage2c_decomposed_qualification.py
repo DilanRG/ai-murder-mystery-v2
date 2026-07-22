@@ -29,7 +29,9 @@ def test_decomposed_manifest_is_frozen_without_provider_access() -> None:
         (("provider_fallbacks",), True),
         (("source_stage2", "git_sha"), "0" * 40),
         (("source_stage2c_revision15", "results_sha256"), "0" * 64),
+        (("source_stage2c_revision16", "results_sha256"), "0" * 64),
         (("source_stage2", "accepted_compiled_stage2", "pro", "stage_2b"), "0" * 64),
+        (("limits", "stage_2c_p2_max_tokens"), 9_000),
         (("limits", "stage_2c_realization_max_tokens"), 9_000),
         (("reasoning", "stage_2c_realizations"), "high"),
         (("budget", "carry_in_stage2_cost_usd"), "0"),
@@ -48,16 +50,69 @@ def test_decomposed_manifest_tampering_fails_closed(
         controller.validate_manifest(manifest)
 
 
-def test_only_plan_items_are_high_reasoning_and_no_stage3_role_exists() -> None:
+def test_only_p2_is_high_reasoning_and_no_stage3_role_exists() -> None:
     roles = controller._reasoning_map()
-    assert roles["stage2_semantic_2c_p1"] == "high"
     assert roles["stage2_semantic_2c_p2"] == "high"
+    assert "stage2_semantic_2c_p1" not in roles
     assert roles["stage2_semantic_2c_r1"] is None
     assert roles["stage2_semantic_2c_r2"] is None
-    assert roles["stage2_semantic_2c_p1_delta_repair"] is None
+    assert "stage2_semantic_2c_p1_delta_repair" not in roles
     assert roles["stage2_semantic_2c_p2_delta_repair"] is None
     assert roles["stage2c_exact_model_preflight"] is None
     assert not any("stage3" in role or "overlay" in role for role in roles)
+
+
+def _revision16_p1_request_rows(manifest: dict) -> list[dict]:
+    source = manifest["source_stage2c_revision16"]
+    return [
+        {
+            "git_sha": source["git_sha"],
+            "run_id": f"stage2c-plan-items-{model_key}",
+            "task_role": "stage2_semantic_2c_p1",
+            "requested_model": model,
+            "actual_model": model,
+            "transport": "deepseek_direct",
+            "fallback_used": False,
+            "provider_failover_used": False,
+            "result": "success",
+            "accounting_status": "measured",
+            "total_external_cost_usd": "0.001",
+        }
+        for model_key, model in controller.EXPECTED_MODELS.items()
+    ]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("fallback_used", True),
+        ("provider_failover_used", True),
+        ("total_external_cost_usd", None),
+    ],
+)
+def test_revision16_p1_reuse_requires_exact_measured_direct_evidence(
+    field: str, value: object
+) -> None:
+    manifest = controller.load_manifest()
+    rows = _revision16_p1_request_rows(manifest)
+    controller._validate_revision16_request_records(
+        source=manifest["source_stage2c_revision16"], request_rows=rows
+    )
+    rows[0][field] = value
+    with pytest.raises(ExperimentSafetyError, match="P1 request evidence mismatched"):
+        controller._validate_revision16_request_records(
+            source=manifest["source_stage2c_revision16"], request_rows=rows
+        )
+
+
+def test_revision16_source_boundary_rejects_overlay_aliases() -> None:
+    manifest = controller.load_manifest()
+    rows = _revision16_p1_request_rows(manifest)
+    rows.append({"task_role": "npc_overlay_generation"})
+    with pytest.raises(ExperimentSafetyError, match="unauthorized Stage 3"):
+        controller._validate_revision16_request_records(
+            source=manifest["source_stage2c_revision16"], request_rows=rows
+        )
 
 
 def _current_checkpoint(manifest: dict, *, git_sha: str) -> dict:
@@ -78,6 +133,12 @@ def _current_checkpoint(manifest: dict, *, git_sha: str) -> dict:
             "accepted_compiled_stage2"
         ]["flash"],
         "source_checkpoint_sha256": "f" * 64,
+        "source_stage2c_checkpoint_sha256": manifest["source_stage2c_revision16"][
+            "checkpoints"
+        ]["flash"]["sha256"],
+        "reused_stage_2c_p1_fingerprint": manifest["source_stage2c_revision16"][
+            "checkpoints"
+        ]["flash"]["accepted_p1_fingerprint"],
         "accepted_stage_records": [],
     }
 
@@ -95,10 +156,14 @@ def test_current_checkpoint_rejects_skip_duplicate_and_provenance_tampering(
         manifest=manifest,
         model_key="flash",
         git_sha=git_sha,
-        source_provenance={"source_checkpoint_sha256": "f" * 64},
+        source_provenance={
+            "source_checkpoint_sha256": "f" * 64,
+            "source_stage2c_checkpoint_sha256": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["sha256"],
+            "reused_stage_2c_p1_fingerprint": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["accepted_p1_fingerprint"],
+        },
     ) == []
 
-    checkpoint["accepted_stage_records"] = [{"stage": "stage2_semantic_2c_p2"}]
+    checkpoint["accepted_stage_records"] = [{"stage": "stage2_semantic_2c_r1"}]
     path.write_text(json.dumps(checkpoint), encoding="utf-8")
     with pytest.raises(ExperimentSafetyError, match="order is invalid"):
         controller._load_current_records(
@@ -106,12 +171,16 @@ def test_current_checkpoint_rejects_skip_duplicate_and_provenance_tampering(
             manifest=manifest,
             model_key="flash",
             git_sha=git_sha,
-            source_provenance={"source_checkpoint_sha256": "f" * 64},
+            source_provenance={
+                "source_checkpoint_sha256": "f" * 64,
+                "source_stage2c_checkpoint_sha256": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["sha256"],
+                "reused_stage_2c_p1_fingerprint": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["accepted_p1_fingerprint"],
+            },
         )
 
     checkpoint["accepted_stage_records"] = [
-        {"stage": "stage2_semantic_2c_p1"},
-        {"stage": "stage2_semantic_2c_p1"},
+        {"stage": "stage2_semantic_2c_p2"},
+        {"stage": "stage2_semantic_2c_p2"},
     ]
     path.write_text(json.dumps(checkpoint), encoding="utf-8")
     with pytest.raises(ExperimentSafetyError, match="order is invalid"):
@@ -120,7 +189,11 @@ def test_current_checkpoint_rejects_skip_duplicate_and_provenance_tampering(
             manifest=manifest,
             model_key="flash",
             git_sha=git_sha,
-            source_provenance={"source_checkpoint_sha256": "f" * 64},
+            source_provenance={
+                "source_checkpoint_sha256": "f" * 64,
+                "source_stage2c_checkpoint_sha256": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["sha256"],
+                "reused_stage_2c_p1_fingerprint": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["accepted_p1_fingerprint"],
+            },
         )
 
     checkpoint = _current_checkpoint(manifest, git_sha=git_sha)
@@ -132,7 +205,11 @@ def test_current_checkpoint_rejects_skip_duplicate_and_provenance_tampering(
             manifest=manifest,
             model_key="flash",
             git_sha=git_sha,
-            source_provenance={"source_checkpoint_sha256": "f" * 64},
+            source_provenance={
+                "source_checkpoint_sha256": "f" * 64,
+                "source_stage2c_checkpoint_sha256": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["sha256"],
+                "reused_stage_2c_p1_fingerprint": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["accepted_p1_fingerprint"],
+            },
         )
 
     checkpoint = _current_checkpoint(manifest, git_sha=git_sha)
@@ -144,7 +221,11 @@ def test_current_checkpoint_rejects_skip_duplicate_and_provenance_tampering(
             manifest=manifest,
             model_key="flash",
             git_sha=git_sha,
-            source_provenance={"source_checkpoint_sha256": "f" * 64},
+            source_provenance={
+                "source_checkpoint_sha256": "f" * 64,
+                "source_stage2c_checkpoint_sha256": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["sha256"],
+                "reused_stage_2c_p1_fingerprint": manifest["source_stage2c_revision16"]["checkpoints"]["flash"]["accepted_p1_fingerprint"],
+            },
         )
 
 
@@ -185,11 +266,28 @@ def test_historical_loader_reuses_only_exact_prefix_and_excludes_flash_suffix(
         "schema_revision": source["schema_revision"],
         "accepted_stage_records": records,
     }
+    p1_fingerprint = manifest["source_stage2c_revision16"]["checkpoints"][
+        "flash"
+    ]["accepted_p1_fingerprint"]
+    p1_record = {
+        "stage": "stage2_semantic_2c_p1",
+        "semantic_candidate_fingerprint": p1_fingerprint,
+        "compiled_fingerprint": p1_fingerprint,
+        "model_authored_document": {"p1": 1},
+        "document": {"p1": 1},
+    }
+    p1_checkpoint = {"accepted_stage_records": [p1_record]}
 
     def fake_load(_path, *, label):
-        return {} if "manifest" in label else checkpoint
+        if "manifest" in label:
+            return {}
+        if "Revision 16 P1 checkpoint" in label:
+            return p1_checkpoint
+        return checkpoint
 
     def fake_fingerprint(value):
+        if "p1" in value:
+            return p1_fingerprint
         if "semantic" in value:
             return f"semantic-{value['semantic']}"
         index = value["compiled"]
@@ -203,21 +301,30 @@ def test_historical_loader_reuses_only_exact_prefix_and_excludes_flash_suffix(
     monkeypatch.setattr(controller, "_load_json", fake_load)
     monkeypatch.setattr(controller, "_manifest_fingerprint", lambda _value: source["manifest_fingerprint"])
     monkeypatch.setattr(controller, "content_fingerprint", fake_fingerprint)
+    monkeypatch.setattr(
+        controller.Stage2CP1Candidate,
+        "model_validate",
+        lambda value: value,
+    )
     monkeypatch.setattr(controller, "verify_stage1_artifact", lambda *_args: {})
     monkeypatch.setattr(controller, "_file_fingerprint", lambda _path: "f" * 64)
     prefix, provenance = controller.verify_historical_prefix(manifest, "flash")
-    assert [row["stage"] for row in prefix] == list(controller.SOURCE_PREFIX_STAGES)
+    assert [row["stage"] for row in prefix] == [
+        *controller.SOURCE_PREFIX_STAGES,
+        "stage2_semantic_2c_p1",
+    ]
+    assert provenance["reused_stage_2c_p1_fingerprint"] == p1_fingerprint
     assert provenance["historical_suffix_excluded"] == [
         "stage2_semantic_2c",
         "stage2_assembled_stage3_ready",
     ]
 
 
-def test_budget_policy_carries_forward_revision14_and_15_cost() -> None:
+def test_budget_policy_carries_forward_through_revision16_cost() -> None:
     manifest = controller.load_manifest()
     policy = controller._budget_policy(manifest)
-    assert policy.soft_stop_usd == Decimal("8.42786546")
-    assert policy.hard_stop_usd == Decimal("9.42786546")
+    assert policy.soft_stop_usd == Decimal("8.41523668")
+    assert policy.hard_stop_usd == Decimal("9.41523668")
 
 
 def test_qualification_commit_must_descend_from_frozen_baseline(monkeypatch) -> None:
@@ -243,8 +350,8 @@ def test_request_history_is_exact_commit_bound_and_duplicate_safe(
         {
             "request_id": f"request-{index}",
             "git_sha": "a" * 40,
-            "run_id": "stage2c-plan-items-flash",
-            "task_role": "stage2_semantic_2c_p1",
+            "run_id": "stage2c-p2-extended-flash",
+            "task_role": "stage2_semantic_2c_p2",
             "total_external_cost_usd": "0.001",
         }
         for index in range(2)
@@ -323,6 +430,10 @@ def test_terminal_failed_result_requires_exact_source_provenance() -> None:
     source_provenance = {
         "source_checkpoint": "checkpoint.json",
         "source_checkpoint_sha256": "f" * 64,
+        "source_stage2c_checkpoint": "checkpoint-p1.json",
+        "source_stage2c_checkpoint_sha256": manifest["source_stage2c_revision16"][
+            "checkpoints"
+        ]["flash"]["sha256"],
         "source_git_sha": manifest["source_stage2"]["git_sha"],
         "source_stage_1_fingerprints": manifest["accepted_stage1"]["flash"],
         "reused_compiled_stage_2a_fingerprint": manifest["source_stage2"][
@@ -331,6 +442,17 @@ def test_terminal_failed_result_requires_exact_source_provenance() -> None:
         "reused_compiled_stage_2b_fingerprint": manifest["source_stage2"][
             "accepted_compiled_stage2"
         ]["flash"]["stage_2b"],
+        "reused_stage_2c_p1_fingerprint": manifest["source_stage2c_revision16"][
+            "checkpoints"
+        ]["flash"]["accepted_p1_fingerprint"],
+        "revision16_suffix_excluded": [
+            "stage2_semantic_2c_p2",
+            "stage2_semantic_2c_p",
+            "stage2_semantic_2c_r1",
+            "stage2_semantic_2c_r2",
+            "stage2_semantic_2c",
+            "stage2_assembled_stage3_ready",
+        ],
         "historical_suffix_excluded": [
             "stage2_semantic_2c",
             "stage2_assembled_stage3_ready",
@@ -374,7 +496,6 @@ def test_terminal_pass_requires_measured_exact_model_p_r1_r2_requests(
     git_sha = "a" * 40
     model = controller.EXPECTED_MODELS["flash"]
     roles = [
-        "stage2_semantic_2c_p1",
         "stage2_semantic_2c_p2",
         "stage2_semantic_2c_r1",
         "stage2_semantic_2c_r2",
@@ -383,7 +504,7 @@ def test_terminal_pass_requires_measured_exact_model_p_r1_r2_requests(
         {
             "request_id": f"request-{index}",
             "git_sha": git_sha,
-            "run_id": "stage2c-plan-items-flash",
+            "run_id": "stage2c-p2-extended-flash",
             "task_role": role,
             "requested_model": model,
             "actual_model": model,
@@ -403,8 +524,8 @@ def test_terminal_pass_requires_measured_exact_model_p_r1_r2_requests(
     )
     monkeypatch.setattr(controller, "REQUESTS_PATH", path)
     row = {
-        "request_records": 4,
-        "locally_estimated_cost_usd": "0.004",
+        "request_records": 3,
+        "locally_estimated_cost_usd": "0.003",
         "request_roles": roles,
     }
     controller._validate_pass_request_evidence(
@@ -438,6 +559,10 @@ def test_terminal_pass_cannot_skip_without_private_accepted_artifact(
     source_provenance = {
         "source_checkpoint": "checkpoint.json",
         "source_checkpoint_sha256": "f" * 64,
+        "source_stage2c_checkpoint": "checkpoint-p1.json",
+        "source_stage2c_checkpoint_sha256": manifest["source_stage2c_revision16"][
+            "checkpoints"
+        ]["flash"]["sha256"],
         "source_git_sha": manifest["source_stage2"]["git_sha"],
         "source_stage_1_fingerprints": manifest["accepted_stage1"]["flash"],
         "reused_compiled_stage_2a_fingerprint": manifest["source_stage2"][
@@ -446,6 +571,17 @@ def test_terminal_pass_cannot_skip_without_private_accepted_artifact(
         "reused_compiled_stage_2b_fingerprint": manifest["source_stage2"][
             "accepted_compiled_stage2"
         ]["flash"]["stage_2b"],
+        "reused_stage_2c_p1_fingerprint": manifest["source_stage2c_revision16"][
+            "checkpoints"
+        ]["flash"]["accepted_p1_fingerprint"],
+        "revision16_suffix_excluded": [
+            "stage2_semantic_2c_p2",
+            "stage2_semantic_2c_p",
+            "stage2_semantic_2c_r1",
+            "stage2_semantic_2c_r2",
+            "stage2_semantic_2c",
+            "stage2_assembled_stage3_ready",
+        ],
         "historical_suffix_excluded": [
             "stage2_semantic_2c",
             "stage2_assembled_stage3_ready",

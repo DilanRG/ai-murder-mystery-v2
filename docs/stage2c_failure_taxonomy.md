@@ -1,7 +1,7 @@
 # Stage 2C Decomposition Failure Taxonomy
 
 **Date:** 2026-07-23
-**Scope:** Revision 15 baseline and Revision 16 plan-item decomposition.
+**Scope:** Revision 15 baseline, Revision 16 plan-item decomposition, and Revision 17 P2 output-bound correction.
 
 This taxonomy preserves Revision 14 as the immutable baseline. Flash completed the old monolithic Stage 2C contract. Pro made three valid provider calls, but each exhausted the fixed 4,000-token completion allowance before returning a complete candidate. Those Pro attempts are output-budget failures, not semantic-validator rejections.
 
@@ -10,6 +10,12 @@ This taxonomy preserves Revision 14 as the immutable baseline. Flash completed t
 Revision 15 made eight measured semantic requests plus two exact-model preflights at exact commit `f723042780f77a5c85ccbb615d80791978f207cf`. Flash's first two combined-plan attempts stopped at the 2,600-token cap. Its third parsed but failed the unchanged semantic validator; one repair remained invalid and one was unauthorized. Pro's three combined-plan attempts all stopped at the same cap. Neither model reached R1 or R2. New estimated cost was USD 0.01158109, cumulative Stage 2 cost was USD 0.07213454, the ledger had zero open reservations, and Stage 3 request count was zero. The private result and ledger fingerprints are frozen in the Revision 16 manifest.
 
 This is observed evidence that even the two-item planning response still couples too much high-reasoning work. Revision 16 therefore splits only P: P1 proposes one item with upstream bindings; P2 proposes only the second item and binds the exact accepted P1 fingerprint. The host assembles the existing two-item `Stage2CPlanCandidate` and runs its unchanged combined validator. R1, R2, the whole-Stage-2 validator, and the Stage-3-readiness gate remain unchanged.
+
+## Revision 16 observed result
+
+Revision 16 ran at exact commit `2428e5699dabe9f19faaaf9e997057e153990739`. Flash accepted P1 and P2, passed the unchanged pair validator, realized both items, and passed whole-Stage-2 plus Stage-3-readiness. Pro accepted P1, then all three P2 attempts exhausted the fixed 2,600-token allowance. No Pro P2 candidate reached schema or semantic validation, so the remaining failure is classified as output-length rather than model-quality or semantic failure. New estimated cost was USD 0.01262878, cumulative Stage 2 cost was USD 0.08476332, with zero open reservations and zero Stage 3 requests.
+
+Revision 17 preserves the exact accepted P1 fingerprints (`fc318565...2c20` for Flash and `cbb888f5...0e00` for Pro) and excludes every dependent Revision 16 suffix. P2 alone receives a 4,000-token output allowance under the same model-paired contract. This is not a hidden retry reset: the new manifest and run namespace identify the new experiment revision, while immutable Revision 16 results remain the baseline.
 
 ## Baseline failure classes
 

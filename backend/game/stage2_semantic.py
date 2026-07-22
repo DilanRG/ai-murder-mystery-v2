@@ -54,6 +54,7 @@ STAGE2A_MAX_TOKENS = 5_000
 STAGE2B_MAX_TOKENS = 7_000
 STAGE2C_MAX_TOKENS = 4_000
 STAGE2C_PLAN_MAX_TOKENS = 2_600
+STAGE2C_P2_MAX_TOKENS = 4_000
 STAGE2C_REALIZATION_MAX_TOKENS = 2_400
 STAGE2_SYNTAX_REPAIR_MAX_TOKENS = 2_500
 STAGE2_DELTA_REPAIR_MAX_TOKENS = 1_800
@@ -4939,7 +4940,7 @@ async def generate_stage2_boundary(
                 candidate_type=Stage2CP2Candidate,
                 validator=validate_p2,
                 compiler=compile_delta,
-                max_tokens=STAGE2C_PLAN_MAX_TOKENS,
+                max_tokens=STAGE2C_P2_MAX_TOKENS,
                 immutable_paths=(
                     "/schema_version",
                     "/accepted_p1_fingerprint",

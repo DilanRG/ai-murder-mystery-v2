@@ -30,6 +30,7 @@ from game.stage1_semantic import content_fingerprint
 from game.stage2_semantic import (
     QUALIFICATION_POLICY,
     STAGE2C_PLAN_MAX_TOKENS,
+    STAGE2C_P2_MAX_TOKENS,
     STAGE2C_REALIZATION_MAX_TOKENS,
     STAGE2_DELTA_REPAIR_MAX_TOKENS,
     STAGE2C_PLAN_ITEMS_PROMPT_REVISION,
@@ -53,7 +54,8 @@ MANIFEST_PATH = Path(__file__).with_name("stage2c_decomposed_qualification_manif
 SOURCE_MANIFEST_PATH = Path(__file__).with_name("stage2_semantic_qualification_manifest.json")
 SOURCE_ROOT = REPOSITORY_ROOT / ".private" / "stage2_semantic_qualification"
 REVISION15_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_decomposed_qualification"
-ARTIFACT_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_plan_items_qualification"
+REVISION16_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_plan_items_qualification"
+ARTIFACT_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_p2_extended_qualification"
 ATTEMPTS_PATH = ARTIFACT_ROOT / "attempts.jsonl"
 REQUESTS_PATH = ARTIFACT_ROOT / "requests.jsonl"
 LEDGER_PATH = ARTIFACT_ROOT / "cost_ledger.jsonl"
@@ -62,7 +64,7 @@ RESULTS_PATH = ARTIFACT_ROOT / "qualification_results.json"
 PREFLIGHTS_PATH = ARTIFACT_ROOT / "verified_preflights.json"
 EXPECTED_BRANCH = "development"
 EXPECTED_MODELS = {"flash": "deepseek-v4-flash", "pro": "deepseek-v4-pro"}
-EXPERIMENT_REVISION = 16
+EXPERIMENT_REVISION = 17
 SOURCE_PREFIX_STAGES = (
     "stage2_semantic_2a_route_1",
     "stage2_semantic_2a_route_2",
@@ -70,7 +72,6 @@ SOURCE_PREFIX_STAGES = (
     "stage2_semantic_2b",
 )
 CURRENT_CHECKPOINT_STAGES = (
-    "stage2_semantic_2c_p1",
     "stage2_semantic_2c_p2",
     "stage2_semantic_2c_p",
     "stage2_semantic_2c_r1",
@@ -91,6 +92,16 @@ def _file_fingerprint(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError as error:
         raise ExperimentSafetyError(f"required private artifact is unavailable: {path.name}") from error
+
+
+def _load_jsonl(path: Path, *, label: str) -> list[dict[str, Any]]:
+    try:
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    except (OSError, json.JSONDecodeError) as error:
+        raise ExperimentSafetyError(f"{label} is unavailable or malformed") from error
+    if not rows or not all(isinstance(row, dict) for row in rows):
+        raise ExperimentSafetyError(f"{label} is unavailable or malformed")
+    return rows
 
 
 def load_manifest() -> dict[str, Any]:
@@ -150,10 +161,36 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         "stage_3_requests": 0,
     }:
         raise ExperimentSafetyError("Revision 15 baseline provenance changed")
+    if manifest.get("source_stage2c_revision16") != {
+        "git_sha": "2428e5699dabe9f19faaaf9e997057e153990739",
+        "manifest_fingerprint": "53d6b13d0a6d70944d2199d46f7449d52b1fc2fd6c0c91d7ce342a13b63878d7",
+        "results_sha256": "52fae2bfa22941925760317614ffb40f40bd9b93561beef3ec89bb652a8f862e",
+        "ledger_sha256": "f692a0a21e7f21386ef53a1e353bef11a2ecd20faa79a913fba1e8791e5c1b79",
+        "requests_sha256": "6d81ca58d940f1d5395d07bf2f14d0df5eb0d979a9c5526cc6ae021a2f3c79bf",
+        "attempts_sha256": "c363f6f73c330a46c9f33d157b9327b1cfb29df3fe346e6dcfa4a6056286f251",
+        "settled_cost_usd": "0.01262878",
+        "cumulative_stage2_cost_usd": "0.08476332",
+        "status": "completed_with_failures",
+        "stage_3_requests": 0,
+        "checkpoints": {
+            "flash": {
+                "filename": "checkpoint_flash_2428e5699dabe9f19faaaf9e997057e153990739.json",
+                "sha256": "d24d77ca5f59c95de96d40cbafa295d80d5ff3f523a198c49e46a19cb95d2a4f",
+                "accepted_p1_fingerprint": "fc318565ab97764ae80b85ad327244e1182b87564c772161c7b1ffbf7d552c20",
+            },
+            "pro": {
+                "filename": "checkpoint_pro_2428e5699dabe9f19faaaf9e997057e153990739.json",
+                "sha256": "20c7e0b4106759a2039f6e0e30293092f86f76d822ba21570fa7ebe585aac232",
+                "accepted_p1_fingerprint": "cbb888f576f4477b97f5257cac43cc26bb047d73541ea8b120985fc2defe0e00",
+            },
+        },
+    }:
+        raise ExperimentSafetyError("Revision 16 baseline provenance changed")
     expected_limits = {
         "initial_attempts_per_substage_per_model": 3,
         "delta_repairs_per_parsed_candidate": 2,
-        "stage_2c_plan_max_tokens": STAGE2C_PLAN_MAX_TOKENS,
+        "stage_2c_p1_max_tokens": STAGE2C_PLAN_MAX_TOKENS,
+        "stage_2c_p2_max_tokens": STAGE2C_P2_MAX_TOKENS,
         "stage_2c_realization_max_tokens": STAGE2C_REALIZATION_MAX_TOKENS,
         "syntax_repair_max_tokens": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
         "delta_repair_max_tokens": STAGE2_DELTA_REPAIR_MAX_TOKENS,
@@ -168,8 +205,8 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     }:
         raise ExperimentSafetyError("Stage 2C reasoning policy changed")
     if manifest.get("budget") != {
-        "namespace": "stage2c_plan_items_qualification",
-        "carry_in_stage2_cost_usd": "0.07213454",
+        "namespace": "stage2c_p2_extended_qualification",
+        "carry_in_stage2_cost_usd": "0.08476332",
         "cumulative_soft_stop_usd": "8.50",
         "cumulative_hard_stop_usd": "9.50",
         "uncertainty_reserve_usd": "0.50",
@@ -215,6 +252,111 @@ def verify_revision15_baseline(manifest: Mapping[str, Any]) -> dict[str, Any]:
     }:
         raise ExperimentSafetyError("Revision 15 model failures were reinterpreted")
     return results
+
+
+def verify_revision16_baseline(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Prove Revision 16 and both accepted P1 deltas before reusing them."""
+
+    source = manifest["source_stage2c_revision16"]
+    paths = {
+        "results_sha256": REVISION16_ROOT / "qualification_results.json",
+        "ledger_sha256": REVISION16_ROOT / "cost_ledger.jsonl",
+        "requests_sha256": REVISION16_ROOT / "requests.jsonl",
+        "attempts_sha256": REVISION16_ROOT / "attempts.jsonl",
+    }
+    for key, path in paths.items():
+        if _file_fingerprint(path) != source[key]:
+            raise ExperimentSafetyError(f"Revision 16 {path.name} fingerprint mismatched")
+    results = _load_json(paths["results_sha256"], label="Revision 16 qualification results")
+    if (
+        results.get("schema_version") != 1
+        or results.get("experiment_revision") != 16
+        or results.get("git_sha") != source["git_sha"]
+        or results.get("manifest_fingerprint") != source["manifest_fingerprint"]
+        or results.get("status") != source["status"]
+        or results.get("stage_3_requests") != source["stage_3_requests"]
+        or results.get("cumulative_stage2_estimated_cost_usd")
+        != source["cumulative_stage2_cost_usd"]
+        or not isinstance(results.get("budget"), dict)
+        or results["budget"].get("settled_usd") != source["settled_cost_usd"]
+        or results["budget"].get("open_reservations") != 0
+    ):
+        raise ExperimentSafetyError("Revision 16 result disposition mismatched")
+    dispositions = {
+        str(row.get("model_key")): (row.get("status"), row.get("failure_code"))
+        for row in results.get("model_results", [])
+        if isinstance(row, dict)
+    }
+    if dispositions != {
+        "flash": ("passed_stage_2_stage3_ready", None),
+        "pro": ("failed", "output_truncated"),
+    }:
+        raise ExperimentSafetyError("Revision 16 model outcomes were reinterpreted")
+    request_rows = _load_jsonl(
+        paths["requests_sha256"], label="Revision 16 request evidence"
+    )
+    _validate_revision16_request_records(source=source, request_rows=request_rows)
+    for model_key, checkpoint_info in source["checkpoints"].items():
+        checkpoint_path = REVISION16_ROOT / checkpoint_info["filename"]
+        if _file_fingerprint(checkpoint_path) != checkpoint_info["sha256"]:
+            raise ExperimentSafetyError(f"Revision 16 {model_key} checkpoint fingerprint mismatched")
+        checkpoint = _load_json(
+            checkpoint_path, label=f"Revision 16 {model_key} checkpoint"
+        )
+        records = checkpoint.get("accepted_stage_records")
+        if (
+            checkpoint.get("experiment_revision") != 16
+            or checkpoint.get("git_sha") != source["git_sha"]
+            or checkpoint.get("manifest_fingerprint") != source["manifest_fingerprint"]
+            or checkpoint.get("model_key") != model_key
+            or checkpoint.get("model") != EXPECTED_MODELS[model_key]
+            or not isinstance(records, list)
+            or not records
+            or records[0].get("stage") != "stage2_semantic_2c_p1"
+            or records[0].get("semantic_candidate_fingerprint")
+            != checkpoint_info["accepted_p1_fingerprint"]
+            or records[0].get("compiled_fingerprint")
+            != checkpoint_info["accepted_p1_fingerprint"]
+            or content_fingerprint(records[0].get("model_authored_document"))
+            != checkpoint_info["accepted_p1_fingerprint"]
+        ):
+            raise ExperimentSafetyError(f"Revision 16 {model_key} P1 provenance mismatched")
+    return results
+
+
+def _validate_revision16_request_records(
+    *, source: Mapping[str, Any], request_rows: Sequence[Mapping[str, Any]]
+) -> None:
+    """Fail closed on the exact paid evidence supporting reused P1 deltas."""
+
+    if any(
+        "stage3" in str(row.get("task_role", ""))
+        or "overlay" in str(row.get("task_role", ""))
+        for row in request_rows
+    ):
+        raise ExperimentSafetyError("Revision 16 contains an unauthorized Stage 3 request")
+    for model_key, expected_model in EXPECTED_MODELS.items():
+        p1_requests = [
+            row
+            for row in request_rows
+            if row.get("git_sha") == source["git_sha"]
+            and row.get("run_id") == f"stage2c-plan-items-{model_key}"
+            and row.get("task_role") == "stage2_semantic_2c_p1"
+        ]
+        if len(p1_requests) != 1 or any(
+            row.get("requested_model") != expected_model
+            or row.get("actual_model") != expected_model
+            or row.get("transport") != "deepseek_direct"
+            or row.get("fallback_used") is not False
+            or row.get("provider_failover_used") is not False
+            or row.get("result") != "success"
+            or row.get("accounting_status") != "measured"
+            or row.get("total_external_cost_usd") is None
+            for row in p1_requests
+        ):
+            raise ExperimentSafetyError(
+                f"Revision 16 {model_key} P1 request evidence mismatched"
+            )
 
 
 def qualification_git_identity(*, require_clean: bool) -> tuple[str, str]:
@@ -285,6 +427,33 @@ def verify_historical_prefix(
     expected = source["accepted_compiled_stage2"][model_key]
     if prefix[2].get("compiled_fingerprint") != expected["stage_2a"] or prefix[3].get("compiled_fingerprint") != expected["stage_2b"]:
         raise ExperimentSafetyError(f"{model_key} accepted Stage 2A/2B fingerprint mismatched")
+    revision16 = manifest["source_stage2c_revision16"]
+    p1_info = revision16["checkpoints"][model_key]
+    p1_path = REVISION16_ROOT / p1_info["filename"]
+    p1_checkpoint = _load_json(
+        p1_path, label=f"{model_key} Revision 16 P1 checkpoint"
+    )
+    p1_records = p1_checkpoint.get("accepted_stage_records")
+    if not isinstance(p1_records, list) or not p1_records:
+        raise ExperimentSafetyError(f"{model_key} Revision 16 P1 checkpoint is incomplete")
+    p1_record = dict(p1_records[0])
+    try:
+        Stage2CP1Candidate.model_validate(p1_record["model_authored_document"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ExperimentSafetyError(f"{model_key} Revision 16 P1 is malformed") from error
+    if (
+        p1_record.get("stage") != "stage2_semantic_2c_p1"
+        or p1_record.get("semantic_candidate_fingerprint")
+        != p1_info["accepted_p1_fingerprint"]
+        or p1_record.get("compiled_fingerprint")
+        != p1_info["accepted_p1_fingerprint"]
+        or content_fingerprint(p1_record.get("model_authored_document"))
+        != p1_info["accepted_p1_fingerprint"]
+        or content_fingerprint(p1_record.get("document"))
+        != p1_info["accepted_p1_fingerprint"]
+    ):
+        raise ExperimentSafetyError(f"{model_key} Revision 16 P1 fingerprint mismatched")
+    prefix.append(p1_record)
     return prefix, {
         "source_checkpoint": checkpoint_name,
         "source_checkpoint_sha256": _file_fingerprint(checkpoint_path),
@@ -292,20 +461,24 @@ def verify_historical_prefix(
         "source_stage_1_fingerprints": manifest["accepted_stage1"][model_key],
         "reused_compiled_stage_2a_fingerprint": expected["stage_2a"],
         "reused_compiled_stage_2b_fingerprint": expected["stage_2b"],
+        "source_stage2c_checkpoint": p1_info["filename"],
+        "source_stage2c_checkpoint_sha256": p1_info["sha256"],
+        "reused_stage_2c_p1_fingerprint": p1_info["accepted_p1_fingerprint"],
+        "revision16_suffix_excluded": [
+            str(record.get("stage", "")) for record in p1_records[1:]
+        ],
         "historical_suffix_excluded": stages[len(SOURCE_PREFIX_STAGES) :],
     }
 
 
 def _reasoning_map() -> dict[str, str | None]:
     result: dict[str, str | None] = {
-        "stage2_semantic_2c_p1": "high",
         "stage2_semantic_2c_p2": "high",
         "stage2_semantic_2c_r1": None,
         "stage2_semantic_2c_r2": None,
         "stage2c_exact_model_preflight": None,
     }
     for role in (
-        "stage2_semantic_2c_p1",
         "stage2_semantic_2c_p2",
         "stage2_semantic_2c_r1",
         "stage2_semantic_2c_r2",
@@ -320,14 +493,11 @@ def _client(
 ) -> LLMClient:
     if reasoning == "high":
         limits = {
-            "stage2_semantic_2c_p1": STAGE2C_PLAN_MAX_TOKENS,
-            "stage2_semantic_2c_p2": STAGE2C_PLAN_MAX_TOKENS,
+            "stage2_semantic_2c_p2": STAGE2C_P2_MAX_TOKENS,
         }
-        max_tokens = STAGE2C_PLAN_MAX_TOKENS
+        max_tokens = STAGE2C_P2_MAX_TOKENS
     else:
         limits = {
-            "stage2_semantic_2c_p1_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
-            "stage2_semantic_2c_p1_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
             "stage2_semantic_2c_p2_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
             "stage2_semantic_2c_p2_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
             "stage2_semantic_2c_r1": STAGE2C_REALIZATION_MAX_TOKENS,
@@ -379,6 +549,12 @@ def _load_current_records(
         "source_stage1_fingerprints": manifest["accepted_stage1"][model_key],
         "source_stage2_fingerprints": manifest["source_stage2"]["accepted_compiled_stage2"][model_key],
         "source_checkpoint_sha256": source_provenance["source_checkpoint_sha256"],
+        "source_stage2c_checkpoint_sha256": source_provenance[
+            "source_stage2c_checkpoint_sha256"
+        ],
+        "reused_stage_2c_p1_fingerprint": source_provenance[
+            "reused_stage_2c_p1_fingerprint"
+        ],
     }
     for key, expected in expected_header.items():
         if value.get(key) != expected:
@@ -423,7 +599,7 @@ def _run_request_records(*, model_key: str, git_sha: str) -> list[dict[str, Any]
                 raise ValueError("request record is not an object")
             if (
                 value.get("git_sha") == git_sha
-                and value.get("run_id") == f"stage2c-plan-items-{model_key}"
+                and value.get("run_id") == f"stage2c-p2-extended-{model_key}"
             ):
                 records.append(value)
     except (OSError, json.JSONDecodeError, ValueError) as error:
@@ -454,7 +630,6 @@ def _validate_pass_request_evidence(
 ) -> None:
     records = _run_request_records(model_key=model_key, git_sha=git_sha)
     required_roles = {
-        "stage2_semantic_2c_p1",
         "stage2_semantic_2c_p2",
         "stage2_semantic_2c_r1",
         "stage2_semantic_2c_r2",
@@ -529,6 +704,10 @@ def _validate_terminal_result(
         "source_stage_1_fingerprints",
         "reused_compiled_stage_2a_fingerprint",
         "reused_compiled_stage_2b_fingerprint",
+        "source_stage2c_checkpoint",
+        "source_stage2c_checkpoint_sha256",
+        "reused_stage_2c_p1_fingerprint",
+        "revision16_suffix_excluded",
         "historical_suffix_excluded",
     ):
         if row.get(key) != source_provenance.get(key):
@@ -643,7 +822,7 @@ async def _preflight(
         context=RunContext(
             experiment_revision=EXPERIMENT_REVISION,
             git_sha=git_sha,
-            run_id=f"stage2c-plan-items-preflight-{model_key}",
+            run_id=f"stage2c-p2-extended-preflight-{model_key}",
             phase="stage2c_exact_commit_preflight",
             pair_id="Q2C",
             case_fingerprint="preflight",
@@ -689,8 +868,8 @@ async def _run_model(
         context=RunContext(
             experiment_revision=EXPERIMENT_REVISION,
             git_sha=git_sha,
-            run_id=f"stage2c-plan-items-{model_key}",
-            phase="stage2c_plan_items_qualification",
+            run_id=f"stage2c-p2-extended-{model_key}",
+            phase="stage2c_p2_extended_qualification",
             pair_id="Q2C",
             case_fingerprint=str(manifest["accepted_stage1"][model_key]["compiled_stage_1_fingerprint"]),
         ),
@@ -708,7 +887,6 @@ async def _run_model(
     )
     diagnostics: list[dict[str, object]] = []
     initial_roles = (
-        "stage2_semantic_2c_p1",
         "stage2_semantic_2c_p2",
         "stage2_semantic_2c_r1",
         "stage2_semantic_2c_r2",
@@ -815,6 +993,12 @@ async def _run_model(
                 "source_stage1_fingerprints": manifest["accepted_stage1"][model_key],
                 "source_stage2_fingerprints": manifest["source_stage2"]["accepted_compiled_stage2"][model_key],
                 "source_checkpoint_sha256": provenance["source_checkpoint_sha256"],
+                "source_stage2c_checkpoint_sha256": provenance[
+                    "source_stage2c_checkpoint_sha256"
+                ],
+                "reused_stage_2c_p1_fingerprint": provenance[
+                    "reused_stage_2c_p1_fingerprint"
+                ],
                 "updated_at": datetime.now(UTC).isoformat(),
                 "accepted_stage_records": current_records,
             },
@@ -865,7 +1049,8 @@ async def _run_model(
     if any("stage3" in role or "overlay" in role for role in request_roles):
         raise ExperimentSafetyError("Stage 3 provider activity crossed the stop boundary")
     accepted_by_stage = {
-        str(record["stage"]): record for record in current_records
+        str(record["stage"]): record
+        for record in (*source_records, *current_records)
     }
     p1_document = accepted_by_stage["stage2_semantic_2c_p1"][
         "model_authored_document"
@@ -915,6 +1100,7 @@ async def _run_model(
 async def run_paid_qualification(manifest: Mapping[str, Any]) -> dict[str, Any]:
     branch, git_sha = qualification_git_identity(require_clean=True)
     verify_revision15_baseline(manifest)
+    verify_revision16_baseline(manifest)
     verified = {key: verify_historical_prefix(manifest, key)[1] for key in manifest["model_order"]}
     historical_flash = REPOSITORY_ROOT / str(manifest["historical_flash_artifact"])
     historical_flash_sha256 = _file_fingerprint(historical_flash)
@@ -1038,6 +1224,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     manifest = load_manifest()
     validate_manifest(manifest)
     revision15 = verify_revision15_baseline(manifest)
+    revision16 = verify_revision16_baseline(manifest)
     verified = {key: verify_historical_prefix(manifest, key)[1] for key in manifest["model_order"]}
     branch, git_sha = qualification_git_identity(require_clean=args.execute)
     if not args.execute:
@@ -1049,6 +1236,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "verified_source_provenance": verified,
             "revision15_results_sha256": manifest["source_stage2c_revision15"]["results_sha256"],
             "revision15_status": revision15["status"],
+            "revision16_results_sha256": manifest["source_stage2c_revision16"]["results_sha256"],
+            "revision16_status": revision16["status"],
             "policy_fingerprint": content_fingerprint(QUALIFICATION_POLICY.model_dump(mode="json")),
             "paid_calls_made": 0,
         }, indent=2, sort_keys=True))
