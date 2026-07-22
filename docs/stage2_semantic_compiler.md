@@ -54,7 +54,11 @@ Independence is mechanical. For every route the engine constructs critical nodes
 
 ## Stage 2C — truthful misdirection
 
-The host derives an opaque catalogue of innocent secondary-secret seeds from Stage 1. The model creates exactly two red herrings, each tied to an offered innocent owner and seed, with a bounded secondary-event window and participants, suspicious evidence, causal source, executable discovery, reasonable misinterpretation, non-murder explanation, contradiction hook, and executable resolution.
+Revision 15 decomposes this phase. Stage 2C-P uses high reasoning to propose two compact semantic plans: innocent suspect, secondary-secret seed, secondary-event meaning, apparent murder relevance and accusation axes, innocent explanation, intended suspicious and resolution channels, and the reason the plans are materially distinct. The host validates and fingerprints that plan before realization.
+
+Stage 2C-R1 and Stage 2C-R2 use reasoning-disabled calls to realize one accepted plan item at a time. Each supplies the suspicious trace, causal origin, event detail, offered discovery and resolution affordances, misleading interpretation, exact accepted innocent explanation, contradiction hook, and post-resolution inference. R2 binds both the plan fingerprint and exact accepted R1 fingerprint.
+
+Both accepted Stage 1 inputs currently expose one secondary-secret seed. The decomposed contract permits that seed to causally ground two different innocent secondary events. It requires distinct innocent suspects, suspicious-evidence channels, event meanings, and four separate discovery/resolution affordances; the host includes the seed owner and selected suspect in each exact event. The host compiles each accepted event into a new Stage 2C fact that names the actual participants and evidence while retaining the original Stage 1 secret as a separate causal-seed link. Stage 1 is not rewritten and no second Stage 1 secret is manufactured.
 
 The host fits each proposed innocent event into the existing actor timeline and room graph, then owns its exact ID, time, room, fact link, and references. It also owns red-herring evidence IDs, exact provenance, placement/actions, implication/exoneration bookkeeping, and uniqueness scoring. Stage 2C cannot mutate Stage 1, Stage 2A, or Stage 2B. A red herring may not enter a true route or make an innocent actor equally best supported.
 

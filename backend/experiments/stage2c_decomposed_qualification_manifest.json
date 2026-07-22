@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "experiment_revision": 15,
+  "branch": "development",
+  "development_baseline_sha": "a2f76a33649b0a87c84ea22b5e4f14359c80cca3",
+  "stage1_qualification_code_sha": "bbf7d1f46cfc138f442c298e0a57ead0a7bacab4",
+  "prompt_revision": "stage2c-decomposed-v1",
+  "schema_revision": "stage2c-decomposed-schema-v1",
+  "transport": "deepseek_direct",
+  "provider_fallbacks": false,
+  "model_order": [
+    "flash",
+    "pro"
+  ],
+  "models": {
+    "flash": "deepseek-v4-flash",
+    "pro": "deepseek-v4-pro"
+  },
+  "source_stage2": {
+    "experiment_revision": 14,
+    "git_sha": "d550fb81a23f24c84e7e1aff121aadf1cbd9ae2c",
+    "branch": "stage2-semantic-compiler",
+    "manifest_fingerprint": "2cdc6e86b5391efb279903f137b08cdc1e87a25a423b5bf5cdcc6761d32d2b64",
+    "prompt_revision": "stage2-semantic-v3",
+    "schema_revision": "stage2-semantic-schema-v2",
+    "checkpoints": {
+      "flash": "checkpoint_flash_d550fb81a23f24c84e7e1aff121aadf1cbd9ae2c.json",
+      "pro": "checkpoint_pro_d550fb81a23f24c84e7e1aff121aadf1cbd9ae2c.json"
+    },
+    "accepted_compiled_stage2": {
+      "flash": {
+        "stage_2a": "40b6c23b2af535f4f0e8e115477d747a931c1d9fd600146734012692ccf499d3",
+        "stage_2b": "c480ce74c4c1d739a22a3a7339bcdd2b781d5edbf6fc1ace858402582bd87b3f"
+      },
+      "pro": {
+        "stage_2a": "7fe0015aa956086ffbf7377cb93bd9976efa917f673ba9544f9fe9b4128dfa76",
+        "stage_2b": "74ca4dcde3484d1fe6280b4ecb82eabbe4bcf08cf4034de81fad21af03a0e2ae"
+      }
+    }
+  },
+  "accepted_stage1": {
+    "flash": {
+      "semantic_plan_fingerprint": "5428e613bfbbaed4c149843f913d5007a3e59914c02a65de034fb3ae186dbbf4",
+      "compiled_stage_1_fingerprint": "f3dfdf8eb50f06c5ff5dc267141f2aaf2ca8b50c92f02ad5ddec7ec659c11166",
+      "proof_support_catalogue_fingerprint": "2727a28b41880a54ff0a1b93b96fc04f08c4d7da0cd9af2bce569ab8bfc7a85c"
+    },
+    "pro": {
+      "semantic_plan_fingerprint": "87d90da4b06ad0eea1b2cc987445134e6eb241c6ea6d91bb4fe779395ab66814",
+      "compiled_stage_1_fingerprint": "642f86e0ffd8a60a5ee372727ecdb6788432765df45dac74d46e2ea0334b26fd",
+      "proof_support_catalogue_fingerprint": "d3ed314b09e9769b7af26ee5f85dd017257b99f18b4a586f0e605557630081da"
+    }
+  },
+  "limits": {
+    "initial_attempts_per_substage_per_model": 3,
+    "delta_repairs_per_parsed_candidate": 2,
+    "stage_2c_plan_max_tokens": 2600,
+    "stage_2c_realization_max_tokens": 2400,
+    "syntax_repair_max_tokens": 2500,
+    "delta_repair_max_tokens": 1800
+  },
+  "reasoning": {
+    "stage_2c_plan": "high",
+    "stage_2c_realizations": "disabled",
+    "syntax_repair": "disabled",
+    "delta_repair": "disabled"
+  },
+  "budget": {
+    "namespace": "stage2c_decomposed_qualification",
+    "carry_in_stage2_cost_usd": "0.06055345",
+    "cumulative_soft_stop_usd": "8.50",
+    "cumulative_hard_stop_usd": "9.50",
+    "uncertainty_reserve_usd": "0.50"
+  },
+  "historical_flash_artifact": ".private/stage2_semantic_qualification/accepted_flash.json",
+  "stop_boundary": "stage3_private_overlays"
+}

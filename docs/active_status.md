@@ -1,12 +1,16 @@
 # Active Build Status
 
-**Updated:** 2026-07-22
+**Updated:** 2026-07-23
 
 **Controlling direction:** [product_north_star.md](product_north_star.md)
 
 **Design roadmap and acceptance gate:** [AI_Murder_Mystery_Game_Design_Roadmap.md](AI_Murder_Mystery_Game_Design_Roadmap.md)
 
 **Settled decisions:** [decision_log.md](decision_log.md)
+
+## Active qualification
+
+Revision 15 implements the owner-authorized decomposed Stage 2C contract directly on `development`. Exact Revision 14 Stage 1, Stage 2A, and Stage 2B private provenance has been verified for Flash and Pro. The new pipeline uses high reasoning only for compact Stage 2C-P, then reasoning-disabled R1 and R2 realizations with exact plan/R1 bindings. The offline gate passes 515 backend tests and 16 frontend tests, the production Vite build, an 18.2 MB Windows package, and the packaged executable's live smoke. Persisted terminal passes must also revalidate their accepted artifact, checkpoint, exact source provenance, exact-model P/R1/R2 request evidence, and measured accounting before they can suppress work; persisted failures always re-enter the bounded runner. The exact-commit direct-DeepSeek qualification remains before owner review. No Stage 3 request is authorized or implemented in this revision. See [stage2c_failure_taxonomy.md](stage2c_failure_taxonomy.md).
 
 ## Playable now
 

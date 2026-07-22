@@ -20,12 +20,15 @@ from game.stage2_semantic import (
     Stage2BRealizationProposal,
     Stage2BSemanticCandidate,
     Stage2CRedHerringProposal,
+    Stage2CPlanCandidate,
+    Stage2CRealizationCandidate,
     Stage2CSemanticCandidate,
     Stage2PatchOperation,
     Stage2SemanticError,
     Stage2SemanticPatch,
     _generate_semantic_stage,
     apply_stage2_semantic_patch,
+    assemble_stage2c_semantic_candidate,
     assemble_stage2_artifact,
     build_discovery_affordance_catalogue,
     build_secondary_secret_catalogue,
@@ -33,9 +36,12 @@ from game.stage2_semantic import (
     build_stage2a_route_messages,
     build_stage2b_messages,
     build_stage2c_messages,
+    build_stage2c_plan_messages,
+    build_stage2c_realization_messages,
     compile_stage2a_candidate,
     compile_stage2b_candidate,
     compile_stage2c_candidate,
+    compile_decomposed_stage2c_candidate,
     compiled_stage2a_fingerprint,
     compiled_stage2b_fingerprint,
     discovery_affordance_catalogue_fingerprint,
@@ -46,12 +52,17 @@ from game.stage2_semantic import (
     stage2a_valid_example,
     stage2b_valid_example,
     stage2c_valid_example,
+    stage2c_plan_valid_example,
+    stage2c_realization_valid_example,
     validate_assembled_stage2,
     validate_stage2a_candidate,
     validate_stage2a_discovery_feasibility,
     validate_stage2a_route_delta,
     validate_stage2b_candidate,
     validate_stage2c_candidate,
+    validate_decomposed_stage2c_candidate,
+    validate_stage2c_plan_candidate,
+    validate_stage2c_realization_candidate,
 )
 from semantic_pipeline_fixture import semantic_pipeline_payloads
 
@@ -106,6 +117,42 @@ def _fixture() -> dict[str, object]:
         stage_2a=stage_a,
         stage_2b=stage_b,
         stage_2c=stage_c,
+    )
+    plan_c = stage2c_plan_valid_example(
+        stage_2a=stage_a,
+        stage_2b=stage_b,
+        discovery_catalogue=discovery,
+        secondary_catalogue=secondary,
+    )
+    realization_c1 = stage2c_realization_valid_example(
+        plan=plan_c,
+        red_herring_index=1,
+        discovery_catalogue=discovery,
+    )
+    realization_c2 = stage2c_realization_valid_example(
+        plan=plan_c,
+        red_herring_index=2,
+        discovery_catalogue=discovery,
+        accepted_r1=realization_c1,
+    )
+    decomposed_candidate_c = assemble_stage2c_semantic_candidate(
+        plan=plan_c,
+        r1=realization_c1,
+        r2=realization_c2,
+        discovery_catalogue=discovery,
+        secondary_catalogue=secondary,
+        core=core,
+    )
+    decomposed_stage_c = compile_decomposed_stage2c_candidate(
+        decomposed_candidate_c,
+        plan=plan_c,
+        r1=realization_c1,
+        r2=realization_c2,
+        stage_2a=stage_a,
+        stage_2b=stage_b,
+        discovery_catalogue=discovery,
+        secondary_catalogue=secondary,
+        core=core,
     )
     return locals()
 
@@ -502,6 +549,132 @@ def test_stage2c_rejects_impossible_secondary_event_window() -> None:
     assert "invalid_secondary_event_window" in _codes(report)
 
 
+def test_stage2c_plan_allows_one_seed_for_two_distinct_innocent_suspects() -> None:
+    f = _fixture()
+    plan = f["plan_c"]
+    assert len({item.secondary_secret_alias for item in plan.plans}) == 1
+    assert len({item.suspect_ref for item in plan.plans}) == 2
+    report = validate_stage2c_plan_candidate(
+        plan,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    )
+    assert report.is_valid
+
+
+@pytest.mark.parametrize(
+    "mutation,code",
+    [
+        ("stale_2a", "stage_2c_plan_rewrites_true_routes"),
+        ("stale_2b", "stage_2c_plan_rewrites_true_evidence"),
+        ("duplicate_suspect", "duplicate_red_herring_suspect"),
+        ("responsible", "red_herring_targets_non_innocent"),
+    ],
+)
+def test_stage2c_plan_rejects_stale_bindings_and_bad_suspects(
+    mutation: str, code: str
+) -> None:
+    f = _fixture()
+    document = f["plan_c"].model_dump(mode="json")
+    if mutation == "stale_2a":
+        document["compiled_stage_2a_fingerprint"] = "0" * 64
+    elif mutation == "stale_2b":
+        document["compiled_stage_2b_fingerprint"] = "0" * 64
+    elif mutation == "duplicate_suspect":
+        document["plans"][1]["suspect_ref"] = document["plans"][0]["suspect_ref"]
+    else:
+        document["plans"][1]["suspect_ref"] = "responsible_actor"
+    report = validate_stage2c_plan_candidate(
+        Stage2CPlanCandidate.model_validate(document),
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    )
+    assert code in _codes(report)
+
+
+def test_stage2c_r2_binds_exact_plan_and_r1_and_prevents_shared_bottleneck() -> None:
+    f = _fixture()
+    document = f["realization_c2"].model_dump(mode="json")
+    document["accepted_r1_fingerprint"] = "0" * 64
+    report = validate_stage2c_realization_candidate(
+        Stage2CRealizationCandidate.model_validate(document),
+        plan=f["plan_c"],
+        expected_index=2,
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+        accepted_r1=f["realization_c1"],
+    )
+    assert "stale_stage_2c_r1" in _codes(report)
+
+    document = f["realization_c2"].model_dump(mode="json")
+    document["discovery_affordance_alias"] = f[
+        "realization_c1"
+    ].discovery_affordance_alias
+    report = validate_stage2c_realization_candidate(
+        Stage2CRealizationCandidate.model_validate(document),
+        plan=f["plan_c"],
+        expected_index=2,
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+        accepted_r1=f["realization_c1"],
+    )
+    assert "shared_red_herring_bottleneck" in _codes(report)
+
+
+def test_decomposed_stage2c_pair_passes_full_stage2_and_stage3_readiness() -> None:
+    f = _fixture()
+    report = validate_decomposed_stage2c_candidate(
+        f["decomposed_candidate_c"],
+        plan=f["plan_c"],
+        r1=f["realization_c1"],
+        r2=f["realization_c2"],
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    )
+    assert report.is_valid
+    artifact = assemble_stage2_artifact(
+        core=f["core"],
+        character_ids=f["case"].character_ids,
+        location=f["location"],
+        support_catalogue=f["support"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        stage_2c=f["decomposed_stage_c"],
+    )
+    assert artifact.stage_3_readiness.is_valid
+    assert len({item.suspect_id for item in artifact.compiled_stage_2c.red_herrings}) == 2
+    assert len(artifact.canonical_fact_delta) == 2
+    for record in artifact.compiled_stage_2c.red_herrings:
+        fact = artifact.canonical_fact_delta[record.canonical_fact_id]
+        event = next(
+            row
+            for row in artifact.canonical_timeline_delta
+            if row.id == record.canonical_event_id
+        )
+        evidence = artifact.evidence_solution.evidence[record.evidence_id]
+        assert record.suspect_id in fact.related_character_ids
+        assert record.evidence_id in fact.related_evidence_ids
+        assert event.fact_ids == (record.canonical_fact_id,)
+        assert record.causal_seed_fact_id in f["core"].facts
+        assert set(evidence.fact_ids) == {
+            record.canonical_fact_id,
+            record.causal_seed_fact_id,
+        }
+
+
 def test_assembled_validator_rejects_true_evidence_exonerating_responsible_actor() -> None:
     f = _fixture()
     solution = f["artifact"].evidence_solution
@@ -642,6 +815,42 @@ class _FakeLLM:
 
 
 @pytest.mark.asyncio
+async def test_legacy_stage2c_path_remains_monolithic() -> None:
+    f = _fixture()
+    route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
+    route_2 = stage2a_route_delta_valid_example(
+        f["support"],
+        route_index=2,
+        accepted_route_1=route_1.route,
+        discovery_catalogue=f["discovery"],
+        core=f["core"],
+    ).model_copy(update={"route": f["candidate_a"].routes[1]})
+    llm = _FakeLLM(
+        [
+            SimpleNamespace(content=route_1.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=route_2.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["candidate_b"].model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["candidate_c"].model_dump_json(), finish_reason="stop"),
+        ]
+    )
+    result = await generate_stage2_boundary(
+        llm,
+        repair_llm=llm,
+        core=f["core"],
+        character_ids=f["case"].character_ids,
+        location=f["location"],
+    )
+    assert result.stage_2c_plan is None
+    assert result.artifact.stage_3_readiness.is_valid
+    assert llm.calls == [
+        "stage2_semantic_2a_route_1",
+        "stage2_semantic_2a_route_2",
+        "stage2_semantic_2b",
+        "stage2_semantic_2c",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_accepted_stage2a_route_checkpoint_resumes_without_duplicate_call() -> None:
     f = _fixture()
     route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
@@ -670,6 +879,7 @@ async def test_accepted_stage2a_route_checkpoint_resumes_without_duplicate_call(
         await generate_stage2_boundary(
             first_llm,
             repair_llm=first_llm,
+            decomposed_stage2c=True,
             core=f["core"],
             character_ids=f["case"].character_ids,
             location=f["location"],
@@ -685,7 +895,15 @@ async def test_accepted_stage2a_route_checkpoint_resumes_without_duplicate_call(
                 finish_reason="stop",
             ),
             SimpleNamespace(
-                content=f["candidate_c"].model_dump_json(),
+                content=f["plan_c"].model_dump_json(),
+                finish_reason="stop",
+            ),
+            SimpleNamespace(
+                content=f["realization_c1"].model_dump_json(),
+                finish_reason="stop",
+            ),
+            SimpleNamespace(
+                content=f["realization_c2"].model_dump_json(),
                 finish_reason="stop",
             ),
         ]
@@ -693,6 +911,7 @@ async def test_accepted_stage2a_route_checkpoint_resumes_without_duplicate_call(
     result = await generate_stage2_boundary(
         resumed_llm,
         repair_llm=resumed_llm,
+        decomposed_stage2c=True,
         core=f["core"],
         character_ids=f["case"].character_ids,
         location=f["location"],
@@ -702,8 +921,65 @@ async def test_accepted_stage2a_route_checkpoint_resumes_without_duplicate_call(
     assert resumed_llm.calls == [
         "stage2_semantic_2a_route_2",
         "stage2_semantic_2b",
-        "stage2_semantic_2c",
+        "stage2_semantic_2c_p",
+        "stage2_semantic_2c_r1",
+        "stage2_semantic_2c_r2",
     ]
+
+
+@pytest.mark.asyncio
+async def test_accepted_stage2c_plan_resumes_with_only_r1_and_r2_calls() -> None:
+    f = _fixture()
+    route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
+    route_2 = stage2a_route_delta_valid_example(
+        f["support"],
+        route_index=2,
+        accepted_route_1=route_1.route,
+        discovery_catalogue=f["discovery"],
+        core=f["core"],
+    ).model_copy(update={"route": f["candidate_a"].routes[1]})
+    records: list[dict[str, object]] = []
+    first_llm = _FakeLLM(
+        [
+            SimpleNamespace(content=route_1.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=route_2.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["candidate_b"].model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["plan_c"].model_dump_json(), finish_reason="stop"),
+        ]
+    )
+
+    def interrupt_after_plan(record: dict[str, object]) -> None:
+        records.append(record)
+        if record["stage"] == "stage2_semantic_2c_p":
+            raise RuntimeError("interrupt after plan")
+
+    with pytest.raises(RuntimeError, match="interrupt after plan"):
+        await generate_stage2_boundary(
+            first_llm,
+            repair_llm=first_llm,
+            decomposed_stage2c=True,
+            core=f["core"],
+            character_ids=f["case"].character_ids,
+            location=f["location"],
+            accepted_stage_observer=interrupt_after_plan,
+        )
+    resumed_llm = _FakeLLM(
+        [
+            SimpleNamespace(content=f["realization_c1"].model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["realization_c2"].model_dump_json(), finish_reason="stop"),
+        ]
+    )
+    result = await generate_stage2_boundary(
+        resumed_llm,
+        repair_llm=resumed_llm,
+        decomposed_stage2c=True,
+        core=f["core"],
+        character_ids=f["case"].character_ids,
+        location=f["location"],
+        resume_stage_records={str(record["stage"]): record for record in records},
+    )
+    assert result.artifact.stage_3_readiness.is_valid
+    assert resumed_llm.calls == ["stage2_semantic_2c_r1", "stage2_semantic_2c_r2"]
 
 
 @pytest.mark.asyncio
@@ -824,6 +1100,23 @@ def test_prompts_expose_only_current_substage_schema() -> None:
             discovery_catalogue=f["discovery"],
             secondary_catalogue=f["secondary"],
         ),
+        build_stage2c_plan_messages(
+            stage_2a=f["stage_a"],
+            stage_2b=f["stage_b"],
+            discovery_catalogue=f["discovery"],
+            secondary_catalogue=f["secondary"],
+        ),
+        build_stage2c_realization_messages(
+            plan=f["plan_c"],
+            red_herring_index=1,
+            discovery_catalogue=f["discovery"],
+        ),
+        build_stage2c_realization_messages(
+            plan=f["plan_c"],
+            red_herring_index=2,
+            discovery_catalogue=f["discovery"],
+            accepted_r1=f["realization_c1"],
+        ),
     ]
     for pair in messages:
         payload = json.loads(pair[1].content)
@@ -831,3 +1124,8 @@ def test_prompts_expose_only_current_substage_schema() -> None:
         assert "GeneratedOverlay" not in encoded
         assert "Presentation" not in encoded
         assert "canonical_fact_ids" not in encoded
+    realization_schema = json.dumps(
+        json.loads(messages[-1][1].content)["schema"]
+    )
+    assert "suspect_ref" not in realization_schema
+    assert "secondary_secret_alias" not in realization_schema
