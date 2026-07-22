@@ -267,11 +267,17 @@ class LLMClient:
         if self.provider_routing is not None:
             # Copy once more because a mocked/observed request may mutate payload.
             payload["provider"] = json.loads(json.dumps(self.provider_routing))
-        if self.reasoning_effort is not None and self.transport == "openrouter":
-            payload["reasoning"] = {"effort": self.reasoning_effort}
+        if self.transport == "deepseek_direct":
+            # DeepSeek V4 defaults to thinking mode.  Send the toggle in both
+            # directions so a no-reasoning repair/preflight cannot silently
+            # spend its bounded output allowance on hidden reasoning tokens.
+            payload["thinking"] = {
+                "type": "enabled" if self.reasoning_effort is not None else "disabled"
+            }
+            if self.reasoning_effort is not None:
+                payload["reasoning_effort"] = self.reasoning_effort
         elif self.reasoning_effort is not None:
-            payload["thinking"] = {"type": "enabled"}
-            payload["reasoning_effort"] = self.reasoning_effort
+            payload["reasoning"] = {"effort": self.reasoning_effort}
 
     async def _notify_observer(self, event: str, data: dict[str, Any]) -> None:
         if self.request_observer is None:

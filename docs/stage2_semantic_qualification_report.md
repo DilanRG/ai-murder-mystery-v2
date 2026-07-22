@@ -29,6 +29,8 @@ The 38 focused tests prove the valid end-to-end local fixture and reject unknown
 
 Both exact private Stage 1 inputs also pass the entire provider-free 2A/2B/2C example compiler and Stage-3-readiness gate. Their prompts remain bounded at roughly 10.4k characters for 2A, 18.7k for 2B, and 15k for 2C before provider output.
 
-The complete offline gate passes: 475 backend tests, 16 frontend tests, the production Vite build, the Windows PyInstaller single-file build, and the packaged executable's live HTTP smoke.
+The complete offline gate passes: 476 backend tests, 16 frontend tests, the production Vite build, the Windows PyInstaller single-file build, and the packaged executable's live HTTP smoke.
+
+The first exact-commit preflight at `c6bbd59aef7abe6885a5b583877a02d980cf5e8d` returned the exact requested Flash model with no fallback, but DeepSeek's default thinking mode consumed the bounded eight-token response and produced no final `OK`. It is preserved as an operational preflight failure, not a model-quality result. The single settled request cost an estimated USD 0.00000364. The direct client now sends the documented `thinking: disabled` control explicitly whenever reasoning is disabled; a transport regression test and the full gate pass before the new qualification revision is committed.
 
 Final gate counts, exact qualification Git SHA, provider attempts, token/cache/reasoning usage, finish reasons, latency, estimated/provider-billed cost, accepted Stage 2 fingerprints, safe route summaries, invalidations, limitations, and the recommended next milestone will be filled from the immutable private qualification artifacts after the exact-commit run.

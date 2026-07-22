@@ -137,6 +137,28 @@ def test_direct_deepseek_uses_exact_endpoint_headers_and_thinking_payload(
     assert response.prompt_cache_miss_tokens == 2
 
 
+def test_direct_deepseek_explicitly_disables_default_thinking_mode() -> None:
+    captured: dict[str, object] = {}
+    client = LLMClient(
+        api_key="test",
+        model="deepseek-v4-flash",
+        transport="deepseek_direct",
+        reasoning_effort=None,
+    )
+
+    async def fake_post(payload: dict[str, object]) -> LLMResponse:
+        captured.update(payload)
+        return LLMResponse(content="OK", model="deepseek-v4-flash")
+
+    client._post = fake_post  # type: ignore[method-assign]
+    asyncio.run(client.generate([LLMMessage(role="user", content="OK")]))
+
+    assert captured["thinking"] == {"type": "disabled"}
+    assert "reasoning_effort" not in captured
+    assert captured["temperature"] == 0.8
+    assert captured["top_p"] == 0.95
+
+
 def test_direct_transport_rejects_openrouter_routing() -> None:
     with pytest.raises(ValueError, match="cannot carry OpenRouter routing"):
         LLMClient(
