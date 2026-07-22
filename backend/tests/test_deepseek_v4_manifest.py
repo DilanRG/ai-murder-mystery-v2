@@ -24,7 +24,7 @@ from experiments.deepseek_v4_runner import (
 def _verified_preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 7,
+            "experiment_revision": 8,
             "model": slug,
             "actual_model": slug,
             "upstream_provider": "deepseek",
@@ -42,7 +42,10 @@ def _verified_preflights() -> dict[str, object]:
 def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     manifest = load_manifest()
 
-    assert manifest["manifest_revision"] == 7
+    assert manifest["manifest_revision"] == 8
+    assert manifest["supersedes_revision"] == 7
+    assert manifest["prompt_revision"] == "procedural-case-generation-staged-v3"
+    assert manifest["schema_revision"] == "procedural-case-schema-staged-v3"
     assert manifest["git_checkpoint"] == "0166ca14c80a5e84c1322e93667d71eea1461aa6"
     assert manifest["gateway"] == "deepseek_direct"
     assert manifest["model_fallbacks"] == []
@@ -63,7 +66,12 @@ def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     assert manifest["runtime_settings"]["stage_attempt_limit"] == 3
     assert manifest["runtime_settings"]["roles"] == {
         "case_generation_core": {"max_tokens": 20_000, "temperature": 0.55, "json_mode": True},
-        "case_generation_evidence": {"max_tokens": 20_000, "temperature": 0.55, "json_mode": True},
+        "case_generation_evidence_inventory": {
+            "max_tokens": 20_000, "temperature": 0.55, "json_mode": True,
+        },
+        "case_generation_solution": {
+            "max_tokens": 8_000, "temperature": 0.55, "json_mode": True,
+        },
         "case_generation_overlays": {"max_tokens": 24_000, "temperature": 0.55, "json_mode": True},
         "case_generation_presentation": {"max_tokens": 8_000, "temperature": 0.2, "json_mode": True},
         "private_npc_action": {"max_tokens": 80, "temperature": 0.0, "json_mode": True},

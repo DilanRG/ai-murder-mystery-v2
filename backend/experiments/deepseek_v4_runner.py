@@ -25,13 +25,16 @@ EXPECTED_MODELS = {
     "flash": "deepseek-v4-flash",
 }
 EXPECTED_RESOLVED_MODELS = dict(EXPECTED_MODELS)
-EXPECTED_MANIFEST_REVISION = 7
+EXPECTED_MANIFEST_REVISION = 8
 EXPECTED_GIT_CHECKPOINT = "0166ca14c80a5e84c1322e93667d71eea1461aa6"
 EXPECTED_GATEWAY = "deepseek_direct"
 EXPECTED_ROUTING = None
+EXPECTED_PROMPT_REVISION = "procedural-case-generation-staged-v3"
+EXPECTED_SCHEMA_REVISION = "procedural-case-schema-staged-v3"
 EXPECTED_ROLE_MAX_TOKENS = {
     "case_generation_core": 20_000,
-    "case_generation_evidence": 20_000,
+    "case_generation_evidence_inventory": 20_000,
+    "case_generation_solution": 8_000,
     "case_generation_overlays": 24_000,
     "case_generation_presentation": 8_000,
     "private_npc_action": 80,
@@ -104,7 +107,10 @@ EXPECTED_RESERVE_PAIR = {
         "failures in the report and stay below the hard operational stop."
     ),
 }
-EXPECTED_REVISION7_PAIR_IDS = ("P2", "P3", "R1")
+EXPECTED_REVISION8_PAIR_IDS = ("P2", "P3", "R1")
+# Revision 8 deliberately retains the Revision 7 zero-admission baseline matrix.
+# Keep this historical name available to the generation and crossed-result readers.
+EXPECTED_REVISION7_PAIR_IDS = EXPECTED_REVISION8_PAIR_IDS
 EXPECTED_REPLACED_PAIR_ID = "P1"
 
 
@@ -142,21 +148,26 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Reject changes that would make the paired measurement unfair or unsafe."""
 
     if manifest.get("manifest_revision") != EXPECTED_MANIFEST_REVISION:
-        raise ExperimentSafetyError("Only frozen manifest revision 7 is accepted.")
+        raise ExperimentSafetyError("Only frozen manifest revision 8 is accepted.")
     if manifest.get("git_checkpoint") != EXPECTED_GIT_CHECKPOINT:
         raise ExperimentSafetyError("Manifest must retain the revision-4 direct-provider checkpoint.")
     if (
-        manifest.get("supersedes_revision") != 6
+        manifest.get("supersedes_revision") != 7
         or manifest.get("gateway") != EXPECTED_GATEWAY
         or manifest.get("model_fallbacks") != []
     ):
-        raise ExperimentSafetyError("Manifest revision 7 must require direct DeepSeek without fallback.")
+        raise ExperimentSafetyError("Manifest revision 8 must require direct DeepSeek without fallback.")
     if manifest.get("models") != EXPECTED_MODELS:
         raise ExperimentSafetyError("Manifest model slugs must be the exact DeepSeek V4 pair.")
     if manifest.get("resolved_models") != EXPECTED_RESOLVED_MODELS:
         raise ExperimentSafetyError("Manifest must freeze the direct DeepSeek model resolutions.")
     if manifest.get("provider_routing") != EXPECTED_ROUTING:
         raise ExperimentSafetyError("Direct DeepSeek must not carry gateway routing fields.")
+    if (
+        manifest.get("prompt_revision") != EXPECTED_PROMPT_REVISION
+        or manifest.get("schema_revision") != EXPECTED_SCHEMA_REVISION
+    ):
+        raise ExperimentSafetyError("Manifest must use the frozen staged-v3 prompt and schema revisions.")
 
     settings = manifest.get("runtime_settings")
     if not isinstance(settings, Mapping) or settings.get("reasoning_effort") != "high":
@@ -173,7 +184,12 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         raise ExperimentSafetyError("Identical sampler defaults are required.")
     expected_roles = {
         "case_generation_core": (EXPECTED_ROLE_MAX_TOKENS["case_generation_core"], 0.55),
-        "case_generation_evidence": (EXPECTED_ROLE_MAX_TOKENS["case_generation_evidence"], 0.55),
+        "case_generation_evidence_inventory": (
+            EXPECTED_ROLE_MAX_TOKENS["case_generation_evidence_inventory"], 0.55
+        ),
+        "case_generation_solution": (
+            EXPECTED_ROLE_MAX_TOKENS["case_generation_solution"], 0.55
+        ),
         "case_generation_overlays": (EXPECTED_ROLE_MAX_TOKENS["case_generation_overlays"], 0.55),
         "case_generation_presentation": (EXPECTED_ROLE_MAX_TOKENS["case_generation_presentation"], 0.2),
         "private_npc_action": (EXPECTED_ROLE_MAX_TOKENS["private_npc_action"], 0.0),
@@ -183,6 +199,8 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     roles = settings.get("roles")
     if not isinstance(roles, Mapping):
         raise ExperimentSafetyError("Every measured production role must be frozen.")
+    if set(roles) != set(expected_roles):
+        raise ExperimentSafetyError("Manifest provider-stage roles differ from the production boundary.")
     for role, (max_tokens, temperature) in expected_roles.items():
         role_settings = roles.get(role)
         if not isinstance(role_settings, Mapping) or (

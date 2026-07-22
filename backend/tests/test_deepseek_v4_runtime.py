@@ -37,7 +37,7 @@ def _observer(tmp_path: Path) -> DeepSeekRequestObserver:
     return DeepSeekRequestObserver(
         ledger=DeepSeekExperimentLedger(tmp_path / "ledger.jsonl"),
         metrics_path=tmp_path / "requests.jsonl",
-        context=RunContext(7, "sha", "run", "preflight"),
+        context=RunContext(8, "sha", "run", "preflight"),
     )
 
 
@@ -75,7 +75,7 @@ def test_verified_response_is_settled_and_sanitized(tmp_path: Path) -> None:
     ]
     assert intents == [
         {
-            "experiment_revision": 7,
+            "experiment_revision": 8,
             "git_sha": "sha",
             "pair_id": "",
             "phase": "preflight",
@@ -116,10 +116,17 @@ def test_measured_client_exposes_safety_stop_as_non_retryable_provider_error(
         observer=observer,
     )
     assert client.sampler["top_k"] is None
-    assert client.task_max_tokens["case_generation_core"] == 20_000
-    assert client.task_max_tokens["case_generation_evidence"] == 20_000
-    assert client.task_max_tokens["case_generation_overlays"] == 24_000
-    assert client.task_max_tokens["case_generation_presentation"] == 8_000
+    assert {
+        role: client.task_max_tokens[role]
+        for role in client.task_max_tokens
+        if role.startswith("case_generation_")
+    } == {
+        "case_generation_core": 20_000,
+        "case_generation_evidence_inventory": 20_000,
+        "case_generation_solution": 8_000,
+        "case_generation_overlays": 24_000,
+        "case_generation_presentation": 8_000,
+    }
 
     async def fake_post(_payload) -> LLMResponse:
         return LLMResponse(

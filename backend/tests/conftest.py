@@ -1,6 +1,8 @@
 """
 tests/conftest.py — Shared fixtures for the AI Murder Mystery Game test suite.
 """
+from copy import deepcopy
+
 import pytest
 from game.content import load_case, load_location
 from game.models import CaseDefinition
@@ -247,8 +249,8 @@ def generated_stage_response(
     """Return the provider payload for one bounded scenario-generation stage.
 
     Test providers keep a complete deterministic document as their fixture data,
-    while the production boundary now asks for four independently validated
-    slices.  Keeping the projection here prevents the fixtures from silently
+    while the production boundary now asks for four conceptual phases with
+    two independently validated evidence deltas. Keeping the projection here prevents fixtures from silently
     exercising the retired one-shot protocol.
     """
 
@@ -269,14 +271,47 @@ def generated_stage_response(
                 )
             },
         }
-    if task_role == "case_generation_evidence":
+    solution = case["solution"]
+    route_support_ids = {
+        evidence_id
+        for route in solution["evidence_routes"]
+        for axis in (
+            "method_evidence_ids",
+            "motive_evidence_ids",
+            "opportunity_evidence_ids",
+        )
+        for evidence_id in route[axis]
+    }
+    red_herring_ids = [
+        evidence_id
+        for evidence_id, item in case["evidence"].items()
+        if item["is_red_herring"]
+    ][:2]
+    inventory_ids = route_support_ids | set(red_herring_ids)
+    if task_role == "case_generation_evidence_inventory":
+        evidence = {
+            evidence_id: deepcopy(item)
+            for evidence_id, item in case["evidence"].items()
+            if evidence_id in inventory_ids
+        }
+        culprit_id = solution["culprit_id"]
+        for evidence_id in route_support_ids:
+            evidence[evidence_id]["implicates_character_ids"] = [culprit_id]
         return {
             "schema_version": 1,
-            "evidence": case["evidence"],
-            "solution": case["solution"],
+            "evidence": evidence,
         }
+    if task_role == "case_generation_solution":
+        return {"schema_version": 1, "solution": solution}
     if task_role == "case_generation_overlays":
-        return {"schema_version": 1, "overlays": case["overlays"]}
+        overlays = deepcopy(case["overlays"])
+        for overlay in overlays.values():
+            overlay["supporting_evidence_ids"] = [
+                evidence_id
+                for evidence_id in overlay["supporting_evidence_ids"]
+                if evidence_id in inventory_ids
+            ]
+        return {"schema_version": 1, "overlays": overlays}
     if task_role == "case_generation_presentation":
         return {"schema_version": 1, "presentation": document["presentation"]}
     raise AssertionError(f"unexpected scenario stage: {task_role}")

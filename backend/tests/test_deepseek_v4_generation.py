@@ -9,8 +9,11 @@ import uuid
 
 import pytest
 
-from conftest import make_dummy_generated_document
-from experiments.run_deepseek_v4_generation import run_generation_matrix
+from conftest import generated_stage_response, make_dummy_generated_document
+from experiments.run_deepseek_v4_generation import (
+    _has_generation_intent,
+    run_generation_matrix,
+)
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
     ExperimentSafetyError,
@@ -25,7 +28,7 @@ GIT_SHA = "b" * 40
 def _preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 7,
+            "experiment_revision": 8,
             "git_sha": GIT_SHA,
             "model": model,
             "actual_model": model,
@@ -51,7 +54,8 @@ class _OfflineMeasuredClient:
     async def generate(self, messages, **kwargs) -> LLMResponse:
         assert kwargs["task_role"] in {
             "case_generation_core",
-            "case_generation_evidence",
+            "case_generation_evidence_inventory",
+            "case_generation_solution",
             "case_generation_overlays",
             "case_generation_presentation",
         }
@@ -96,32 +100,7 @@ class _OfflineMeasuredClient:
 
 
 def _stage_document(document: dict[str, object], role: str) -> dict[str, object]:
-    case = document["case"]
-    assert isinstance(case, dict)
-    if role == "case_generation_core":
-        return {
-            "schema_version": 1,
-            **{
-                key: case[key]
-                for key in (
-                    "title",
-                    "investigation_start_minute",
-                    "murder",
-                    "facts",
-                    "timeline",
-                    "opening",
-                )
-            },
-        }
-    if role == "case_generation_evidence":
-        return {
-            "schema_version": 1,
-            "evidence": case["evidence"],
-            "solution": case["solution"],
-        }
-    if role == "case_generation_overlays":
-        return {"schema_version": 1, "overlays": case["overlays"]}
-    return {"schema_version": 1, "presentation": document["presentation"]}
+    return generated_stage_response(document, role)
 
 
 def test_generation_matrix_uses_production_admission_and_private_snapshots(
@@ -172,7 +151,7 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
     assert clients_built == 6
     assert all(outcome["admitted"] is True for outcome in outcomes)
     assert all(outcome["candidate_attempts"] == 1 for outcome in outcomes)
-    assert all(outcome["stage_requests"] == 4 for outcome in outcomes)
+    assert all(outcome["stage_requests"] == 5 for outcome in outcomes)
     assert all(len(outcome["case_fingerprint"]) == 64 for outcome in outcomes)
     assert all((tmp_path / outcome["canonical_artifact"]).is_file() for outcome in outcomes)
     progress = json.loads((tmp_path / "generation_results.json").read_text(encoding="utf-8"))
@@ -186,15 +165,16 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
     plan = json.loads((tmp_path / "generation_plan.json").read_text(encoding="utf-8"))
     assert plan["status"] == "completed"
     assert len(plan["completed_cells"]) == 6
-    assert plan["request_events"] == 24
-    assert plan["attempt_events"] == 24
+    assert plan["request_events"] == 30
+    assert plan["attempt_events"] == 30
     request_records = (tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(request_records) == 24
+    assert len(request_records) == 30
     request_intents = (tmp_path / "request_intents.jsonl").read_text(encoding="utf-8").splitlines()
-    assert len(request_intents) == 24
+    assert len(request_intents) == 30
     assert {json.loads(record)["task_role"] for record in request_records} == {
         "case_generation_core",
-        "case_generation_evidence",
+        "case_generation_evidence_inventory",
+        "case_generation_solution",
         "case_generation_overlays",
         "case_generation_presentation",
     }
@@ -204,7 +184,7 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    assert len(attempts) == 24
+    assert len(attempts) == 30
     assert all(record["admission_result"] == "admitted" for record in attempts)
     assert all(record["request_id"] and record["generation_id"] for record in attempts)
 
@@ -321,7 +301,7 @@ def test_generation_matrix_refuses_unverified_revision_before_building_client(
     assert built is False
 
 
-def test_revision7_refuses_any_reserve_replacement_other_than_interrupted_p1(
+def test_revision8_refuses_any_reserve_replacement_other_than_interrupted_p1(
     tmp_path: Path,
 ) -> None:
     manifest = load_manifest()
@@ -345,6 +325,36 @@ def test_revision7_refuses_any_reserve_replacement_other_than_interrupted_p1(
             )
         )
     assert built is False
+
+
+def test_revision8_orphan_guard_ignores_archived_revision7_intents(tmp_path: Path) -> None:
+    intent_path = tmp_path / "request_intents.jsonl"
+    intent_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "experiment_revision": 7,
+                "phase": "generation",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert _has_generation_intent(intent_path, experiment_revision=8) is False
+
+    with intent_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "experiment_revision": 8,
+                    "phase": "generation",
+                }
+            )
+            + "\n"
+        )
+    assert _has_generation_intent(intent_path, experiment_revision=8) is True
 
 
 class _CrashAfterReservationClient:

@@ -89,7 +89,7 @@ def test_normal_new_story_admits_dummy_provider_case_with_exact_manual_cast(tmp_
         "story_source": "openrouter",
         "story_status": "ready",
     }
-    assert provider.calls == 4
+    assert provider.calls == 5
     assert set(main._session.engine.case.character_ids) == set(source.character_ids)
 
 
@@ -231,7 +231,7 @@ def test_generated_case_save_load_embeds_validated_truth_without_provider_key(tm
     assert loaded.status_code == 200, loaded.text
     assert main._session.engine.case.id == generated_case_id
     assert main._session.engine.case.id.startswith("generated_")
-    assert provider.calls == 4
+    assert provider.calls == 5
 
 
 def test_generated_case_save_rejects_embedded_truth_tampering(tmp_path) -> None:

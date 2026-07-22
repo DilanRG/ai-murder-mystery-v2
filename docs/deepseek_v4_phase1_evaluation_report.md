@@ -1,13 +1,37 @@
 # DeepSeek V4 Phase 1 Evaluation Report
 
-**Status:** Incomplete — revision 7 evaluator verified offline; exact-commit preflight pending
+**Status:** Incomplete — Revision 7 completed with zero admissions; Revision 8 split-stage evaluator verified offline
 **Experiment date:** 2026-07-21 to 2026-07-22
 **Product:** AI Murder Mystery Game
 **Frozen input manifest:** [`backend/experiments/deepseek_v4_manifest.json`](../backend/experiments/deepseek_v4_manifest.json)
 
 This is a live evidence report, not a Phase 1 or MVP completion claim. The experiment must ultimately stop at the human blind-playtest gate.
 
-## Current provider result
+## Current measured result
+
+Revision 7 ran against exact Git SHA `e0047c3a480e193dc22a6d280ea3a2b88bd6149b`. Direct preflights passed for both exact models with `deepseek_direct`, no fallback, complete token accounting, and exact returned-model identity. The frozen P2/P3/R1 matrix completed all six model/cast cells and 31 chargeable generation requests.
+
+No case was admitted. All six cells eventually accepted Stage 1 crime/timeline output and then exhausted Stage 2 evidence/solution attempts. Consequently there is no Stage 3 overlay evidence, Stage 4 presentation evidence, crossed NPC comparison, intended-play result, or adversarial-play result from Revision 7.
+
+| Revision 7 result | Pro | Flash |
+|---|---:|---:|
+| Formal cells completed | 3 / 3 | 3 / 3 |
+| Stage 1 ultimately accepted | 3 / 3 | 3 / 3 |
+| Stage 1 first-attempt semantic success | 1 / 3 | 1 / 3 |
+| Stage 2 ultimately accepted | 0 / 3 | 0 / 3 |
+| Whole cases admitted | 0 / 3 | 0 / 3 |
+| Chargeable requests | 16 | 15 |
+| Locally settled matrix cost estimate | USD 0.24401892 | USD 0.04179448 |
+
+Formal Revision 7 generation cost was USD 0.28581340. Cumulative locally settled experiment cost was USD 0.50991102 at matrix completion. Those values are estimates calculated from returned token/cache meters and the frozen direct DeepSeek price card; current provider-billed cost is unavailable. Open historical reservations were USD 1.68643580 of conservative exposure, not billed spend, leaving USD 5.80365318 before the soft stop after holds and the USD 0.50 accounting margin.
+
+The failure concentration is unambiguous. Stage 2 repeatedly violated exact discovery routes, declared-fact provenance, method/motive/opportunity category links, route-local timeline support, culprit uniqueness, evidence-count bounds, or evidence/redundancy-group independence. Pro also had several `length` completions that spent the full allowance on reasoning or truncated JSON. Flash was materially faster and cheaper in this sample, but neither model produced an admissible case, so no deployment or NPC-runtime recommendation is justified from Revision 7.
+
+Revision 8 addresses only this demonstrated boundary. It retains the four conceptual ownership phases and replaces the single Stage 2 provider response with an exactly-eight-item evidence inventory followed by a small exactly-two-route solution delta. Legal slot/search mappings and axis/independence rules are explicit. The assembled evidence contract and whole-case validator are unchanged. Provider-free verification is 392 passing backend tests, 16 passing frontend tests, a successful Vite production build, and a successful packaged Windows smoke test; Revision 8 has not yet made a provider call.
+
+A post-hoc audit also corrected the Revision 6 history below. The shell controller timed out, but its background process continued and settled nine generation requests: three P1/Flash core rejections, plus a P1/Pro core accepted on attempt three followed by three evidence rejections. Those records and costs remain preserved. Because the controller boundary was operationally invalid, they are excluded from the formal Revision 7 comparison denominator; the recovered request dispositions are reported as post-hoc validation evidence, not as completed model-quality cells.
+
+## Historical provider lead-up
 
 Three revision-1 requests to `deepseek/deepseek-v4-flash` were rejected before generation. One revision-2 routing diagnostic completed through WandB and is invalidated because it did not use the required DeepSeek upstream. Two revision-3 forced-DeepSeek requests were rejected before generation because the OpenRouter account guardrail/data policy excluded the endpoint. Revision 4 then verified both direct models and complete token accounting.
 
@@ -25,7 +49,7 @@ Before the revision-7 matrix, the legacy root `generation_results.json` was hash
 
 The owner supplied a separate direct DeepSeek development key and explicitly authorized disclosure of the frozen cards, location, schema, prompts, and accepted-stage artifacts for this capped evaluation. Because provider evidence is bound to an exact clean Git SHA, two tiny checks will be recorded after the revision-7 checkpoint commit before the matrix begins.
 
-## Frozen comparison design
+## Revision 7 frozen comparison design
 
 - Exact models: `deepseek-v4-pro` and `deepseek-v4-flash`.
 - Provider route: official direct DeepSeek API; no gateway, shared-provider, or model fallback; `top_k` deliberately omitted for both models.
@@ -47,7 +71,7 @@ The owner supplied a separate direct DeepSeek development key and explicitly aut
 - Deterministic fallback is classified separately as timeout, malformed response, invalid action/response ID, provider error, or provider unavailable; it is never counted as model success.
 - Phase A uses a restricted localhost player API and append-only, SHA-256-sealed public transcript. Canonical truth and debrief remain unavailable until the transcript and player report are frozen.
 
-## Results
+## Pre-Revision 7 results snapshot (historical; superseded by current measured result)
 
 | Evidence area | Pro | Flash |
 |---|---:|---:|
@@ -60,7 +84,7 @@ The owner supplied a separate direct DeepSeek development key and explicitly aut
 
 Generation quality, NPC quality, latency, cache behaviour, cost per case/turn/interview/game, and qualitative model comparisons are not yet measurable. No routing recommendation is justified yet.
 
-## Verification completed at this checkpoint
+## Revision 7 offline verification snapshot (historical)
 
 ```text
 python -m pytest backend\tests -q -p no:cacheprovider
@@ -78,7 +102,16 @@ Windows package built (18.1 MB); packaged smoke passed
 
 Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
-## Remaining work
+## Current remaining work
+
+1. Commit and push Revision 8 on `experiment`, then record both tiny direct DeepSeek preflights against the exact clean SHA.
+2. Execute the same six P2/P3/R1 model cells under the frozen Revision 8 inventory/solution split, retaining every rejection and stopping on incomplete safety state or the budget threshold.
+3. Only if at least one Pro and one Flash case pass the complete validator, select the first admitted cases and run crossed Phase A cells A-D through the restricted player interface.
+4. Freeze Phase A transcripts/reports and inspect post-game truth/action/knowledge audits. Phase B begins only after the declared Phase A gate passes.
+5. Fix only demonstrated in-scope defects, run the frozen adversarial surface, then rerun ordinary intended play.
+6. Produce per-delta and end-to-end model/cost recommendations and stop at the human blind-playtest gate.
+
+## Revision 7 remaining-work snapshot (historical; superseded)
 
 1. Commit and push revision 7, then record both tiny direct DeepSeek preflights against that exact Git SHA.
 2. Execute the six frozen P2/P3/R1 model cells through the durable controller, retaining all rejections and stopping on any incomplete safety state.

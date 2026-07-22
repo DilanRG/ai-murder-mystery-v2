@@ -130,7 +130,7 @@ def test_generated_committed_turn_runs_seven_isolated_agent_calls(
         result = await service.action(MoveIntent(room_id=destination))
 
         assert result["accepted"] and result["committed"]
-        assert provider.scenario_calls == 4
+        assert provider.scenario_calls == 5
         assert len(provider.agent_requests) == 7
         assert len({request["actor_id"] for request in provider.agent_requests}) == 7
         assert all(
@@ -172,7 +172,7 @@ def test_generated_case_and_runtime_can_use_distinct_role_clients(
         result = await service.action(MoveIntent(room_id=destination))
 
         assert result["accepted"] and result["committed"]
-        assert scenario_provider.calls == 4
+        assert scenario_provider.calls == 5
         assert len(npc_provider.requests) == 7
         assert len({request["actor_id"] for request in npc_provider.requests}) == 7
         diagnostics = service.runtime_diagnostics()
