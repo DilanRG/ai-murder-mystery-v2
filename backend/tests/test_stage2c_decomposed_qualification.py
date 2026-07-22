@@ -31,6 +31,7 @@ def test_decomposed_manifest_is_frozen_without_provider_access() -> None:
         (("source_stage2c_revision15", "results_sha256"), "0" * 64),
         (("source_stage2c_revision16", "results_sha256"), "0" * 64),
         (("source_stage2c_revision17", "results_sha256"), "0" * 64),
+        (("source_stage2c_revision18", "results_sha256"), "0" * 64),
         (("source_stage2", "accepted_compiled_stage2", "pro", "stage_2b"), "0" * 64),
         (("limits", "stage_2c_p2_max_tokens"), 9_000),
         (("limits", "stage_2c_realization_max_tokens"), 9_000),
@@ -212,6 +213,118 @@ def test_revision17_checkpoint_binds_frozen_manifest() -> None:
     checkpoint["manifest_fingerprint"] = "0" * 64
     with pytest.raises(ExperimentSafetyError, match="checkpoint is malformed"):
         controller._validate_revision17_flash_checkpoint(
+            checkpoint=checkpoint, source=source
+        )
+
+
+def _revision18_request_rows(manifest: dict) -> list[dict]:
+    rows: list[dict] = []
+    source = manifest["source_stage2c_revision18"]
+    roles = {
+        "flash": (
+            "stage2c_exact_model_preflight",
+            "stage2_semantic_2c_p2",
+            "stage2_semantic_2c_r1",
+            "stage2_semantic_2c_r2",
+        ),
+        "pro": (
+            "stage2c_exact_model_preflight",
+            "stage2_semantic_2c_p2",
+            "stage2_semantic_2c_p2_delta_repair",
+        ),
+    }
+    for model_key, task_roles in roles.items():
+        model = controller.EXPECTED_MODELS[model_key]
+        for task_role in task_roles:
+            rows.append(
+                {
+                    "git_sha": source["git_sha"],
+                    "run_id": (
+                        f"stage2c-p2-protected-text-preflight-{model_key}"
+                        if task_role == "stage2c_exact_model_preflight"
+                        else f"stage2c-p2-protected-text-{model_key}"
+                    ),
+                    "task_role": task_role,
+                    "requested_model": model,
+                    "actual_model": model,
+                    "transport": "deepseek_direct",
+                    "fallback_used": False,
+                    "provider_failover_used": False,
+                    "result": "success",
+                    "accounting_status": "measured",
+                    "total_external_cost_usd": "0.001",
+                }
+            )
+    return rows
+
+
+def test_revision18_baseline_request_evidence_is_exact_and_stage3_free() -> None:
+    manifest = controller.load_manifest()
+    source = manifest["source_stage2c_revision18"]
+    rows = _revision18_request_rows(manifest)
+    controller._validate_revision18_request_records(source=source, request_rows=rows)
+
+    rows[0]["actual_model"] = controller.EXPECTED_MODELS["pro"]
+    with pytest.raises(ExperimentSafetyError, match="evidence is untrusted"):
+        controller._validate_revision18_request_records(
+            source=source, request_rows=rows
+        )
+
+    rows = _revision18_request_rows(manifest)
+    rows.append({"task_role": "npc_overlay_generation"})
+    with pytest.raises(ExperimentSafetyError, match="unauthorized Stage 3"):
+        controller._validate_revision18_request_records(
+            source=source, request_rows=rows
+        )
+
+    rows = [
+        row
+        for row in _revision18_request_rows(manifest)
+        if not (
+            row["requested_model"] == controller.EXPECTED_MODELS["flash"]
+            and row["task_role"] == "stage2_semantic_2c_r2"
+        )
+    ]
+    with pytest.raises(ExperimentSafetyError, match="role evidence is incomplete"):
+        controller._validate_revision18_request_records(
+            source=source, request_rows=rows
+        )
+
+
+@pytest.mark.parametrize("field", ["git_sha", "run_id"])
+def test_revision18_request_evidence_binds_exact_commit_and_run_id(field: str) -> None:
+    manifest = controller.load_manifest()
+    source = manifest["source_stage2c_revision18"]
+    rows = _revision18_request_rows(manifest)
+    rows[0][field] = "tampered"
+    with pytest.raises(ExperimentSafetyError, match="evidence is untrusted"):
+        controller._validate_revision18_request_records(
+            source=source, request_rows=rows
+        )
+
+
+def test_revision18_checkpoint_binds_frozen_manifest_and_prompt() -> None:
+    manifest = controller.load_manifest()
+    source = manifest["source_stage2c_revision18"]
+    checkpoint = {
+        "schema_version": 1,
+        "experiment_revision": 18,
+        "git_sha": source["git_sha"],
+        "manifest_fingerprint": source["manifest_fingerprint"],
+        "model_key": "flash",
+        "model": controller.EXPECTED_MODELS["flash"],
+        "prompt_revision": "stage2c-plan-items-v2",
+        "schema_revision": controller.STAGE2C_PLAN_ITEMS_SCHEMA_REVISION,
+        "accepted_stage_records": [
+            {"stage": stage} for stage in controller.CURRENT_CHECKPOINT_STAGES
+        ],
+    }
+    controller._validate_revision18_flash_checkpoint(
+        checkpoint=checkpoint, source=source
+    )
+    checkpoint["prompt_revision"] = "tampered"
+    with pytest.raises(ExperimentSafetyError, match="checkpoint is malformed"):
+        controller._validate_revision18_flash_checkpoint(
             checkpoint=checkpoint, source=source
         )
 
@@ -421,11 +534,11 @@ def test_historical_loader_reuses_only_exact_prefix_and_excludes_flash_suffix(
     ]
 
 
-def test_budget_policy_carries_forward_through_revision17_cost() -> None:
+def test_budget_policy_carries_forward_through_revision18_cost() -> None:
     manifest = controller.load_manifest()
     policy = controller._budget_policy(manifest)
-    assert policy.soft_stop_usd == Decimal("8.40316748")
-    assert policy.hard_stop_usd == Decimal("9.40316748")
+    assert policy.soft_stop_usd == Decimal("8.39001943")
+    assert policy.hard_stop_usd == Decimal("9.39001943")
 
 
 def test_qualification_commit_must_descend_from_frozen_baseline(monkeypatch) -> None:
@@ -451,7 +564,7 @@ def test_request_history_is_exact_commit_bound_and_duplicate_safe(
         {
             "request_id": f"request-{index}",
             "git_sha": "a" * 40,
-            "run_id": "stage2c-p2-protected-text-flash",
+            "run_id": "stage2c-p2-alias-repair-flash",
             "task_role": "stage2_semantic_2c_p2",
             "total_external_cost_usd": "0.001",
         }
@@ -605,7 +718,7 @@ def test_terminal_pass_requires_measured_exact_model_p_r1_r2_requests(
         {
             "request_id": f"request-{index}",
             "git_sha": git_sha,
-            "run_id": "stage2c-p2-protected-text-flash",
+            "run_id": "stage2c-p2-alias-repair-flash",
             "task_role": role,
             "requested_model": model,
             "actual_model": model,

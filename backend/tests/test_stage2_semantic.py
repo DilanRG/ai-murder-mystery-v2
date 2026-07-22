@@ -720,6 +720,136 @@ def test_stage2c_p2_protected_text_repair_targets_only_the_defective_field(
     assert "literal protected role tokens" in issue.message
 
 
+def test_stage2c_p2_unknown_secret_repair_names_exact_offered_aliases() -> None:
+    f = _fixture()
+    p1, p2 = _plan_item_deltas(f)
+    safe_alias = p2.plan.secondary_secret_alias
+    safe_support = f["secondary"].entries[safe_alias]
+    true_fact_id = next(
+        fact_id
+        for role in f["stage_a"].roles.values()
+        for fact_id in role.canonical_fact_ids
+    )
+    contaminated_alias = "secondary_secret_contaminated"
+    catalogue = f["secondary"].model_copy(
+        update={
+            "entries": {
+                **f["secondary"].entries,
+                contaminated_alias: safe_support.model_copy(
+                    update={
+                        "alias": contaminated_alias,
+                        "canonical_fact_id": true_fact_id,
+                    }
+                ),
+            }
+        }
+    )
+    p1 = p1.model_copy(
+        update={
+            "secondary_secret_catalogue_fingerprint": (
+                secondary_secret_catalogue_fingerprint(catalogue)
+            )
+        }
+    )
+    p2 = p2.model_copy(
+        update={
+            "accepted_p1_fingerprint": content_fingerprint(
+                p1.model_dump(mode="json")
+            )
+        }
+    )
+    changed_plan = p2.plan.model_copy(
+        update={"secondary_secret_alias": "invented_secret"}
+    )
+    rejected = p2.model_copy(update={"plan": changed_plan})
+    report = validate_stage2c_p2_candidate(
+        rejected,
+        accepted_p1=p1,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=catalogue,
+        core=f["core"],
+    )
+    issue = next(
+        issue
+        for issue in report.issues
+        if issue.code == "unknown_secondary_secret_alias"
+    )
+    assert issue.path == "/plan/secondary_secret_alias"
+    assert issue.allowed_paths == ("/plan/secondary_secret_alias",)
+    assert safe_alias in issue.message
+    assert contaminated_alias not in issue.message
+
+    repaired = apply_stage2_semantic_patch(
+        rejected,
+        Stage2SemanticPatch(
+            base_fingerprint=content_fingerprint(rejected.model_dump(mode="json")),
+            operations=(
+                Stage2PatchOperation(
+                    path=issue.path,
+                    value=safe_alias,
+                ),
+            ),
+        ),
+        candidate_type=Stage2CP2Candidate,
+        allowed_paths=issue.allowed_paths,
+        immutable_paths=("/accepted_p1_fingerprint",),
+    )
+    assert validate_stage2c_p2_candidate(
+        repaired,
+        accepted_p1=p1,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=catalogue,
+        core=f["core"],
+    ).is_valid
+
+
+def test_stage2c_unknown_secret_has_no_repair_path_when_all_seeds_contaminate_routes() -> None:
+    f = _fixture()
+    p1, _p2 = _plan_item_deltas(f)
+    true_fact_id = next(
+        fact_id
+        for role in f["stage_a"].roles.values()
+        for fact_id in role.canonical_fact_ids
+    )
+    catalogue = f["secondary"].model_copy(
+        update={
+            "entries": {
+                alias: support.model_copy(update={"canonical_fact_id": true_fact_id})
+                for alias, support in f["secondary"].entries.items()
+            }
+        }
+    )
+    rejected = p1.model_copy(
+        update={
+            "secondary_secret_catalogue_fingerprint": (
+                secondary_secret_catalogue_fingerprint(catalogue)
+            ),
+            "plan": p1.plan.model_copy(
+                update={"secondary_secret_alias": "invented_secret"}
+            ),
+        }
+    )
+    report = validate_stage2c_p1_candidate(
+        rejected,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=catalogue,
+        core=f["core"],
+    )
+    issue = next(
+        issue
+        for issue in report.issues
+        if issue.code == "no_eligible_secondary_secret_alias"
+    )
+    assert issue.path == "/plan/secondary_secret_alias"
+    assert issue.allowed_paths == ()
+
+
 @pytest.mark.parametrize(
     "mutation,code",
     [
@@ -1416,5 +1546,8 @@ def test_prompts_expose_only_current_substage_schema() -> None:
         p1.model_dump(mode="json")
     )
     assert "Never write the literal tokens victim or responsible_actor" in " ".join(
+        p2_payload["validator_requirements"]
+    )
+    assert "copy accepted_p1_plan.secondary_secret_alias exactly" in " ".join(
         p2_payload["validator_requirements"]
     )

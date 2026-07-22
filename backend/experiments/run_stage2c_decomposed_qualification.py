@@ -56,7 +56,8 @@ SOURCE_ROOT = REPOSITORY_ROOT / ".private" / "stage2_semantic_qualification"
 REVISION15_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_decomposed_qualification"
 REVISION16_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_plan_items_qualification"
 REVISION17_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_p2_extended_qualification"
-ARTIFACT_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_p2_protected_text_qualification"
+REVISION18_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_p2_protected_text_qualification"
+ARTIFACT_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_p2_alias_repair_qualification"
 ATTEMPTS_PATH = ARTIFACT_ROOT / "attempts.jsonl"
 REQUESTS_PATH = ARTIFACT_ROOT / "requests.jsonl"
 LEDGER_PATH = ARTIFACT_ROOT / "cost_ledger.jsonl"
@@ -65,7 +66,7 @@ RESULTS_PATH = ARTIFACT_ROOT / "qualification_results.json"
 PREFLIGHTS_PATH = ARTIFACT_ROOT / "verified_preflights.json"
 EXPECTED_BRANCH = "development"
 EXPECTED_MODELS = {"flash": "deepseek-v4-flash", "pro": "deepseek-v4-pro"}
-EXPERIMENT_REVISION = 18
+EXPERIMENT_REVISION = 19
 SOURCE_PREFIX_STAGES = (
     "stage2_semantic_2a_route_1",
     "stage2_semantic_2a_route_2",
@@ -209,6 +210,28 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         },
     }:
         raise ExperimentSafetyError("Revision 17 baseline provenance changed")
+    if manifest.get("source_stage2c_revision18") != {
+        "git_sha": "235f418746d036e58f1fd423b3b691dd0371c428",
+        "manifest_fingerprint": "52712fec04f997b1298c8c6fef4eb7011ace4abae67e0afc1071582092c1d977",
+        "results_sha256": "f830ea48d1a027794b72a97c9d6d655136b193f9dd2081a8795287ad2d6ae5ab",
+        "ledger_sha256": "a1fc0d5a9adebc84b3e1a6e86eb6c71aee1e49216ea74d5cc4f3779bdaee7505",
+        "requests_sha256": "1ee0025117edc5117445acaee9db0c04b9ef2cff7abe02180f4535517d415758",
+        "attempts_sha256": "56cb2ad07676e4ff4fa1c60bed48782552efd3c0f7335f16b6638724eee48b22",
+        "settled_cost_usd": "0.01314805",
+        "cumulative_stage2_cost_usd": "0.10998057",
+        "status": "completed_with_failures",
+        "stage_3_requests": 0,
+        "accepted_flash_artifact_fingerprint": "19a386b38cdbfd7c6186f80fb6aefe4902003887bc41c6f9f77ac7471f05c2c2",
+        "flash_checkpoint": {
+            "filename": "checkpoint_flash_235f418746d036e58f1fd423b3b691dd0371c428.json",
+            "sha256": "d888ac1ae9c2d4eaa8cacf9fb550329d0fe367775b788eb725738069cc362a71",
+        },
+        "flash_artifact": {
+            "filename": "accepted_flash.json",
+            "sha256": "2c155d158cbcb68ed39bc8068a8f84364da6e27a4504bdd2200881f68e15e0b1",
+        },
+    }:
+        raise ExperimentSafetyError("Revision 18 baseline provenance changed")
     expected_limits = {
         "initial_attempts_per_substage_per_model": 3,
         "delta_repairs_per_parsed_candidate": 2,
@@ -228,8 +251,8 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     }:
         raise ExperimentSafetyError("Stage 2C reasoning policy changed")
     if manifest.get("budget") != {
-        "namespace": "stage2c_p2_protected_text_qualification",
-        "carry_in_stage2_cost_usd": "0.09683252",
+        "namespace": "stage2c_p2_alias_repair_qualification",
+        "carry_in_stage2_cost_usd": "0.10998057",
         "cumulative_soft_stop_usd": "8.50",
         "cumulative_hard_stop_usd": "9.50",
         "uncertainty_reserve_usd": "0.50",
@@ -539,6 +562,169 @@ def _validate_revision17_flash_checkpoint(
         raise ExperimentSafetyError("Revision 17 Flash checkpoint is malformed")
 
 
+def verify_revision18_baseline(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Freeze the protected-token run before refining exact alias repair feedback."""
+
+    source = manifest["source_stage2c_revision18"]
+    paths = {
+        "results_sha256": REVISION18_ROOT / "qualification_results.json",
+        "ledger_sha256": REVISION18_ROOT / "cost_ledger.jsonl",
+        "requests_sha256": REVISION18_ROOT / "requests.jsonl",
+        "attempts_sha256": REVISION18_ROOT / "attempts.jsonl",
+    }
+    for key, path in paths.items():
+        if _file_fingerprint(path) != source[key]:
+            raise ExperimentSafetyError(f"Revision 18 {path.name} fingerprint mismatched")
+    results = _load_json(paths["results_sha256"], label="Revision 18 qualification results")
+    if (
+        results.get("schema_version") != 1
+        or results.get("experiment_revision") != 18
+        or results.get("git_sha") != source["git_sha"]
+        or results.get("manifest_fingerprint") != source["manifest_fingerprint"]
+        or results.get("status") != source["status"]
+        or results.get("stage_3_requests") != source["stage_3_requests"]
+        or results.get("cumulative_stage2_estimated_cost_usd")
+        != source["cumulative_stage2_cost_usd"]
+        or not isinstance(results.get("budget"), dict)
+        or results["budget"].get("settled_usd") != source["settled_cost_usd"]
+        or results["budget"].get("open_reservations") != 0
+    ):
+        raise ExperimentSafetyError("Revision 18 result disposition mismatched")
+    result_rows = {
+        str(row.get("model_key")): row
+        for row in results.get("model_results", [])
+        if isinstance(row, dict)
+    }
+    if {
+        key: (row.get("status"), row.get("failure_code"))
+        for key, row in result_rows.items()
+    } != {
+        "flash": ("passed_stage_2_stage3_ready", None),
+        "pro": ("failed", "output_truncated"),
+    }:
+        raise ExperimentSafetyError("Revision 18 model outcomes were reinterpreted")
+    if (
+        result_rows["flash"].get("accepted_stage_2_artifact_fingerprint")
+        != source["accepted_flash_artifact_fingerprint"]
+    ):
+        raise ExperimentSafetyError("Revision 18 accepted Flash fingerprint mismatched")
+    request_rows = _load_jsonl(
+        paths["requests_sha256"], label="Revision 18 request evidence"
+    )
+    _validate_revision18_request_records(source=source, request_rows=request_rows)
+
+    checkpoint_info = source["flash_checkpoint"]
+    checkpoint_path = REVISION18_ROOT / checkpoint_info["filename"]
+    if _file_fingerprint(checkpoint_path) != checkpoint_info["sha256"]:
+        raise ExperimentSafetyError("Revision 18 Flash checkpoint fingerprint mismatched")
+    checkpoint = _load_json(checkpoint_path, label="Revision 18 Flash checkpoint")
+    _validate_revision18_flash_checkpoint(checkpoint=checkpoint, source=source)
+
+    artifact_info = source["flash_artifact"]
+    artifact_path = REVISION18_ROOT / artifact_info["filename"]
+    if _file_fingerprint(artifact_path) != artifact_info["sha256"]:
+        raise ExperimentSafetyError("Revision 18 Flash artifact fingerprint mismatched")
+    accepted = _load_json(artifact_path, label="Revision 18 accepted Flash artifact")
+    try:
+        artifact = DecomposedStage2CandidateArtifact.model_validate(
+            accepted["stage_2_artifact"]
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ExperimentSafetyError("Revision 18 accepted Flash artifact is malformed") from error
+    if (
+        accepted.get("experiment_revision") != 18
+        or accepted.get("git_sha") != source["git_sha"]
+        or accepted.get("model_key") != "flash"
+        or accepted.get("model") != EXPECTED_MODELS["flash"]
+        or artifact.artifact_fingerprint
+        != source["accepted_flash_artifact_fingerprint"]
+    ):
+        raise ExperimentSafetyError("Revision 18 accepted Flash artifact provenance mismatched")
+    return results
+
+
+def _validate_revision18_request_records(
+    *, source: Mapping[str, Any], request_rows: Sequence[Mapping[str, Any]]
+) -> None:
+    if any(
+        "stage3" in str(row.get("task_role", ""))
+        or "overlay" in str(row.get("task_role", ""))
+        for row in request_rows
+    ):
+        raise ExperimentSafetyError("Revision 18 contains an unauthorized Stage 3 request")
+    for row in request_rows:
+        expected_model = row.get("requested_model")
+        model_key = next(
+            (
+                key
+                for key, model in EXPECTED_MODELS.items()
+                if model == expected_model
+            ),
+            None,
+        )
+        task_role = str(row.get("task_role", ""))
+        expected_run_id = (
+            f"stage2c-p2-protected-text-preflight-{model_key}"
+            if task_role == "stage2c_exact_model_preflight"
+            else f"stage2c-p2-protected-text-{model_key}"
+        )
+        if (
+            model_key is None
+            or row.get("git_sha") != source["git_sha"]
+            or row.get("run_id") != expected_run_id
+            or row.get("actual_model") != expected_model
+            or row.get("transport") != "deepseek_direct"
+            or row.get("fallback_used") is not False
+            or row.get("provider_failover_used") is not False
+            or row.get("result") != "success"
+            or row.get("accounting_status") != "measured"
+            or row.get("total_external_cost_usd") is None
+        ):
+            raise ExperimentSafetyError("Revision 18 provider request evidence is untrusted")
+    role_sets = {
+        model_key: {
+            str(row.get("task_role", ""))
+            for row in request_rows
+            if row.get("requested_model") == expected_model
+        }
+        for model_key, expected_model in EXPECTED_MODELS.items()
+    }
+    if role_sets != {
+        "flash": {
+            "stage2c_exact_model_preflight",
+            "stage2_semantic_2c_p2",
+            "stage2_semantic_2c_r1",
+            "stage2_semantic_2c_r2",
+        },
+        "pro": {
+            "stage2c_exact_model_preflight",
+            "stage2_semantic_2c_p2",
+            "stage2_semantic_2c_p2_delta_repair",
+        },
+    }:
+        raise ExperimentSafetyError("Revision 18 request-role evidence is incomplete")
+
+
+def _validate_revision18_flash_checkpoint(
+    *, checkpoint: Mapping[str, Any], source: Mapping[str, Any]
+) -> None:
+    checkpoint_records = checkpoint.get("accepted_stage_records")
+    if (
+        checkpoint.get("schema_version") != 1
+        or checkpoint.get("experiment_revision") != 18
+        or checkpoint.get("git_sha") != source["git_sha"]
+        or checkpoint.get("manifest_fingerprint") != source["manifest_fingerprint"]
+        or checkpoint.get("model_key") != "flash"
+        or checkpoint.get("model") != EXPECTED_MODELS["flash"]
+        or checkpoint.get("prompt_revision") != "stage2c-plan-items-v2"
+        or checkpoint.get("schema_revision") != STAGE2C_PLAN_ITEMS_SCHEMA_REVISION
+        or not isinstance(checkpoint_records, list)
+        or [str(row.get("stage", "")) for row in checkpoint_records]
+        != list(CURRENT_CHECKPOINT_STAGES)
+    ):
+        raise ExperimentSafetyError("Revision 18 Flash checkpoint is malformed")
+
+
 def qualification_git_identity(*, require_clean: bool) -> tuple[str, str]:
     branch = _git_output("rev-parse", "--abbrev-ref", "HEAD")
     sha = _git_output("rev-parse", "HEAD")
@@ -779,7 +965,7 @@ def _run_request_records(*, model_key: str, git_sha: str) -> list[dict[str, Any]
                 raise ValueError("request record is not an object")
             if (
                 value.get("git_sha") == git_sha
-                and value.get("run_id") == f"stage2c-p2-protected-text-{model_key}"
+                and value.get("run_id") == f"stage2c-p2-alias-repair-{model_key}"
             ):
                 records.append(value)
     except (OSError, json.JSONDecodeError, ValueError) as error:
@@ -1002,7 +1188,7 @@ async def _preflight(
         context=RunContext(
             experiment_revision=EXPERIMENT_REVISION,
             git_sha=git_sha,
-            run_id=f"stage2c-p2-protected-text-preflight-{model_key}",
+            run_id=f"stage2c-p2-alias-repair-preflight-{model_key}",
             phase="stage2c_exact_commit_preflight",
             pair_id="Q2C",
             case_fingerprint="preflight",
@@ -1048,8 +1234,8 @@ async def _run_model(
         context=RunContext(
             experiment_revision=EXPERIMENT_REVISION,
             git_sha=git_sha,
-            run_id=f"stage2c-p2-protected-text-{model_key}",
-            phase="stage2c_p2_protected_text_qualification",
+            run_id=f"stage2c-p2-alias-repair-{model_key}",
+            phase="stage2c_p2_alias_repair_qualification",
             pair_id="Q2C",
             case_fingerprint=str(manifest["accepted_stage1"][model_key]["compiled_stage_1_fingerprint"]),
         ),
@@ -1282,6 +1468,7 @@ async def run_paid_qualification(manifest: Mapping[str, Any]) -> dict[str, Any]:
     verify_revision15_baseline(manifest)
     verify_revision16_baseline(manifest)
     verify_revision17_baseline(manifest)
+    verify_revision18_baseline(manifest)
     verified = {key: verify_historical_prefix(manifest, key)[1] for key in manifest["model_order"]}
     historical_flash = REPOSITORY_ROOT / str(manifest["historical_flash_artifact"])
     historical_flash_sha256 = _file_fingerprint(historical_flash)
@@ -1407,6 +1594,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     revision15 = verify_revision15_baseline(manifest)
     revision16 = verify_revision16_baseline(manifest)
     revision17 = verify_revision17_baseline(manifest)
+    revision18 = verify_revision18_baseline(manifest)
     verified = {key: verify_historical_prefix(manifest, key)[1] for key in manifest["model_order"]}
     branch, git_sha = qualification_git_identity(require_clean=args.execute)
     if not args.execute:
@@ -1422,6 +1610,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "revision16_status": revision16["status"],
             "revision17_results_sha256": manifest["source_stage2c_revision17"]["results_sha256"],
             "revision17_status": revision17["status"],
+            "revision18_results_sha256": manifest["source_stage2c_revision18"]["results_sha256"],
+            "revision18_status": revision18["status"],
             "policy_fingerprint": content_fingerprint(QUALIFICATION_POLICY.model_dump(mode="json")),
             "paid_calls_made": 0,
         }, indent=2, sort_keys=True))

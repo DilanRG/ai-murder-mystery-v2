@@ -48,7 +48,7 @@ STAGE2_PROMPT_REVISION = "stage2-semantic-v3"
 STAGE2_SCHEMA_REVISION = "stage2-semantic-schema-v2"
 STAGE2C_DECOMPOSED_PROMPT_REVISION = "stage2c-decomposed-v1"
 STAGE2C_DECOMPOSED_SCHEMA_REVISION = "stage2c-decomposed-schema-v1"
-STAGE2C_PLAN_ITEMS_PROMPT_REVISION = "stage2c-plan-items-v2"
+STAGE2C_PLAN_ITEMS_PROMPT_REVISION = "stage2c-plan-items-v3"
 STAGE2C_PLAN_ITEMS_SCHEMA_REVISION = "stage2c-plan-items-schema-v1"
 STAGE2A_MAX_TOKENS = 5_000
 STAGE2B_MAX_TOKENS = 7_000
@@ -1778,13 +1778,30 @@ def _validate_stage2c_plan_item(
             f"{path}/suspect_ref",
         )
     if support is None:
-        _issue(
-            issues,
-            "unknown_secondary_secret_alias",
-            f"{path}/secondary_secret_alias",
-            "The selected secondary-secret seed is not in the accepted catalogue.",
-            f"{path}/secondary_secret_alias",
+        provider_safe_aliases = sorted(
+            alias
+            for alias, entry in secondary_catalogue.entries.items()
+            if entry.canonical_fact_id not in true_fact_ids
         )
+        if provider_safe_aliases:
+            _issue(
+                issues,
+                "unknown_secondary_secret_alias",
+                f"{path}/secondary_secret_alias",
+                (
+                    "The selected secondary-secret seed is not in the accepted catalogue. "
+                    "Use one exact offered alias: "
+                    f"{', '.join(provider_safe_aliases)}."
+                ),
+                f"{path}/secondary_secret_alias",
+            )
+        else:
+            _issue(
+                issues,
+                "no_eligible_secondary_secret_alias",
+                f"{path}/secondary_secret_alias",
+                "No secondary-secret alias is eligible without contaminating a true route.",
+            )
     elif support.canonical_fact_id in true_fact_ids:
         _issue(
             issues,
@@ -3946,6 +3963,7 @@ def build_stage2c_plan_item_messages(
             "Choose a different innocent suspect and suspicious-evidence channel from P1.",
             "Make the event, apparent implication, innocent explanation, and distinctiveness materially different from P1.",
             "The same offered seed may be reused only as causal material for a genuinely distinct secondary event.",
+            "Copy an exact secondary_secret_catalogue alias; when P1 uses the only offered seed, copy accepted_p1_plan.secondary_secret_alias exactly and never invent shorthand.",
             "Do not realize evidence, recruit a protected actor, rewrite an upstream stage, or overlap accepted true evidence.",
             "Never write the literal tokens victim or responsible_actor in any plan text; describe apparent crime relevance through method, motive, opportunity, concealment, or timing instead.",
         )

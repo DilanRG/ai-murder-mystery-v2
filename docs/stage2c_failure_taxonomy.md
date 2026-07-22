@@ -1,7 +1,7 @@
 # Stage 2C Decomposition Failure Taxonomy
 
 **Date:** 2026-07-23
-**Scope:** Revision 15 baseline through Revision 18's field-specific protected-token repair correction.
+**Scope:** Revision 15 baseline through Revision 19's exact secondary-secret-alias repair correction.
 
 This taxonomy preserves Revision 14 as the immutable baseline. Flash completed the old monolithic Stage 2C contract. Pro made three valid provider calls, but each exhausted the fixed 4,000-token completion allowance before returning a complete candidate. Those Pro attempts are output-budget failures, not semantic-validator rejections.
 
@@ -23,6 +23,12 @@ The 4,000-token bound removed Pro's truncation failure: all three Pro P2 candida
 
 Revision 18 does not weaken that protected-role rule or increase attempts. It emits one issue per defective field with one exact allowed repair path, and the prompt states the literal lexical constraint. This makes the declared delta-repair mechanism actionable without letting the repair rewrite other accepted plan meaning.
 
+## Revision 18 observed result
+
+Revision 18 ran at exact commit `235f418746d036e58f1fd423b3b691dd0371c428`. Flash passed the full decomposed pipeline and Stage-3-readiness with all three current provider stages accepted on their first attempts. Pro's first complete P2 candidate complied with the protected-token contract, proving Revision 18 corrected the observed Revision 17 defect. It selected an unavailable shorthand secondary-secret alias, however, and both exact-field repairs repeated that shorthand because the issue identified only what was invalid, not the exact provider-safe alias available in the frozen catalogue. The next two initial Pro attempts stopped at the 4,000-token cap. This is one semantic rejection followed by two output-length stops, not evidence that the Stage 2C plan meaning or innocent explanation was invalid. New estimated cost was USD 0.01314805, cumulative Stage 2 cost was USD 0.10998057, with zero open reservations and zero Stage 3 requests.
+
+Revision 19 changes only the feedback for the already-enforced unknown-secondary-secret-alias rule. The exact offered alias list is included in the issue message at the one permitted field path, and the prompt requires copying an offered catalogue alias exactly. The host does not guess, normalize, or accept shorthand. All schemas, limits, attempts, repairs, realizations, and admission validators remain frozen.
+
 ## Baseline failure classes
 
 | Class | Detection | Disposition |
@@ -31,7 +37,7 @@ Revision 18 does not weaken that protected-role rule or increase attempts. It em
 | Output-length stop | Provider finish reason is `length` | Count the attempt; do not patch a truncated document |
 | Malformed or schema-invalid JSON | Parsing or Pydantic schema validation fails | Apply only the declared syntax policy; never infer missing semantics |
 | Immutable-binding failure | Stage 2C-P changes a Stage 2A, Stage 2B, discovery-catalogue, or secondary-secret fingerprint | Reject the plan |
-| Plan semantic failure | Non-innocent or duplicate suspects, unknown seed, true-route contamination, repeated suspicious channel, cosmetic duplicate, or unrealizable channel | Repair only plan-owned fields or reject Stage 2C-P |
+| Plan semantic failure | Non-innocent or duplicate suspects, unknown seed, true-route contamination, repeated suspicious channel, cosmetic duplicate, or unrealizable channel | Repair only plan-owned fields or reject Stage 2C-P; unknown-seed feedback may name exact offered aliases but the host never substitutes one |
 | Realization binding failure | R1/R2 has the wrong plan index or fingerprint, or R2 lacks the exact accepted R1 fingerprint | Reject the realization; do not regenerate accepted upstream deltas |
 | Realization semantic failure | Wrong affordance channel, self-resolving clue, rewritten innocent explanation, or R2 reuses an R1 discovery/resolution bottleneck | Repair only the defective realization |
 | Host scheduling failure | Immutable actor timelines and room travel cannot fit the proposed secondary event | Reject the owning realization; the host does not rewrite Stage 1 |
