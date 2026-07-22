@@ -38,12 +38,15 @@ from game.stage2_semantic import (
     compiled_stage2a_fingerprint,
     compiled_stage2b_fingerprint,
     discovery_affordance_catalogue_fingerprint,
+    generate_stage2_boundary,
     secondary_secret_catalogue_fingerprint,
+    stage2a_affordance_assignment,
     stage2a_valid_example,
     stage2b_valid_example,
     stage2c_valid_example,
     validate_assembled_stage2,
     validate_stage2a_candidate,
+    validate_stage2a_discovery_feasibility,
     validate_stage2b_candidate,
     validate_stage2c_candidate,
 )
@@ -172,6 +175,67 @@ def test_stage2a_rejects_reused_channel_pattern_presented_as_independent() -> No
     codes = _codes(validate_stage2a_candidate(changed, catalogue=f["support"]))
     assert "reused_evidence_channel_pattern" in codes
     assert "shared_planned_proof_channel" in codes
+
+
+def test_stage2a_proves_an_independent_discovery_allocation_before_stage2b() -> None:
+    f = _fixture()
+    report = validate_stage2a_discovery_feasibility(
+        f["candidate_a"],
+        support_catalogue=f["support"],
+        discovery_catalogue=f["discovery"],
+        core=f["core"],
+    )
+    assert report.is_valid
+    assert stage2a_affordance_assignment(
+        f["stage_a"],
+        support_catalogue=f["support"],
+        discovery_catalogue=f["discovery"],
+    ) is not None
+    build_stage2b_messages(
+        stage_2a=f["stage_a"],
+        support_catalogue=f["support"],
+        discovery_catalogue=f["discovery"],
+    )
+
+
+def test_stage2a_rejects_channel_and_discovery_mode_mismatch() -> None:
+    f = _fixture()
+    candidate = f["candidate_a"]
+    left, right = candidate.routes
+    changed_method = left.method.model_copy(
+        update={
+            "proposed_channel": EvidenceKind.BEHAVIOURAL,
+            "planned_discovery_mode": "physical_search",
+        }
+    )
+    changed = candidate.model_copy(
+        update={"routes": (left.model_copy(update={"method": changed_method}), right)}
+    )
+    assert "channel_discovery_mismatch" in _codes(
+        validate_stage2a_candidate(changed, catalogue=f["support"])
+    )
+
+
+def test_stage2a_rejects_two_routes_dependent_on_the_single_body_action() -> None:
+    f = _fixture()
+    candidate = f["candidate_a"]
+    left, right = candidate.routes
+    changed_method = right.method.model_copy(
+        update={
+            "proposed_channel": EvidenceKind.PHYSICAL,
+            "planned_discovery_mode": "body_inspection",
+        }
+    )
+    changed = candidate.model_copy(
+        update={"routes": (left, right.model_copy(update={"method": changed_method}))}
+    )
+    report = validate_stage2a_discovery_feasibility(
+        changed,
+        support_catalogue=f["support"],
+        discovery_catalogue=f["discovery"],
+        core=f["core"],
+    )
+    assert "stage_2a_discovery_infeasible" in _codes(report)
 
 
 def test_stage2b_rejects_shared_critical_discovery_dependency() -> None:
@@ -562,6 +626,82 @@ class _FakeLLM:
 
 
 @pytest.mark.asyncio
+async def test_accepted_stage2a_checkpoint_resumes_at_stage2b_without_duplicate_call() -> None:
+    f = _fixture()
+    stage_2a_record: dict[str, object] = {}
+    first_llm = _FakeLLM(
+        [
+            SimpleNamespace(
+                content=f["candidate_a"].model_dump_json(),
+                finish_reason="stop",
+            )
+        ]
+    )
+
+    def interrupt_after_stage_2a(record: dict[str, object]) -> None:
+        stage_2a_record.update(record)
+        raise RuntimeError("simulated controller interruption")
+
+    with pytest.raises(RuntimeError, match="simulated controller interruption"):
+        await generate_stage2_boundary(
+            first_llm,
+            repair_llm=first_llm,
+            core=f["core"],
+            character_ids=f["case"].character_ids,
+            location=f["location"],
+            accepted_stage_observer=interrupt_after_stage_2a,
+        )
+    assert first_llm.calls == ["stage2_semantic_2a"]
+
+    resumed_llm = _FakeLLM(
+        [
+            SimpleNamespace(
+                content=f["candidate_b"].model_dump_json(),
+                finish_reason="stop",
+            ),
+            SimpleNamespace(
+                content=f["candidate_c"].model_dump_json(),
+                finish_reason="stop",
+            ),
+        ]
+    )
+    result = await generate_stage2_boundary(
+        resumed_llm,
+        repair_llm=resumed_llm,
+        core=f["core"],
+        character_ids=f["case"].character_ids,
+        location=f["location"],
+        resume_stage_records={"stage2_semantic_2a": stage_2a_record},
+    )
+    assert result.artifact.stage_3_readiness.is_valid
+    assert resumed_llm.calls == ["stage2_semantic_2b", "stage2_semantic_2c"]
+
+
+@pytest.mark.asyncio
+async def test_tampered_stage_checkpoint_fails_before_provider_call() -> None:
+    f = _fixture()
+    record = {
+        "stage": "stage2_semantic_2a",
+        "semantic_candidate_fingerprint": "0" * 64,
+        "compiled_fingerprint": content_fingerprint(f["stage_a"].model_dump(mode="json")),
+        "model_authored_document": f["candidate_a"].model_dump(mode="json"),
+        "document": f["stage_a"].model_dump(mode="json"),
+    }
+    llm = _FakeLLM([])
+    with pytest.raises(Stage2SemanticError) as raised:
+        await generate_stage2_boundary(
+            llm,
+            repair_llm=llm,
+            core=f["core"],
+            character_ids=f["case"].character_ids,
+            location=f["location"],
+            resume_stage_records={"stage2_semantic_2a": record},
+        )
+    assert raised.value.code == "checkpoint_invalid"
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
 async def test_truncated_output_is_never_patched() -> None:
     f = _fixture()
     llm = _FakeLLM([SimpleNamespace(content='{"partial":', finish_reason="length")])
@@ -570,7 +710,7 @@ async def test_truncated_output_is_never_patched() -> None:
             llm,
             repair_llm=llm,
             role="stage2_test",
-            messages=build_stage2a_messages(f["support"]),
+            messages=build_stage2a_messages(f["support"], f["discovery"]),
             candidate_type=Stage2ASemanticCandidate,
             validator=lambda value: validate_stage2a_candidate(value, catalogue=f["support"]),
             compiler=lambda value: compile_stage2a_candidate(value, catalogue=f["support"], core=f["core"]),
@@ -594,7 +734,7 @@ async def test_malformed_output_is_classified_and_not_semantically_patched() -> 
             llm,
             repair_llm=llm,
             role="stage2_test",
-            messages=build_stage2a_messages(f["support"]),
+            messages=build_stage2a_messages(f["support"], f["discovery"]),
             candidate_type=Stage2ASemanticCandidate,
             validator=lambda value: validate_stage2a_candidate(value, catalogue=f["support"]),
             compiler=lambda value: compile_stage2a_candidate(value, catalogue=f["support"], core=f["core"]),
@@ -620,7 +760,7 @@ def test_schema_prevents_host_from_inventing_missing_semantic_meaning() -> None:
 def test_prompts_expose_only_current_substage_schema() -> None:
     f = _fixture()
     messages = [
-        build_stage2a_messages(f["support"]),
+        build_stage2a_messages(f["support"], f["discovery"]),
         build_stage2b_messages(
             stage_2a=f["stage_a"],
             support_catalogue=f["support"],

@@ -38,9 +38,9 @@ These results remain failures. The new contract does not reinterpret or manually
 
 The host derives a fingerprinted proof-support catalogue from the accepted Stage 1 facts and containing events. The provider view contains only aliases, safe semantic summaries, axis, causal-beat summary, and permitted evidence channels. Canonical fact IDs, event IDs, room IDs, and actor IDs remain host-private.
 
-The model returns exactly two route proposals, each with a thesis, explicit method/motive/opportunity reasoning, six total role briefs, proposed evidence channel and discovery mode, combined inference, limitations, and independence rationale. The host assigns route/role IDs and binds each role to immutable Stage 1 support.
+The model returns exactly two route proposals, each with a thesis, explicit method/motive/opportunity reasoning, six total role briefs, proposed evidence channel and discovery mode, combined inference, limitations, and independence rationale. The host assigns route/role IDs and binds each role to immutable Stage 1 support. The prompt includes only bounded realization counts for each support/channel/mode combination; concrete affordance aliases remain Stage 2B-owned.
 
-Validation rejects unknown/stale aliases, wrong-axis support, unsupported channels, incomplete reasoning, testimonial-access misclassification, identical route channel patterns, and shared truth presented through the same manifestation channel.
+Validation rejects unknown/stale aliases, wrong-axis support, unsupported or mismatched channel/mode pairs, incomplete reasoning, testimonial-access misclassification, identical route channel patterns, and shared truth presented through the same manifestation channel. Before acceptance, a deterministic solver must also prove that all six abstract roles can be allocated to executable affordances without a critical dependency shared across the two routes. It proves feasibility only; it does not choose the later Stage 2B evidence realization.
 
 ## Stage 2B — evidence and discovery
 
@@ -61,6 +61,8 @@ The host fits each proposed innocent event into the existing actor timeline and 
 ## Repair and phase-aware admission
 
 Every accepted candidate is normalized and fingerprinted. A semantic repair receives the actual candidate, stable issue codes and paths, immutable paths, and only issue-authorized replace paths. Stale fingerprints, immutable-stage changes, and undeclared paths fail closed. There are at most three initial attempts per substage and two deltas per parsed rejected candidate.
+
+Each accepted substage is also atomically checkpointed in the ignored private experiment archive with exact Git, manifest, model, source, prompt, schema, semantic, and compiled provenance. Resume rebuilds the host catalogues, reruns validation and compilation, and requires byte-identical documents and fingerprints before it skips a provider request. A stale, reordered, incomplete-dependent, or tampered checkpoint fails closed.
 
 Validation has five explicit entry points: Stage 2A, Stage 2B, Stage 2C, assembled Stage 1 plus Stage 2 evidence, and Stage 3 readiness. The assembled gate reuses the unchanged evidence/solution validator. It does not manufacture fake overlays or presentation.
 

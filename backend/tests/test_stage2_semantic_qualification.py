@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import pytest
 
 from experiments.deepseek_v4_runner import ExperimentSafetyError
 from experiments.run_stage2_semantic_qualification import (
+    EXPERIMENT_REVISION,
     EXPECTED_MODELS,
+    EXPECTED_BRANCH,
+    STAGE2_PROMPT_REVISION,
+    STAGE2_SCHEMA_REVISION,
+    _load_checkpoint_records,
+    _manifest_fingerprint,
     _reasoning_map,
     load_manifest,
     validate_manifest,
@@ -54,3 +61,43 @@ def test_only_declared_stage2_roles_can_reach_measured_controller() -> None:
     assert roles["stage2_semantic_2a_delta_repair"] is None
     assert roles["stage2_exact_model_preflight"] is None
     assert not any("stage3" in role or "overlay" in role for role in roles)
+
+
+def test_checkpoint_provenance_and_stage_order_fail_closed(tmp_path) -> None:
+    manifest = load_manifest()
+    model_key = "flash"
+    model = EXPECTED_MODELS[model_key]
+    git_sha = "a" * 40
+    checkpoint = {
+        "schema_version": 1,
+        "experiment_revision": EXPERIMENT_REVISION,
+        "manifest_fingerprint": _manifest_fingerprint(manifest),
+        "branch": EXPECTED_BRANCH,
+        "git_sha": git_sha,
+        "model_key": model_key,
+        "model": model,
+        "input_stage_1_fingerprints": manifest["accepted_stage1"][model_key],
+        "prompt_revision": STAGE2_PROMPT_REVISION,
+        "schema_revision": STAGE2_SCHEMA_REVISION,
+        "accepted_stage_records": [],
+    }
+    path = tmp_path / "checkpoint.json"
+    path.write_text(json.dumps(checkpoint), encoding="utf-8")
+    assert _load_checkpoint_records(
+        path=path,
+        manifest=manifest,
+        model_key=model_key,
+        model=model,
+        git_sha=git_sha,
+    ) == []
+
+    checkpoint["git_sha"] = "b" * 40
+    path.write_text(json.dumps(checkpoint), encoding="utf-8")
+    with pytest.raises(ExperimentSafetyError, match="git_sha provenance mismatch"):
+        _load_checkpoint_records(
+            path=path,
+            manifest=manifest,
+            model_key=model_key,
+            model=model,
+            git_sha=git_sha,
+        )

@@ -65,6 +65,7 @@ EXPECTED_MODELS = {
     "flash": "deepseek-v4-flash",
     "pro": "deepseek-v4-pro",
 }
+EXPERIMENT_REVISION = 13
 
 
 class Stage2ProviderPolicy(ExperimentPolicy):
@@ -127,7 +128,10 @@ def load_manifest() -> dict[str, Any]:
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> None:
-    if manifest.get("schema_version") != 1 or manifest.get("experiment_revision") != 12:
+    if (
+        manifest.get("schema_version") != 1
+        or manifest.get("experiment_revision") != EXPERIMENT_REVISION
+    ):
         raise ExperimentSafetyError("Unexpected Stage 2 qualification revision")
     if manifest.get("branch") != EXPECTED_BRANCH:
         raise ExperimentSafetyError("Stage 2 qualification branch changed")
@@ -319,6 +323,59 @@ def _json_ready(value: object) -> object:
     return value
 
 
+def _manifest_fingerprint(manifest: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _checkpoint_path(*, model_key: str, git_sha: str) -> Path:
+    return ARTIFACT_ROOT / f"checkpoint_{model_key}_{git_sha}.json"
+
+
+def _load_checkpoint_records(
+    *,
+    path: Path,
+    manifest: Mapping[str, Any],
+    model_key: str,
+    model: str,
+    git_sha: str,
+) -> list[dict[str, object]]:
+    if not path.is_file():
+        return []
+    checkpoint = _load_json(path, label=f"{model_key} Stage 2 checkpoint")
+    expected_header = {
+        "schema_version": 1,
+        "experiment_revision": EXPERIMENT_REVISION,
+        "manifest_fingerprint": _manifest_fingerprint(manifest),
+        "branch": EXPECTED_BRANCH,
+        "git_sha": git_sha,
+        "model_key": model_key,
+        "model": model,
+        "input_stage_1_fingerprints": manifest["accepted_stage1"][model_key],
+        "prompt_revision": STAGE2_PROMPT_REVISION,
+        "schema_revision": STAGE2_SCHEMA_REVISION,
+    }
+    for key, expected in expected_header.items():
+        if checkpoint.get(key) != expected:
+            raise ExperimentSafetyError(
+                f"{model_key} Stage 2 checkpoint {key} provenance mismatch"
+            )
+    records = checkpoint.get("accepted_stage_records")
+    if not isinstance(records, list) or not all(isinstance(row, dict) for row in records):
+        raise ExperimentSafetyError(f"{model_key} Stage 2 checkpoint records are malformed")
+    expected_order = [
+        "stage2_semantic_2a",
+        "stage2_semantic_2b",
+        "stage2_semantic_2c",
+        "stage2_assembled_stage3_ready",
+    ]
+    stages = [str(row.get("stage", "")) for row in records]
+    if stages != expected_order[: len(stages)] or len(stages) > len(expected_order):
+        raise ExperimentSafetyError(f"{model_key} Stage 2 checkpoint order is invalid")
+    return [dict(row) for row in records]
+
+
 async def _preflight(
     *,
     api_key: str,
@@ -331,7 +388,7 @@ async def _preflight(
         ledger=ledger,
         metrics_path=REQUESTS_PATH,
         context=RunContext(
-            experiment_revision=12,
+            experiment_revision=EXPERIMENT_REVISION,
             git_sha=git_sha,
             run_id=f"stage2-preflight-{model_key}",
             phase="stage2_exact_commit_preflight",
@@ -386,7 +443,7 @@ async def _run_model(
         ledger=ledger,
         metrics_path=REQUESTS_PATH,
         context=RunContext(
-            experiment_revision=12,
+            experiment_revision=EXPERIMENT_REVISION,
             git_sha=git_sha,
             run_id=f"stage2-semantic-{model_key}",
             phase="stage2_qualification",
@@ -408,12 +465,20 @@ async def _run_model(
         reasoning=None,
     )
     diagnostics: list[dict[str, object]] = []
+    checkpoint_path = _checkpoint_path(model_key=model_key, git_sha=git_sha)
+    accepted_stages = _load_checkpoint_records(
+        path=checkpoint_path,
+        manifest=manifest,
+        model_key=model_key,
+        model=model,
+        git_sha=git_sha,
+    )
 
     def record_attempt(record: dict[str, object]) -> None:
         enriched = {
             "schema_version": 1,
             "recorded_at": datetime.now(UTC).isoformat(),
-            "experiment_revision": 12,
+            "experiment_revision": EXPERIMENT_REVISION,
             "git_sha": git_sha,
             "model_key": model_key,
             "model": model,
@@ -422,10 +487,46 @@ async def _run_model(
         diagnostics.append(enriched)
         _append_jsonl(ATTEMPTS_PATH, enriched)
 
-    accepted_stages: list[dict[str, object]] = []
-
     def record_accepted(record: dict[str, object]) -> None:
+        stage = str(record.get("stage", ""))
+        existing = next(
+            (row for row in accepted_stages if row.get("stage") == stage),
+            None,
+        )
+        if existing is not None:
+            if existing != record:
+                raise ExperimentSafetyError(
+                    f"{model_key} accepted-stage checkpoint changed for {stage}"
+                )
+            return
+        expected_order = [
+            "stage2_semantic_2a",
+            "stage2_semantic_2b",
+            "stage2_semantic_2c",
+            "stage2_assembled_stage3_ready",
+        ]
+        if len(accepted_stages) >= len(expected_order) or stage != expected_order[len(accepted_stages)]:
+            raise ExperimentSafetyError(
+                f"{model_key} accepted-stage checkpoint arrived out of order"
+            )
         accepted_stages.append(record)
+        _atomic_json(
+            checkpoint_path,
+            {
+                "schema_version": 1,
+                "experiment_revision": EXPERIMENT_REVISION,
+                "manifest_fingerprint": _manifest_fingerprint(manifest),
+                "branch": EXPECTED_BRANCH,
+                "git_sha": git_sha,
+                "model_key": model_key,
+                "model": model,
+                "input_stage_1_fingerprints": manifest["accepted_stage1"][model_key],
+                "prompt_revision": STAGE2_PROMPT_REVISION,
+                "schema_revision": STAGE2_SCHEMA_REVISION,
+                "updated_at": datetime.now(UTC).isoformat(),
+                "accepted_stage_records": accepted_stages,
+            },
+        )
 
     started_at = datetime.now(UTC).isoformat()
     try:
@@ -439,6 +540,15 @@ async def _run_model(
             max_delta_repairs=int(manifest["limits"]["delta_repairs_per_parsed_candidate"]),
             attempt_observer=record_attempt,
             accepted_stage_observer=record_accepted,
+            resume_stage_records={
+                str(record["stage"]): record
+                for record in accepted_stages
+                if record.get("stage") in {
+                    "stage2_semantic_2a",
+                    "stage2_semantic_2b",
+                    "stage2_semantic_2c",
+                }
+            },
         )
     except Stage2SemanticError as error:
         if error.code == "experiment_safety_stop":
@@ -466,7 +576,7 @@ async def _run_model(
         raise ExperimentSafetyError("Stage 3 activity crossed the declared stop boundary")
     private_document = {
         "schema_version": 1,
-        "experiment_revision": 12,
+        "experiment_revision": EXPERIMENT_REVISION,
         "git_sha": git_sha,
         "model_key": model_key,
         "model": model,

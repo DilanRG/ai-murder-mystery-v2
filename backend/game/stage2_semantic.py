@@ -14,6 +14,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import product
 import json
 import re
 from typing import Any, Literal
@@ -42,7 +43,7 @@ from game.stage1_semantic import content_fingerprint
 from llm.client import LLMMessage, LLMProviderError
 
 
-STAGE2_PROMPT_REVISION = "stage2-semantic-v1"
+STAGE2_PROMPT_REVISION = "stage2-semantic-v2"
 STAGE2_SCHEMA_REVISION = "stage2-semantic-schema-v1"
 STAGE2A_MAX_TOKENS = 5_000
 STAGE2B_MAX_TOKENS = 7_000
@@ -874,6 +875,44 @@ def validate_stage2a_candidate(
                     "Only testimonial proof may plan voluntary testimony.",
                     f"{path}/planned_discovery_mode",
                 )
+            if (
+                role.planned_discovery_mode == "involuntary_record"
+                and role.proposed_channel != EvidenceKind.DOCUMENTARY
+            ):
+                _issue(
+                    issues,
+                    "channel_discovery_mismatch",
+                    f"{path}/planned_discovery_mode",
+                    "Involuntary-record discovery requires documentary evidence.",
+                    f"{path}/proposed_channel",
+                    f"{path}/planned_discovery_mode",
+                )
+            if (
+                role.planned_discovery_mode == "body_inspection"
+                and role.proposed_channel
+                not in {EvidenceKind.PHYSICAL, EvidenceKind.BEHAVIOURAL}
+            ):
+                _issue(
+                    issues,
+                    "channel_discovery_mismatch",
+                    f"{path}/planned_discovery_mode",
+                    "Body inspection can realize only physical or behavioural evidence.",
+                    f"{path}/proposed_channel",
+                    f"{path}/planned_discovery_mode",
+                )
+            if (
+                role.planned_discovery_mode == "physical_search"
+                and role.proposed_channel
+                not in {EvidenceKind.PHYSICAL, EvidenceKind.DOCUMENTARY}
+            ):
+                _issue(
+                    issues,
+                    "channel_discovery_mismatch",
+                    f"{path}/planned_discovery_mode",
+                    "Physical search can realize only physical or documentary evidence.",
+                    f"{path}/proposed_channel",
+                    f"{path}/planned_discovery_mode",
+                )
             channels.append(role.proposed_channel)
             role_rows[axis].append(role)
         route_channels.append(tuple(channels))  # type: ignore[arg-type]
@@ -905,6 +944,141 @@ def validate_stage2a_candidate(
                 f"/routes/1/{axis}/planned_discovery_mode",
             )
     return Stage2ValidationReport(phase="stage_2a", issues=tuple(issues))
+
+
+def _eligible_affordances_for_role(
+    role: CompiledProofRole,
+    *,
+    support_catalogue: ProofSupportCatalogue,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+) -> tuple[DiscoveryAffordance, ...]:
+    support = support_catalogue.entries[role.support_alias]
+    mode_kind: dict[PlannedDiscoveryMode, DiscoveryKind] = {
+        "physical_search": "search_slot",
+        "body_inspection": "inspect_body",
+        "involuntary_record": "search_slot",
+        "voluntary_testimony": "interview",
+    }
+    required_kind = mode_kind[role.planned_discovery_mode]
+    wants_voluntary = required_kind == "interview"
+    return tuple(
+        affordance
+        for affordance in sorted(
+            discovery_catalogue.affordances.values(), key=lambda item: item.alias
+        )
+        if affordance.voluntary_disclosure == wants_voluntary
+        and affordance.kind == required_kind
+        and role.proposed_channel in affordance.compatible_channels
+        and (
+            role.planned_discovery_mode != "involuntary_record"
+            or role.proposed_channel == EvidenceKind.DOCUMENTARY
+        )
+        and (
+            not wants_voluntary
+            or affordance.witness_id in set(support.eligible_actor_ids)
+        )
+        and (
+            wants_voluntary
+            or support.event_room_id in affordance.minimum_travel_minutes_by_room
+        )
+    )
+
+
+def stage2a_affordance_assignment(
+    stage_2a: CompiledStage2A,
+    *,
+    support_catalogue: ProofSupportCatalogue,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+) -> dict[str, str] | None:
+    """Find one host-proved realization with no critical cross-route dependency."""
+
+    route_roles: list[list[CompiledProofRole]] = []
+    route_choices: list[list[tuple[DiscoveryAffordance, ...]]] = []
+    for route in stage_2a.routes:
+        roles = [stage_2a.roles[role_id] for role_id in route.role_ids]
+        choices = [
+            _eligible_affordances_for_role(
+                role,
+                support_catalogue=support_catalogue,
+                discovery_catalogue=discovery_catalogue,
+            )
+            for role in roles
+        ]
+        if any(not row for row in choices):
+            return None
+        route_roles.append(roles)
+        route_choices.append(choices)
+    for left_selected in product(*route_choices[0]):
+        left_dependencies = {
+            dependency
+            for affordance in left_selected
+            for dependency in affordance.access_dependency_keys
+        }
+        right_choices = [
+            tuple(
+                affordance
+                for affordance in choices
+                if left_dependencies.isdisjoint(affordance.access_dependency_keys)
+            )
+            for choices in route_choices[1]
+        ]
+        if any(not row for row in right_choices):
+            continue
+        right_selected = tuple(row[0] for row in right_choices)
+        return {
+            role.role_ref: affordance.alias
+            for roles, selected in (
+                (route_roles[0], left_selected),
+                (route_roles[1], right_selected),
+            )
+            for role, affordance in zip(roles, selected, strict=True)
+        }
+    return None
+
+
+def validate_stage2a_discovery_feasibility(
+    candidate: Stage2ASemanticCandidate,
+    *,
+    support_catalogue: ProofSupportCatalogue,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+    core: GeneratedCrimeTimelineStage,
+) -> Stage2ValidationReport:
+    """Prove that the abstract blueprint has at least one executable realization."""
+
+    report = validate_stage2a_candidate(candidate, catalogue=support_catalogue)
+    if not report.is_valid:
+        return report
+    compiled = compile_stage2a_candidate(
+        candidate,
+        catalogue=support_catalogue,
+        core=core,
+    )
+    if stage2a_affordance_assignment(
+        compiled,
+        support_catalogue=support_catalogue,
+        discovery_catalogue=discovery_catalogue,
+    ) is not None:
+        return report
+    editable = tuple(
+        f"/routes/{route_index}/{axis}/{field}"
+        for route_index in range(2)
+        for axis in ("method", "motive", "opportunity")
+        for field in ("proposed_channel", "planned_discovery_mode")
+    )
+    return Stage2ValidationReport(
+        phase="stage_2a",
+        issues=(
+            Stage2Issue(
+                code="stage_2a_discovery_infeasible",
+                path="/routes",
+                message=(
+                    "No assignment of executable discovery affordances can realize all six "
+                    "roles while keeping the two routes free of shared critical dependencies."
+                ),
+                allowed_paths=editable,
+            ),
+        ),
+    )
 
 
 def compile_stage2a_candidate(
@@ -1133,20 +1307,20 @@ def validate_stage2b_candidate(
                     "The evidence form cannot be placed at the selected affordance.",
                     f"{path}/discovery_affordance_alias",
                 )
-            if role.planned_discovery_mode == "voluntary_testimony" and not affordance.voluntary_disclosure:
-                _issue(
-                    issues,
-                    "stage_2b_rewrites_stage_2a",
-                    f"{path}/discovery_affordance_alias",
-                    "The selected affordance changes the accepted voluntary-testimony plan.",
-                    f"{path}/discovery_affordance_alias",
+            eligible_affordance_aliases = {
+                candidate_affordance.alias
+                for candidate_affordance in _eligible_affordances_for_role(
+                    role,
+                    support_catalogue=support_catalogue,
+                    discovery_catalogue=discovery_catalogue,
                 )
-            if role.planned_discovery_mode != "voluntary_testimony" and affordance.voluntary_disclosure:
+            }
+            if affordance.alias not in eligible_affordance_aliases:
                 _issue(
                     issues,
                     "stage_2b_rewrites_stage_2a",
                     f"{path}/discovery_affordance_alias",
-                    "A non-voluntary planned role cannot become voluntary testimony.",
+                    "The selected affordance changes the accepted discovery mode or its provenance.",
                     f"{path}/discovery_affordance_alias",
                 )
             if affordance.witness_id is not None and affordance.witness_id not in selected_actor_ids:
@@ -2218,25 +2392,21 @@ def stage2b_valid_example(
     support_catalogue: ProofSupportCatalogue,
     discovery_catalogue: DiscoveryAffordanceCatalogue,
 ) -> Stage2BSemanticCandidate:
-    available = list(discovery_catalogue.affordances.values())
-    used: set[str] = set()
+    assignment = stage2a_affordance_assignment(
+        stage_2a,
+        support_catalogue=support_catalogue,
+        discovery_catalogue=discovery_catalogue,
+    )
+    if assignment is None:
+        raise Stage2SemanticError(
+            "accepted Stage 2A has no independent executable realization",
+            code="stage_2a_discovery_infeasible",
+        )
     reverse_actor = {actor_id: alias for alias, actor_id in discovery_catalogue.actor_aliases.items()}
     realizations: list[Stage2BRealizationProposal] = []
     for role in sorted(stage_2a.roles.values(), key=lambda item: item.role_ref):
         support = support_catalogue.entries[role.support_alias]
-        wanted_voluntary = role.planned_discovery_mode == "voluntary_testimony"
-        affordance = next(
-            item
-            for item in available
-            if item.alias not in used
-            and item.voluntary_disclosure == wanted_voluntary
-            and role.proposed_channel in item.compatible_channels
-            and (
-                not wanted_voluntary
-                or item.witness_id in set(support.eligible_actor_ids)
-            )
-        )
-        used.add(affordance.alias)
+        affordance = discovery_catalogue.affordances[assignment[role.role_ref]]
         involved = tuple(
             reverse_actor[actor_id]
             for actor_id in support.eligible_actor_ids
@@ -2365,18 +2535,58 @@ def _messages(
 
 def build_stage2a_messages(
     support_catalogue: ProofSupportCatalogue,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
 ) -> tuple[LLMMessage, LLMMessage]:
+    realization_feasibility = {
+        alias: {
+            channel.value: {
+                "physical_search": sum(
+                    1
+                    for affordance in discovery_catalogue.affordances.values()
+                    if affordance.kind == "search_slot"
+                    and channel in affordance.compatible_channels
+                ),
+                "body_inspection": sum(
+                    1
+                    for affordance in discovery_catalogue.affordances.values()
+                    if affordance.kind == "inspect_body"
+                    and channel in affordance.compatible_channels
+                ),
+                "involuntary_record": (
+                    sum(
+                        1
+                        for affordance in discovery_catalogue.affordances.values()
+                        if affordance.kind == "search_slot"
+                        and channel in affordance.compatible_channels
+                    )
+                    if channel == EvidenceKind.DOCUMENTARY
+                    else 0
+                ),
+                "voluntary_testimony": sum(
+                    1
+                    for affordance in discovery_catalogue.affordances.values()
+                    if affordance.kind == "interview"
+                    and channel in affordance.compatible_channels
+                    and affordance.witness_id in set(entry.eligible_actor_ids)
+                ),
+            }
+            for channel in entry.permitted_channels
+        }
+        for alias, entry in support_catalogue.entries.items()
+    }
     return _messages(
         task="Design exactly two complete, materially independent semantic proof routes.",
         schema=Stage2ASemanticCandidate.model_json_schema(),
         context={
             "policy": QUALIFICATION_POLICY.model_dump(mode="json"),
             "proof_support_catalogue": support_catalogue.provider_view(),
+            "realization_feasibility": realization_feasibility,
         },
         rules=(
             "Use only offered support aliases and the locked responsible_actor ref.",
             "Give each route one method, motive, and opportunity role with a complete reasoning chain.",
             "Author evidence concepts and causal manifestations, not canonical facts or events.",
+            "Choose only channel/discovery-mode pairs whose realization count is nonzero.",
             "Use materially distinct player-facing channels; shared background truth is allowed.",
             "Explain what each role and route does not prove alone.",
         ),
@@ -2885,6 +3095,56 @@ async def _generate_semantic_stage(
     )
 
 
+def _resume_semantic_stage(
+    record: Mapping[str, object],
+    *,
+    role: str,
+    candidate_type: type[Any],
+    validator: Callable[[Any], Stage2ValidationReport],
+    compiler: Callable[[Any], Any],
+) -> tuple[Any, Any]:
+    """Revalidate a private accepted-stage checkpoint before provider-free reuse."""
+
+    if record.get("stage") != role:
+        raise Stage2SemanticError("checkpoint stage does not match", code="checkpoint_invalid")
+    try:
+        candidate = candidate_type.model_validate(record["model_authored_document"])
+        expected_candidate_fingerprint = content_fingerprint(
+            candidate.model_dump(mode="json")
+        )
+        if record.get("semantic_candidate_fingerprint") != expected_candidate_fingerprint:
+            raise Stage2SemanticError(
+                "checkpoint semantic fingerprint mismatch",
+                code="checkpoint_invalid",
+            )
+        report = validator(candidate)
+        if not report.is_valid:
+            raise Stage2SemanticError(
+                "checkpoint no longer passes semantic validation",
+                code="checkpoint_invalid",
+                issues=report.issues,
+            )
+        compiled = compiler(candidate)
+        compiled_document = compiled.model_dump(mode="json")
+        expected_compiled_fingerprint = content_fingerprint(compiled_document)
+        if (
+            record.get("compiled_fingerprint") != expected_compiled_fingerprint
+            or record.get("document") != compiled_document
+        ):
+            raise Stage2SemanticError(
+                "checkpoint compiled document mismatch",
+                code="checkpoint_invalid",
+            )
+    except (KeyError, ValidationError, TypeError, ValueError) as error:
+        if isinstance(error, Stage2SemanticError):
+            raise
+        raise Stage2SemanticError(
+            "checkpoint document is malformed",
+            code="checkpoint_invalid",
+        ) from error
+    return candidate, compiled
+
+
 async def generate_stage2_boundary(
     llm: Any,
     *,
@@ -2896,6 +3156,7 @@ async def generate_stage2_boundary(
     max_delta_repairs: int = 2,
     attempt_observer: Callable[[dict[str, object]], None] | None = None,
     accepted_stage_observer: Callable[[dict[str, object]], None] | None = None,
+    resume_stage_records: Mapping[str, Mapping[str, object]] | None = None,
 ) -> Stage2BoundaryResult:
     """Generate and compile 2A/2B/2C, then stop before any Stage 3 request."""
 
@@ -2910,96 +3171,149 @@ async def generate_stage2_boundary(
         location=location,
     )
     secondary = build_secondary_secret_catalogue(core, character_ids=character_ids)
-    stage_2a_candidate, stage_2a = await _generate_semantic_stage(
-        llm,
-        repair_llm=repair_llm,
-        role="stage2_semantic_2a",
-        messages=build_stage2a_messages(support),
-        candidate_type=Stage2ASemanticCandidate,
-        validator=lambda value: validate_stage2a_candidate(value, catalogue=support),
-        compiler=lambda value: compile_stage2a_candidate(value, catalogue=support, core=core),
-        max_tokens=STAGE2A_MAX_TOKENS,
-        immutable_paths=("/schema_version", "/proof_support_catalogue_fingerprint"),
-        max_initial_attempts=max_initial_attempts,
-        max_delta_repairs=max_delta_repairs,
-        attempt_observer=attempt_observer,
-        accepted_stage_observer=accepted_stage_observer,
-    )
-    stage_2b_candidate, stage_2b = await _generate_semantic_stage(
-        llm,
-        repair_llm=repair_llm,
-        role="stage2_semantic_2b",
-        messages=build_stage2b_messages(
-            stage_2a=stage_2a,
+    resumed = dict(resume_stage_records or {})
+    allowed_resume_stages = {
+        "stage2_semantic_2a",
+        "stage2_semantic_2b",
+        "stage2_semantic_2c",
+    }
+    if set(resumed) - allowed_resume_stages:
+        raise Stage2SemanticError("checkpoint contains an unknown stage", code="checkpoint_invalid")
+    if "stage2_semantic_2b" in resumed and "stage2_semantic_2a" not in resumed:
+        raise Stage2SemanticError("Stage 2B checkpoint lacks Stage 2A", code="checkpoint_invalid")
+    if "stage2_semantic_2c" in resumed and "stage2_semantic_2b" not in resumed:
+        raise Stage2SemanticError("Stage 2C checkpoint lacks Stage 2B", code="checkpoint_invalid")
+
+    validate_2a = lambda value: validate_stage2a_discovery_feasibility(
+            value,
             support_catalogue=support,
             discovery_catalogue=discovery,
-        ),
-        candidate_type=Stage2BSemanticCandidate,
-        validator=lambda value: validate_stage2b_candidate(
+            core=core,
+        )
+    compile_2a = lambda value: compile_stage2a_candidate(value, catalogue=support, core=core)
+    if "stage2_semantic_2a" in resumed:
+        stage_2a_candidate, stage_2a = _resume_semantic_stage(
+            resumed["stage2_semantic_2a"],
+            role="stage2_semantic_2a",
+            candidate_type=Stage2ASemanticCandidate,
+            validator=validate_2a,
+            compiler=compile_2a,
+        )
+    else:
+        stage_2a_candidate, stage_2a = await _generate_semantic_stage(
+            llm,
+            repair_llm=repair_llm,
+            role="stage2_semantic_2a",
+            messages=build_stage2a_messages(support, discovery),
+            candidate_type=Stage2ASemanticCandidate,
+            validator=validate_2a,
+            compiler=compile_2a,
+            max_tokens=STAGE2A_MAX_TOKENS,
+            immutable_paths=("/schema_version", "/proof_support_catalogue_fingerprint"),
+            max_initial_attempts=max_initial_attempts,
+            max_delta_repairs=max_delta_repairs,
+            attempt_observer=attempt_observer,
+            accepted_stage_observer=accepted_stage_observer,
+        )
+
+    validate_2b = lambda value: validate_stage2b_candidate(
             value,
             stage_2a=stage_2a,
             support_catalogue=support,
             discovery_catalogue=discovery,
             core=core,
-        ),
-        compiler=lambda value: compile_stage2b_candidate(
+        )
+    compile_2b = lambda value: compile_stage2b_candidate(
             value,
             stage_2a=stage_2a,
             support_catalogue=support,
             discovery_catalogue=discovery,
             core=core,
-        ),
-        max_tokens=STAGE2B_MAX_TOKENS,
-        immutable_paths=(
-            "/schema_version",
-            "/compiled_stage_2a_fingerprint",
-            "/discovery_affordance_catalogue_fingerprint",
-        ),
-        max_initial_attempts=max_initial_attempts,
-        max_delta_repairs=max_delta_repairs,
-        attempt_observer=attempt_observer,
-        accepted_stage_observer=accepted_stage_observer,
-    )
-    stage_2c_candidate, stage_2c = await _generate_semantic_stage(
-        llm,
-        repair_llm=repair_llm,
-        role="stage2_semantic_2c",
-        messages=build_stage2c_messages(
+        )
+    if "stage2_semantic_2b" in resumed:
+        stage_2b_candidate, stage_2b = _resume_semantic_stage(
+            resumed["stage2_semantic_2b"],
+            role="stage2_semantic_2b",
+            candidate_type=Stage2BSemanticCandidate,
+            validator=validate_2b,
+            compiler=compile_2b,
+        )
+    else:
+        stage_2b_candidate, stage_2b = await _generate_semantic_stage(
+            llm,
+            repair_llm=repair_llm,
+            role="stage2_semantic_2b",
+            messages=build_stage2b_messages(
+                stage_2a=stage_2a,
+                support_catalogue=support,
+                discovery_catalogue=discovery,
+            ),
+            candidate_type=Stage2BSemanticCandidate,
+            validator=validate_2b,
+            compiler=compile_2b,
+            max_tokens=STAGE2B_MAX_TOKENS,
+            immutable_paths=(
+                "/schema_version",
+                "/compiled_stage_2a_fingerprint",
+                "/discovery_affordance_catalogue_fingerprint",
+            ),
+            max_initial_attempts=max_initial_attempts,
+            max_delta_repairs=max_delta_repairs,
+            attempt_observer=attempt_observer,
+            accepted_stage_observer=accepted_stage_observer,
+        )
+
+    validate_2c = lambda value: validate_stage2c_candidate(
+            value,
             stage_2a=stage_2a,
             stage_2b=stage_2b,
             discovery_catalogue=discovery,
             secondary_catalogue=secondary,
-        ),
-        candidate_type=Stage2CSemanticCandidate,
-        validator=lambda value: validate_stage2c_candidate(
+            core=core,
+        )
+    compile_2c = lambda value: compile_stage2c_candidate(
             value,
             stage_2a=stage_2a,
             stage_2b=stage_2b,
             discovery_catalogue=discovery,
             secondary_catalogue=secondary,
             core=core,
-        ),
-        compiler=lambda value: compile_stage2c_candidate(
-            value,
-            stage_2a=stage_2a,
-            stage_2b=stage_2b,
-            discovery_catalogue=discovery,
-            secondary_catalogue=secondary,
-            core=core,
-        ),
-        max_tokens=STAGE2C_MAX_TOKENS,
-        immutable_paths=(
-            "/schema_version",
-            "/compiled_stage_2a_fingerprint",
-            "/compiled_stage_2b_fingerprint",
-            "/discovery_affordance_catalogue_fingerprint",
-            "/secondary_secret_catalogue_fingerprint",
-        ),
-        max_initial_attempts=max_initial_attempts,
-        max_delta_repairs=max_delta_repairs,
-        attempt_observer=attempt_observer,
-        accepted_stage_observer=accepted_stage_observer,
-    )
+        )
+    if "stage2_semantic_2c" in resumed:
+        stage_2c_candidate, stage_2c = _resume_semantic_stage(
+            resumed["stage2_semantic_2c"],
+            role="stage2_semantic_2c",
+            candidate_type=Stage2CSemanticCandidate,
+            validator=validate_2c,
+            compiler=compile_2c,
+        )
+    else:
+        stage_2c_candidate, stage_2c = await _generate_semantic_stage(
+            llm,
+            repair_llm=repair_llm,
+            role="stage2_semantic_2c",
+            messages=build_stage2c_messages(
+                stage_2a=stage_2a,
+                stage_2b=stage_2b,
+                discovery_catalogue=discovery,
+                secondary_catalogue=secondary,
+            ),
+            candidate_type=Stage2CSemanticCandidate,
+            validator=validate_2c,
+            compiler=compile_2c,
+            max_tokens=STAGE2C_MAX_TOKENS,
+            immutable_paths=(
+                "/schema_version",
+                "/compiled_stage_2a_fingerprint",
+                "/compiled_stage_2b_fingerprint",
+                "/discovery_affordance_catalogue_fingerprint",
+                "/secondary_secret_catalogue_fingerprint",
+            ),
+            max_initial_attempts=max_initial_attempts,
+            max_delta_repairs=max_delta_repairs,
+            attempt_observer=attempt_observer,
+            accepted_stage_observer=accepted_stage_observer,
+        )
     artifact = assemble_stage2_artifact(
         core=core,
         character_ids=character_ids,
