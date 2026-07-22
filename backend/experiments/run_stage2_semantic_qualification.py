@@ -57,6 +57,7 @@ ARTIFACT_ROOT = REPOSITORY_ROOT / ".private" / "stage2_semantic_qualification"
 ATTEMPTS_PATH = ARTIFACT_ROOT / "attempts.jsonl"
 REQUESTS_PATH = ARTIFACT_ROOT / "requests.jsonl"
 LEDGER_PATH = ARTIFACT_ROOT / "cost_ledger.jsonl"
+RECOVERIES_PATH = ARTIFACT_ROOT / "operational_recoveries.jsonl"
 PLAN_PATH = ARTIFACT_ROOT / "qualification_plan.json"
 RESULTS_PATH = ARTIFACT_ROOT / "qualification_results.json"
 PREFLIGHTS_PATH = ARTIFACT_ROOT / "verified_preflights.json"
@@ -66,6 +67,24 @@ EXPECTED_MODELS = {
     "pro": "deepseek-v4-pro",
 }
 EXPERIMENT_REVISION = 14
+EXPECTED_CHECKPOINT_STAGES = (
+    "stage2_semantic_2a_route_1",
+    "stage2_semantic_2a_route_2",
+    "stage2_semantic_2a",
+    "stage2_semantic_2b",
+    "stage2_semantic_2c",
+    "stage2_assembled_stage3_ready",
+)
+OPERATIONAL_RECOVERY_SOURCE = {
+    "flash": {
+        "git_sha": "51d25b7ad164725949b052775b6e265b1df4c6a2",
+        "reason": "post_validation_result_serialization_attribute_error",
+    }
+}
+OPERATIONAL_RECOVERY_ALLOWED_DIFF = {
+    "backend/experiments/run_stage2_semantic_qualification.py",
+    "backend/tests/test_stage2_semantic_qualification.py",
+}
 
 
 class Stage2ProviderPolicy(ExperimentPolicy):
@@ -373,18 +392,112 @@ def _load_checkpoint_records(
     records = checkpoint.get("accepted_stage_records")
     if not isinstance(records, list) or not all(isinstance(row, dict) for row in records):
         raise ExperimentSafetyError(f"{model_key} Stage 2 checkpoint records are malformed")
-    expected_order = [
-        "stage2_semantic_2a_route_1",
-        "stage2_semantic_2a_route_2",
-        "stage2_semantic_2a",
-        "stage2_semantic_2b",
-        "stage2_semantic_2c",
-        "stage2_assembled_stage3_ready",
-    ]
     stages = [str(row.get("stage", "")) for row in records]
-    if stages != expected_order[: len(stages)] or len(stages) > len(expected_order):
+    if (
+        stages != list(EXPECTED_CHECKPOINT_STAGES[: len(stages)])
+        or len(stages) > len(EXPECTED_CHECKPOINT_STAGES)
+    ):
         raise ExperimentSafetyError(f"{model_key} Stage 2 checkpoint order is invalid")
     return [dict(row) for row in records]
+
+
+def _load_operational_recovery_records(
+    *,
+    manifest: Mapping[str, Any],
+    model_key: str,
+    model: str,
+    git_sha: str,
+) -> tuple[list[dict[str, object]], str | None]:
+    recovery = OPERATIONAL_RECOVERY_SOURCE.get(model_key)
+    if recovery is None:
+        return [], None
+    source_sha = str(recovery["git_sha"])
+    if _git_output("rev-parse", f"{git_sha}^") != source_sha:
+        return [], None
+    changed_files = {
+        line.strip().replace("\\", "/")
+        for line in _git_output("diff", "--name-only", f"{source_sha}..{git_sha}").splitlines()
+        if line.strip()
+    }
+    if changed_files != OPERATIONAL_RECOVERY_ALLOWED_DIFF:
+        raise ExperimentSafetyError(
+            "Operational checkpoint recovery commit changed files outside the exact fix"
+        )
+    records = _load_checkpoint_records(
+        path=_checkpoint_path(model_key=model_key, git_sha=source_sha),
+        manifest=manifest,
+        model_key=model_key,
+        model=model,
+        git_sha=source_sha,
+    )
+    if tuple(str(record.get("stage", "")) for record in records) != EXPECTED_CHECKPOINT_STAGES:
+        raise ExperimentSafetyError(
+            f"{model_key} operational recovery source is not a complete Stage 2 checkpoint"
+        )
+    return records, source_sha
+
+
+def _source_run_metrics(*, model_key: str, git_sha: str) -> dict[str, object]:
+    attempts: list[dict[str, Any]] = []
+    requests: list[dict[str, Any]] = []
+    for path, destination in ((ATTEMPTS_PATH, attempts), (REQUESTS_PATH, requests)):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for line_number, line in enumerate(lines, start=1):
+                value = json.loads(line)
+                if not isinstance(value, dict):
+                    raise ValueError("record is not an object")
+                if value.get("git_sha") != git_sha:
+                    continue
+                if path == ATTEMPTS_PATH and value.get("model_key") == model_key:
+                    destination.append(value)
+                if (
+                    path == REQUESTS_PATH
+                    and value.get("run_id") == f"stage2-semantic-{model_key}"
+                ):
+                    destination.append(value)
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            raise ExperimentSafetyError(
+                f"Operational recovery metrics are unavailable or malformed at {path.name}"
+            ) from error
+    return {
+        "attempt_records": len(attempts),
+        "request_records": len(requests),
+        "locally_estimated_cost_usd": sum(
+            (
+                Decimal(str(record.get("total_external_cost_usd", 0)))
+                for record in requests
+            ),
+            Decimal("0"),
+        ),
+    }
+
+
+def _boundary_result_metrics(boundary: Any) -> dict[str, object]:
+    compiled_stage_2c = boundary.artifact.compiled_stage_2c
+    return {
+        "proof_support_catalogue_fingerprint": boundary.artifact.proof_support_catalogue_fingerprint,
+        "discovery_affordance_catalogue_fingerprint": boundary.artifact.discovery_affordance_catalogue_fingerprint,
+        "compiled_stage_2a_fingerprint": content_fingerprint(
+            boundary.compiled_stage_2a.model_dump(mode="json")
+        ),
+        "compiled_stage_2b_fingerprint": content_fingerprint(
+            boundary.compiled_stage_2b.model_dump(mode="json")
+        ),
+        "compiled_stage_2c_fingerprint": content_fingerprint(
+            compiled_stage_2c.model_dump(mode="json")
+        ),
+        "accepted_stage_2_artifact_fingerprint": boundary.artifact.artifact_fingerprint,
+        "true_routes": len(boundary.compiled_stage_2a.routes),
+        "true_evidence_roles": len(boundary.compiled_stage_2b.evidence),
+        "red_herrings": len(compiled_stage_2c.red_herrings),
+        "fully_non_voluntary_routes": len(
+            boundary.compiled_stage_2b.fully_non_voluntary_route_ids
+        ),
+        "deferred_stage_3_obligations": len(
+            boundary.artifact.stage_3_readiness.deferred_stage_3_obligations
+        ),
+    }
 
 
 async def _preflight(
@@ -484,6 +597,14 @@ async def _run_model(
         model=model,
         git_sha=git_sha,
     )
+    recovered_from_git_sha: str | None = None
+    if not accepted_stages:
+        accepted_stages, recovered_from_git_sha = _load_operational_recovery_records(
+            manifest=manifest,
+            model_key=model_key,
+            model=model,
+            git_sha=git_sha,
+        )
 
     def record_attempt(record: dict[str, object]) -> None:
         enriched = {
@@ -510,15 +631,10 @@ async def _run_model(
                     f"{model_key} accepted-stage checkpoint changed for {stage}"
                 )
             return
-        expected_order = [
-            "stage2_semantic_2a_route_1",
-            "stage2_semantic_2a_route_2",
-            "stage2_semantic_2a",
-            "stage2_semantic_2b",
-            "stage2_semantic_2c",
-            "stage2_assembled_stage3_ready",
-        ]
-        if len(accepted_stages) >= len(expected_order) or stage != expected_order[len(accepted_stages)]:
+        if (
+            len(accepted_stages) >= len(EXPECTED_CHECKPOINT_STAGES)
+            or stage != EXPECTED_CHECKPOINT_STAGES[len(accepted_stages)]
+        ):
             raise ExperimentSafetyError(
                 f"{model_key} accepted-stage checkpoint arrived out of order"
             )
@@ -589,12 +705,58 @@ async def _run_model(
         }
     if any(str(record.get("stage", "")).startswith("stage3") for record in accepted_stages):
         raise ExperimentSafetyError("Stage 3 activity crossed the declared stop boundary")
+    if recovered_from_git_sha is not None:
+        recovery = OPERATIONAL_RECOVERY_SOURCE[model_key]
+        _atomic_json(
+            checkpoint_path,
+            {
+                "schema_version": 1,
+                "experiment_revision": EXPERIMENT_REVISION,
+                "manifest_fingerprint": _manifest_fingerprint(manifest),
+                "branch": EXPECTED_BRANCH,
+                "git_sha": git_sha,
+                "model_key": model_key,
+                "model": model,
+                "input_stage_1_fingerprints": manifest["accepted_stage1"][model_key],
+                "prompt_revision": STAGE2_PROMPT_REVISION,
+                "schema_revision": STAGE2_SCHEMA_REVISION,
+                "updated_at": datetime.now(UTC).isoformat(),
+                "operational_recovery_from_git_sha": recovered_from_git_sha,
+                "operational_recovery_reason": recovery["reason"],
+                "accepted_stage_records": accepted_stages,
+            },
+        )
+        _append_jsonl(
+            RECOVERIES_PATH,
+            {
+                "schema_version": 1,
+                "recorded_at": datetime.now(UTC).isoformat(),
+                "experiment_revision": EXPERIMENT_REVISION,
+                "model_key": model_key,
+                "model": model,
+                "source_git_sha": recovered_from_git_sha,
+                "destination_git_sha": git_sha,
+                "reason": recovery["reason"],
+                "accepted_stage_records_fingerprint": content_fingerprint(accepted_stages),
+                "revalidated_artifact_fingerprint": boundary.artifact.artifact_fingerprint,
+            },
+        )
+    recovered_metrics = (
+        _source_run_metrics(model_key=model_key, git_sha=recovered_from_git_sha)
+        if recovered_from_git_sha is not None
+        else {
+            "attempt_records": 0,
+            "request_records": 0,
+            "locally_estimated_cost_usd": Decimal("0"),
+        }
+    )
     private_document = {
         "schema_version": 1,
         "experiment_revision": EXPERIMENT_REVISION,
         "git_sha": git_sha,
         "model_key": model_key,
         "model": model,
+        "operational_recovery_from_git_sha": recovered_from_git_sha,
         "input_stage_1_fingerprints": manifest["accepted_stage1"][model_key],
         "proof_support_catalogue": boundary.support_catalogue.model_dump(mode="json"),
         "discovery_affordance_catalogue": boundary.discovery_catalogue.model_dump(mode="json"),
@@ -611,27 +773,16 @@ async def _run_model(
     return {
         "model_key": model_key,
         "model": model,
+        "operational_recovery_from_git_sha": recovered_from_git_sha,
         "status": "passed_stage_2_stage3_ready",
         "started_at": started_at,
         "completed_at": datetime.now(UTC).isoformat(),
         "input_compiled_stage_1_fingerprint": manifest["accepted_stage1"][model_key]["compiled_stage_1_fingerprint"],
-        "proof_support_catalogue_fingerprint": boundary.artifact.proof_support_catalogue_fingerprint,
-        "discovery_affordance_catalogue_fingerprint": boundary.artifact.discovery_affordance_catalogue_fingerprint,
-        "compiled_stage_2a_fingerprint": content_fingerprint(boundary.compiled_stage_2a.model_dump(mode="json")),
-        "compiled_stage_2b_fingerprint": content_fingerprint(boundary.compiled_stage_2b.model_dump(mode="json")),
-        "compiled_stage_2c_fingerprint": content_fingerprint(boundary.compiled_stage_2c.model_dump(mode="json")),
-        "accepted_stage_2_artifact_fingerprint": boundary.artifact.artifact_fingerprint,
-        "true_routes": len(boundary.compiled_stage_2a.routes),
-        "true_evidence_roles": len(boundary.compiled_stage_2b.evidence),
-        "red_herrings": len(boundary.compiled_stage_2c.red_herrings),
-        "fully_non_voluntary_routes": len(boundary.compiled_stage_2b.fully_non_voluntary_route_ids),
-        "deferred_stage_3_obligations": len(
-            boundary.artifact.stage_3_readiness.deferred_stage_3_obligations
-        ),
-        "attempt_records": len(diagnostics),
-        "request_records": len(observer.records),
+        **_boundary_result_metrics(boundary),
+        "attempt_records": int(recovered_metrics["attempt_records"]) + len(diagnostics),
+        "request_records": int(recovered_metrics["request_records"]) + len(observer.records),
         "locally_estimated_cost_usd": format(
-            sum(
+            Decimal(str(recovered_metrics["locally_estimated_cost_usd"])) + sum(
                 (Decimal(str(record.get("total_external_cost_usd", 0))) for record in observer.records),
                 Decimal("0"),
             ),
