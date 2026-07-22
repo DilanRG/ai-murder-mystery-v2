@@ -29,6 +29,10 @@ Revision 18 ran at exact commit `235f418746d036e58f1fd423b3b691dd0371c428`. Flas
 
 Revision 19 changes only the feedback for the already-enforced unknown-secondary-secret-alias rule. The exact offered alias list is included in the issue message at the one permitted field path, and the prompt requires copying an offered catalogue alias exactly. The host does not guess, normalize, or accept shorthand. All schemas, limits, attempts, repairs, realizations, and admission validators remain frozen.
 
+## Revision 19 observed result
+
+Revision 19 ran at exact commit `fb8052f87bef5eb4df0f02c10647ff2d599ef7ea`. Flash and Pro each accepted P2, R1, and R2 on the first attempt, then passed the unchanged complete Stage 2 and Stage-3-readiness gates. No repair path was used. Revision 19 therefore resolves the observed Revision 18 alias-feedback defect without weakening the alias rule or raising a limit. New locally settled estimated cost was USD 0.00794878, cumulative Stage 2 estimated cost was USD 0.11792935, with zero open reservations and zero Stage 3 requests. Both accepted documents and checkpoints are privately sealed by the hashes in [stage2c_decomposed_qualification_report.md](stage2c_decomposed_qualification_report.md).
+
 ## Baseline failure classes
 
 | Class | Detection | Disposition |
