@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "experiment_revision": 11,
+  "name": "stage1-semantic-compiler-qualification",
+  "baseline_sha": "682d4f38c3d2e6f674f6e22f26deb661f14b69c7",
+  "prompt_revision": "stage1-semantic-plan-v1",
+  "schema_revision": "stage1-semantic-schema-v1",
+  "transport": "deepseek_direct",
+  "provider_fallbacks": false,
+  "location_id": "ashwick_manor",
+  "seed": 2026072201,
+  "character_ids": [
+    "lady_vivienne_ashford",
+    "edgar_blackwood",
+    "dr_celestine_moreau",
+    "inspector_elena_hayes",
+    "captain_marcus_drake",
+    "chef_armand_dubois",
+    "sabrina_voss",
+    "zara_okonkwo"
+  ],
+  "death_mode": "homicide",
+  "role_assignment": "engine_selected_private",
+  "role_assignment_fingerprint": "9c5dde08e244654c086422b0f14cf8b76acb469c9d1d83b38303129cf0761616",
+  "model_order": ["flash", "pro"],
+  "models": {
+    "flash": "deepseek-v4-flash",
+    "pro": "deepseek-v4-pro"
+  },
+  "limits": {
+    "initial_attempts_per_model": 3,
+    "delta_repairs_per_parsed_candidate": 2,
+    "semantic_plan_max_tokens": 6000,
+    "syntax_repair_max_tokens": 3000,
+    "delta_repair_max_tokens": 2000
+  },
+  "reasoning": {
+    "semantic_plan": "high",
+    "syntax_repair": "disabled",
+    "delta_repair": "disabled"
+  },
+  "budget": {
+    "namespace": "stage1_semantic_qualification",
+    "fresh_budget_usd": "10.00",
+    "soft_stop_usd": "8.50",
+    "hard_stop_usd": "9.50",
+    "uncertainty_reserve_usd": "0.50"
+  },
+  "stop_boundary": "existing_stage_2_input"
+}

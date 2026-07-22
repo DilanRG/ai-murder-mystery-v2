@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import main
-from conftest import generated_stage_response, make_dummy_generated_document
+from conftest import SemanticScenarioFixture, make_dummy_generated_document
 from game.case_generation import select_generation_cast
 from game.content import CHARACTER_CARDS_DIR, list_content_ids, load_case
 from game.models import CaseDefinition
@@ -22,14 +22,14 @@ class DummyScenarioProvider:
         self.outputs = list(outputs)
         self.calls = 0
         self.document: dict[str, object] | None = None
+        self.scenario: SemanticScenarioFixture | None = None
 
     async def generate(self, messages, **kwargs):
         self.calls += 1
-        if self.document is not None and kwargs.get("task_role", "").startswith(
-            "case_generation_"
-        ):
-            output: dict[str, object] | Exception = generated_stage_response(
-                self.document, kwargs["task_role"]
+        task_role = kwargs.get("task_role", "")
+        if self.scenario is not None:
+            output: dict[str, object] | Exception = self.scenario.response(
+                messages, task_role
             )
         else:
             output = self.outputs.pop(0) if self.outputs else {}
@@ -37,7 +37,8 @@ class DummyScenarioProvider:
             raise output
         if "case" in output and "presentation" in output:
             self.document = output
-            output = generated_stage_response(output, kwargs["task_role"])
+            self.scenario = SemanticScenarioFixture(output)
+            output = self.scenario.response(messages, task_role)
         return SimpleNamespace(content=json.dumps(output))
 
 
@@ -109,7 +110,7 @@ def test_rejected_provider_case_never_replaces_existing_demo(tmp_path) -> None:
         )
 
     assert response.status_code == 502
-    assert response.json()["detail"]["code"] == "invalid_generated_case"
+    assert response.json()["detail"]["code"] == "schema_invalid_json"
     assert main._session.engine is previous_engine
     assert provider.calls == 3
 

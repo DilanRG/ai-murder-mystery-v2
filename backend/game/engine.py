@@ -303,6 +303,15 @@ class GameEngine:
             weapon_id: WeaponRuntimeState(weapon_id=weapon_id, current_room_id=weapon.room_id)
             for weapon_id, weapon in self.location.potential_weapons.items()
         }
+        weapons.update(
+            {
+                means_id: WeaponRuntimeState(
+                    weapon_id=means_id,
+                    current_room_id=means.initial_room_id,
+                )
+                for means_id, means in self.case.case_means.items()
+            }
+        )
         return WorldRuntimeState(
             case_id=self.case.id,
             seed=self.case.seed,

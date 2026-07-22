@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from conftest import generated_stage_response, make_dummy_generated_document
+from conftest import SemanticScenarioFixture, make_dummy_generated_document
 from game.actions import AdvanceOpeningIntent, BeginInterviewIntent, InterviewExchangeIntent
 from game.case_generation import compile_generated_scenario
 from game.content import load_case, load_location
@@ -498,16 +498,14 @@ class _ScenarioInterviewAndPortrayalProvider:
         self.interview_requests: list[dict[str, object]] = []
         self.portrayal_calls = 0
         self.unexpected_system_prompts: list[str] = []
+        self.scenario = SemanticScenarioFixture(make_dummy_generated_document())
 
     async def generate(self, messages, **kwargs):
         system = messages[0].content
-        if "canonical scenario architect" in system:
+        task_role = kwargs.get("task_role", "")
+        if task_role == "stage1_semantic_plan" or task_role.startswith("case_generation_"):
             return SimpleNamespace(
-                content=json.dumps(
-                    generated_stage_response(
-                        make_dummy_generated_document(), kwargs["task_role"]
-                    )
-                )
+                content=json.dumps(self.scenario.response(messages, task_role))
             )
         if "interviewed NPC" in system:
             request = json.loads(messages[-1].content)

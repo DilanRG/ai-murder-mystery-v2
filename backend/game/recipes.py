@@ -123,6 +123,28 @@ def case_content_fingerprint(case: CaseDefinition) -> str:
     """Hash canonical validated case JSON, independent of file whitespace/order."""
 
     document = case.model_dump(mode="json")
+    # Semantic Stage 1 fields were added after the authored foundation was
+    # fingerprinted. Keep legacy case/save/recipe compatibility byte-stable.
+    if document.get("stage1_contract_version") == "legacy":
+        document.pop("stage1_contract_version", None)
+        if not document.get("case_means"):
+            document.pop("case_means", None)
+        murder = document["murder"]
+        if murder.get("death_mode") == "homicide":
+            murder.pop("death_mode", None)
+        if murder.get("responsible_actor_id") is None:
+            murder.pop("responsible_actor_id", None)
+        for event in document["timeline"]:
+            if event.get("causal_role") is None:
+                event.pop("causal_role", None)
+            if not event.get("dependency_event_ids"):
+                event.pop("dependency_event_ids", None)
+            if event.get("means_id") is None:
+                event.pop("means_id", None)
+            if event.get("requires_actor_victim_colocation") is False:
+                event.pop("requires_actor_victim_colocation", None)
+            if event.get("victim_encounters_means") is False:
+                event.pop("victim_encounters_means", None)
     # Generated evidence retains explicit causal provenance. Preserve authored
     # foundation fingerprints when the backwards-compatible optional field is
     # absent, while generated cases keep it in canonical truth.

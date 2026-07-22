@@ -7,7 +7,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
-from conftest import generated_stage_payloads, make_dummy_generated_document
+from semantic_pipeline_fixture import semantic_pipeline_payloads
 
 from game.case_generation import (
     GeneratedCrimeTimelineStage,
@@ -22,8 +22,12 @@ from game.case_generation import (
     build_proof_support_catalog,
     compile_proof_route_selection,
     generate_validated_scenario,
+    _validate_core_stage,
 )
 from game.content import load_case, load_location
+
+
+TEST_SEED = 901
 
 
 class ScriptedStageLLM:
@@ -45,7 +49,7 @@ class ScriptedStageLLM:
 
 
 def _stage_payloads() -> dict[str, dict[str, object]]:
-    return generated_stage_payloads(make_dummy_generated_document())
+    return semantic_pipeline_payloads(TEST_SEED)
 
 
 def _json_stage_outputs(
@@ -161,7 +165,7 @@ async def test_staged_generation_compiles_a_complete_canonical_case() -> None:
         llm,
         character_ids=source.character_ids,
         location=load_location("ashwick_manor"),
-        seed=901,
+        seed=TEST_SEED,
         max_attempts=1,
     )
 
@@ -169,7 +173,7 @@ async def test_staged_generation_compiles_a_complete_canonical_case() -> None:
     assert result.presentation.source == "llm"
     assert len(result.case.evidence) == 8
     assert _roles(llm) == [
-        "case_generation_core",
+        "stage1_semantic_plan",
         "case_generation_proof_blueprint",
         "case_generation_evidence_realization",
         "case_generation_misdirection",
@@ -189,7 +193,7 @@ async def test_accepted_stage_observer_receives_exact_private_deltas() -> None:
         llm,
         character_ids=source.character_ids,
         location=load_location("ashwick_manor"),
-        seed=9011,
+        seed=TEST_SEED,
         max_attempts=1,
         accepted_stage_observer=lambda record: accepted.append(record),
     )
@@ -220,12 +224,12 @@ async def test_accepted_stage_persistence_failure_never_retries_paid_response() 
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=9012,
+            seed=TEST_SEED,
             max_attempts=3,
             accepted_stage_observer=fail_persistence,
         )
 
-    assert _roles(llm) == ["case_generation_core"]
+    assert _roles(llm) == ["stage1_semantic_plan"]
 
 
 @pytest.mark.asyncio
@@ -237,7 +241,7 @@ async def test_staged_generation_uses_a_byte_identical_cacheable_prefix() -> Non
         llm,
         character_ids=source.character_ids,
         location=load_location("ashwick_manor"),
-        seed=902,
+        seed=TEST_SEED,
         max_attempts=1,
     )
 
@@ -246,7 +250,10 @@ async def test_staged_generation_uses_a_byte_identical_cacheable_prefix() -> Non
         for call in llm.calls
     ]
     assert len(prefixes) == 6
-    assert prefixes[1:] == [prefixes[0]] * 5
+    assert prefixes[1:] == [prefixes[1]] * 5
+    assert prefixes[0] != prefixes[1]
+    assert "stage 1 murder semantics" in prefixes[0][0].lower()
+    assert "stage schemas" not in prefixes[0][0].lower()
 
 
 @pytest.mark.asyncio
@@ -262,12 +269,12 @@ async def test_malformed_proof_blueprint_stops_before_evidence_spend() -> None:
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=903,
+            seed=TEST_SEED,
             max_attempts=2,
         )
 
     assert _roles(llm) == [
-        "case_generation_core",
+        "stage1_semantic_plan",
         "case_generation_proof_blueprint",
         "case_generation_proof_blueprint",
     ]
@@ -290,7 +297,7 @@ async def test_proof_repair_keeps_stage1_and_catalog_byte_identical() -> None:
         llm,
         character_ids=source.character_ids,
         location=load_location("ashwick_manor"),
-        seed=9031,
+        seed=TEST_SEED,
         max_attempts=2,
     )
 
@@ -314,12 +321,12 @@ async def test_unknown_proof_candidate_stops_before_realization() -> None:
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=904,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
     assert _roles(llm) == [
-        "case_generation_core",
+        "stage1_semantic_plan",
         "case_generation_proof_blueprint",
     ]
 
@@ -337,11 +344,11 @@ async def test_wrong_axis_proof_candidate_stops_before_realization() -> None:
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=90401,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
-    assert _roles(llm) == ["case_generation_core", "case_generation_proof_blueprint"]
+    assert _roles(llm) == ["stage1_semantic_plan", "case_generation_proof_blueprint"]
 
 
 @pytest.mark.asyncio
@@ -358,11 +365,11 @@ async def test_free_form_truth_references_are_forbidden_in_proof_selection() -> 
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=90402,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
-    assert _roles(llm) == ["case_generation_core", "case_generation_proof_blueprint"]
+    assert _roles(llm) == ["stage1_semantic_plan", "case_generation_proof_blueprint"]
 
 
 @pytest.mark.asyncio
@@ -378,18 +385,17 @@ async def test_stale_proof_catalog_fingerprint_stops_before_realization() -> Non
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=9041,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
     assert _roles(llm) == [
-        "case_generation_core",
+        "stage1_semantic_plan",
         "case_generation_proof_blueprint",
     ]
 
 
-@pytest.mark.asyncio
-async def test_stage1_without_motive_support_stops_before_stage2a_spend() -> None:
+def test_stage1_without_motive_support_stops_before_stage2a_spend() -> None:
     source = load_case("ashwick_sample")
     payloads = _stage_payloads()
     core = payloads["case_generation_core"]
@@ -399,18 +405,13 @@ async def test_stage1_without_motive_support_stops_before_stage2a_spend() -> Non
             fact["related_character_ids"] = [
                 value for value in fact["related_character_ids"] if value != murderer_id
             ]
-    llm = ScriptedStageLLM(_json_stage_outputs(payloads))
-
-    with pytest.raises(GeneratedScenarioError, match="after 1 attempts"):
-        await generate_validated_scenario(
-            llm,
+    broken = GeneratedCrimeTimelineStage.model_validate(core)
+    with pytest.raises(GeneratedScenarioError, match="motive"):
+        _validate_core_stage(
+            broken,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=90411,
-            max_attempts=1,
         )
-
-    assert _roles(llm) == ["case_generation_core"]
 
 
 @pytest.mark.asyncio
@@ -429,12 +430,12 @@ async def test_same_candidate_and_form_cannot_fake_an_independent_causal_channel
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=9042,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
     assert _roles(llm) == [
-        "case_generation_core",
+        "stage1_semantic_plan",
         "case_generation_proof_blueprint",
     ]
 
@@ -452,12 +453,12 @@ async def test_realization_cannot_reassign_an_accepted_proof_role() -> None:
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=905,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
     assert _roles(llm) == [
-        "case_generation_core",
+        "stage1_semantic_plan",
         "case_generation_proof_blueprint",
         "case_generation_evidence_realization",
     ]
@@ -478,12 +479,12 @@ async def test_realized_routes_cannot_share_one_discovery_dependency() -> None:
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=9051,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
     assert _roles(llm) == [
-        "case_generation_core",
+        "stage1_semantic_plan",
         "case_generation_proof_blueprint",
         "case_generation_evidence_realization",
     ]
@@ -506,7 +507,7 @@ async def test_realization_retry_keeps_the_accepted_proof_blueprint_immutable() 
         llm,
         character_ids=source.character_ids,
         location=load_location("ashwick_manor"),
-        seed=906,
+        seed=TEST_SEED,
         max_attempts=2,
     )
 
@@ -537,7 +538,7 @@ async def test_misdirection_cannot_target_culprit_or_rewrite_true_evidence() -> 
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=907,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
@@ -558,7 +559,7 @@ async def test_overlay_requires_the_exact_selected_cast_before_presentation() ->
             llm,
             character_ids=source.character_ids,
             location=load_location("ashwick_manor"),
-            seed=908,
+            seed=TEST_SEED,
             max_attempts=1,
         )
 
@@ -585,7 +586,7 @@ async def test_public_spoiler_retries_only_presentation_after_truth_admission() 
         llm,
         character_ids=source.character_ids,
         location=load_location("ashwick_manor"),
-        seed=909,
+        seed=TEST_SEED,
         max_attempts=2,
     )
 

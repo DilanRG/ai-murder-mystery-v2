@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from game.models import CaseDefinition, CharacterRole, LocationPackage
+from game.stage1_semantic import compiled_causal_chain_issues
 
 
 _DIRECT_MURDER_CONFESSION = re.compile(
@@ -632,6 +633,7 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
     if case.initial_player_room_id not in rooms:
         report.add("unknown_room", "initial_player_room_id", "player start room must exist")
     _check_mapping_ids(report, case.facts, "facts")
+    _check_mapping_ids(report, case.case_means, "case_means")
     _check_mapping_ids(report, case.overlays, "overlays", "character_id")
     _check_mapping_ids(report, case.evidence, "evidence")
     _check_unique_ids(report, case.timeline, "timeline")
@@ -848,10 +850,13 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
     murder = case.murder
     if murder.room_id not in rooms:
         report.add("unknown_room", "murder.room_id", "murder room must exist")
-    if murder.weapon_id not in location.potential_weapons:
-        report.add("unknown_weapon", "murder.weapon_id", "murder weapon must be a location weapon")
-    elif murder.method not in location.potential_weapons[murder.weapon_id].compatible_methods:
-        report.add("method_weapon_mismatch", "murder", "murder method must be compatible with murder weapon")
+    if case.stage1_contract_version == "legacy":
+        if murder.weapon_id not in location.potential_weapons:
+            report.add("unknown_weapon", "murder.weapon_id", "murder weapon must be a location weapon")
+        elif murder.method not in location.potential_weapons[murder.weapon_id].compatible_methods:
+            report.add("method_weapon_mismatch", "murder", "murder method must be compatible with murder weapon")
+    elif murder.weapon_id not in case.case_means:
+        report.add("unknown_case_means", "murder.weapon_id", "semantic murder must reference case-specific means")
     for field_name in ("means", "motive", "opportunity"):
         if not getattr(murder, field_name).strip():
             report.add("missing_murder_explanation", f"murder.{field_name}", f"murder {field_name} must be specified")
@@ -863,27 +868,38 @@ def validate_case(case: CaseDefinition, location: LocationPackage) -> Validation
     }
     for category in required_categories - represented_categories:
         report.add("unreferenced_murder_element", "facts", f"murderer needs a {category} fact to ground the murder narrative")
-    matching_rules = [
-        rule for rule in location.murder_opportunity_rules
-        if murder.room_id in rule.room_ids
-        and murder.weapon_id in rule.weapon_ids
-        and murder.method in rule.compatible_methods
-    ]
-    if not matching_rules:
-        report.add("invalid_murder_opportunity", "murder", "murder room, weapon, and method must satisfy a location opportunity rule")
-    murder_events = [event for event in case.timeline if event.minute == murder.minute and event.room_id == murder.room_id and event.event_type.value == "murder"]
-    if not murder_events or not any({murder.murderer_id, murder.victim_id} <= set(event.actor_ids) for event in murder_events):
-        report.add("infeasible_murder_colocation", "murder", "a murder timeline event must place killer and victim together at the murder minute")
-    for character_id, role_name in (
-        (murder.murderer_id, "murderer"),
-        (murder.victim_id, "victim"),
-    ):
-        if not _scheduled_at_location(case, character_id, murder.minute, murder.room_id):
-            report.add(
-                "infeasible_murder_schedule",
-                f"overlays.{character_id}.schedule",
-                f"the {role_name} schedule must place them in the murder room at the murder minute",
-            )
+    if case.stage1_contract_version == "legacy":
+        matching_rules = [
+            rule for rule in location.murder_opportunity_rules
+            if murder.room_id in rule.room_ids
+            and murder.weapon_id in rule.weapon_ids
+            and murder.method in rule.compatible_methods
+        ]
+        if not matching_rules:
+            report.add("invalid_murder_opportunity", "murder", "murder room, weapon, and method must satisfy a location opportunity rule")
+        murder_events = [event for event in case.timeline if event.minute == murder.minute and event.room_id == murder.room_id and event.event_type.value == "murder"]
+        if not murder_events or not any({murder.murderer_id, murder.victim_id} <= set(event.actor_ids) for event in murder_events):
+            report.add("infeasible_murder_colocation", "murder", "a murder timeline event must place killer and victim together at the murder minute")
+        for character_id, role_name in (
+            (murder.murderer_id, "murderer"),
+            (murder.victim_id, "victim"),
+        ):
+            if not _scheduled_at_location(case, character_id, murder.minute, murder.room_id):
+                report.add(
+                    "infeasible_murder_schedule",
+                    f"overlays.{character_id}.schedule",
+                    f"the {role_name} schedule must place them in the murder room at the murder minute",
+                )
+    else:
+        for issue in compiled_causal_chain_issues(
+            murder=murder,
+            timeline=case.timeline,
+            case_means=case.case_means,
+            opening=case.opening,
+            character_ids=case.character_ids,
+            location=location,
+        ):
+            report.add(issue.code, issue.path.lstrip("/"), issue.message)
 
     opening = case.opening
     survivors = cast - {murder.victim_id}

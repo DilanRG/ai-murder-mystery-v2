@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from conftest import generated_stage_response, make_dummy_generated_document
+from conftest import SemanticScenarioFixture, make_dummy_generated_document
 from game.actions import AdvanceOpeningIntent, MoveIntent
 from game.case_generation import compile_generated_scenario
 from game.content import load_case, load_location
@@ -63,17 +63,14 @@ class _ScenarioThenAgentsProvider:
     def __init__(self) -> None:
         self.scenario_calls = 0
         self.agent_requests: list[dict[str, object]] = []
+        self.scenario = SemanticScenarioFixture(make_dummy_generated_document())
 
     async def generate(self, messages, **kwargs):
-        system = messages[0].content
-        if "canonical scenario architect" in system:
+        task_role = kwargs.get("task_role", "")
+        if task_role == "stage1_semantic_plan" or task_role.startswith("case_generation_"):
             self.scenario_calls += 1
             return SimpleNamespace(
-                content=json.dumps(
-                    generated_stage_response(
-                        make_dummy_generated_document(), kwargs["task_role"]
-                    )
-                )
+                content=json.dumps(self.scenario.response(messages, task_role))
             )
         request = json.loads(messages[-1].content)
         self.agent_requests.append(request)
@@ -87,14 +84,14 @@ class _ScenarioThenAgentsProvider:
 class _ScenarioOnlyProvider:
     def __init__(self) -> None:
         self.calls = 0
+        self.scenario = SemanticScenarioFixture(make_dummy_generated_document())
 
     async def generate(self, messages, **kwargs):
         self.calls += 1
-        assert "canonical scenario architect" in messages[0].content
+        task_role = kwargs.get("task_role", "")
+        assert task_role == "stage1_semantic_plan" or task_role.startswith("case_generation_")
         return SimpleNamespace(
-            content=json.dumps(
-                generated_stage_response(make_dummy_generated_document(), kwargs["task_role"])
-            )
+            content=json.dumps(self.scenario.response(messages, task_role))
         )
 
 
@@ -103,7 +100,8 @@ class _NpcOnlyProvider:
         self.requests: list[dict[str, object]] = []
 
     async def generate(self, messages, **kwargs):
-        assert "canonical scenario architect" not in messages[0].content
+        assert not kwargs.get("task_role", "").startswith("case_generation_")
+        assert kwargs.get("task_role") != "stage1_semantic_plan"
         request = json.loads(messages[-1].content)
         self.requests.append(request)
         return SimpleNamespace(

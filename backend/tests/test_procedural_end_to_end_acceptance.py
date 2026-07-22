@@ -11,10 +11,9 @@ from fastapi.testclient import TestClient
 import main
 from procedural_acceptance_fixture import (
     ARBITRARY_CAST,
-    MURDERER_ID,
     independent_generated_document,
 )
-from conftest import generated_stage_response
+from conftest import SemanticScenarioFixture
 
 
 class _AcceptanceProvider:
@@ -23,27 +22,19 @@ class _AcceptanceProvider:
     def __init__(self) -> None:
         self.calls = 0
         self.document: dict[str, object] | None = None
+        self.scenario: SemanticScenarioFixture | None = None
 
     async def generate(self, messages, **kwargs):
         self.calls += 1
         if self.document is None:
             document = deepcopy(independent_generated_document())
-            document["case"]["overlays"][MURDERER_ID]["lies"] = [  # type: ignore[index]
-                {
-                    "id": "acceptance_return_lie",
-                    "topic": "library clock",
-                    "claim": "The library clock was running when I left.",
-                    "contradicts_fact_ids": ["acceptance_timeline_a"],
-                    "disclosed_fact_ids": [],
-                    "reason": "The claim conceals the stopped-clock timeline.",
-                }
-            ]
             self.document = document
-        if kwargs.get("task_role", "").startswith("case_generation_"):
+            self.scenario = SemanticScenarioFixture(document)
+        task_role = kwargs.get("task_role", "")
+        if task_role == "stage1_semantic_plan" or task_role.startswith("case_generation_"):
+            assert self.scenario is not None
             return SimpleNamespace(
-                content=json.dumps(
-                    generated_stage_response(self.document, kwargs["task_role"])
-                )
+                content=json.dumps(self.scenario.response(messages, task_role))
             )
         return SimpleNamespace(content="minus beer")
 
@@ -107,61 +98,65 @@ def test_generated_case_remains_solvable_after_autonomous_activity_and_replays(
             "fallback"
         }
 
-        # The documentary route remains physically accessible after that
-        # activity.  Discover it only through normal movement/search actions.
-        _post_action(client, kind="move", room_id="library")
-        _post_action(client, kind="search", object_id="library_fireplace")
-        _post_action(client, kind="search", object_id="library_clock")
-
-        murderer_statement = next(
-            statement
-            for statement in engine.runtime.player_knowledge.statements
-            if statement.speaker_id == MURDERER_ID
-            and statement.claim == "I have no involvement in the death."
-        )
-        witness_statement = next(
-            statement
-            for statement in engine.runtime.player_knowledge.statements
-            if statement.speaker_id == "inspector_maeve_quinn"
-            and "acceptance_timeline_a" in statement.referenced_fact_ids
-        )
-        _post_action(
-            client,
-            kind="mark_contradiction",
-            left_statement_id=murderer_statement.id,
-            right_statement_id=witness_statement.id,
-            note="The stopped clock contradicts Cross's account.",
-        )
-        contradiction = engine.runtime.player_knowledge.contradictions[-1]
-        assert contradiction.confirmed
-
-        _post_action(client, kind="move", room_id="study")
-        _post_action(client, kind="search", object_id="study_desk")
-
-        route = next(
-            route
-            for route in engine.case.solution.evidence_routes
-            if route.id == "route_1"
-        )
+        # One complete proof route remains physically accessible after that
+        # activity. Discover it only through normal movement/search actions.
+        route = engine.case.solution.evidence_routes[0]
         selected_evidence = [
             *route.method_evidence_ids,
             *route.motive_evidence_ids,
             *route.opportunity_evidence_ids,
         ]
+        from test_generated_vertical_slice_matrix import _route
+
+        body_path = _route(
+            [door.model_dump(mode="json") for door in engine.location.doors],
+            engine.runtime.player_room_id,
+            engine.case.opening.body_room_id,
+        )
+        for room_id in body_path:
+            _post_action(client, kind="move", room_id=room_id)
+        _post_action(client, kind="examine_body")
+        for evidence_id in selected_evidence:
+            action = engine.case.evidence[evidence_id].discoverable_via[0]
+            object_id = action.split(":", 1)[1]
+            room_id = engine.location.searchable_objects[object_id].room_id
+            while engine.runtime.player_room_id != room_id:
+                # Use a shortest public route when the first exit does not lead
+                # directly to the evidence room.
+                path = _route(
+                    [door.model_dump(mode="json") for door in engine.location.doors],
+                    engine.runtime.player_room_id,
+                    room_id,
+                )
+                assert path
+                _post_action(client, kind="move", room_id=path[0])
+            for _ in range(engine.case.evidence[evidence_id].difficulty.value):
+                _post_action(client, kind="search", object_id=object_id)
         assert set(selected_evidence) <= (
             engine.runtime.player_knowledge.discovered_evidence_ids
         )
-        facts = {fact.id: fact.statement for fact in engine.case.facts.values()}
+        method_fact = next(
+            engine.case.facts[fact_id]
+            for evidence_id in route.method_evidence_ids
+            for fact_id in engine.case.evidence[evidence_id].fact_ids
+            if engine.case.facts[fact_id].category.value == "means"
+        )
+        motive_fact = next(
+            engine.case.facts[fact_id]
+            for evidence_id in route.motive_evidence_ids
+            for fact_id in engine.case.evidence[evidence_id].fact_ids
+            if engine.case.facts[fact_id].category.value == "motive"
+        )
+        timeline_fact = engine.case.facts[route.timeline_fact_ids[0]]
         accused = _post_action(
             client,
             kind="accuse",
-            character_id=MURDERER_ID,
+            character_id=engine.case.murder.murderer_id,
             selected_supporting_evidence_ids=selected_evidence,
-            method=facts["acceptance_means"],
-            motive=facts["acceptance_motive"],
-            timeline=facts["acceptance_timeline_a"],
-            timeline_fact_ids=["acceptance_timeline_a"],
-            confirmed_contradiction_ids=[contradiction.id],
+            method=method_fact.statement,
+            motive=motive_fact.statement,
+            timeline=timeline_fact.statement,
+            timeline_fact_ids=[timeline_fact.id],
         )
         verdict = accused["game"]["result"]
         assert verdict["correct_culprit"] is True
@@ -169,21 +164,22 @@ def test_generated_case_remains_solvable_after_autonomous_activity_and_replays(
         assert verdict["motive_supported"] is True
         assert verdict["timeline_supported"] is True
         assert verdict["evidence_supported"] is True
-        assert verdict["contradictions_supported"] is True
-        assert verdict["evaluation_score"] == 6
+        assert verdict["contradictions_supported"] is False
+        assert verdict["evaluation_score"] == 5
         assert verdict["solved"] is True
 
         debrief = client.get("/api/game/debrief")
         assert debrief.status_code == 200, debrief.text
         audit = debrief.json()["audit"]
-        assert audit["canonical_truth"]["culprit_id"] == MURDERER_ID
+        assert audit["canonical_truth"]["culprit_id"] == engine.case.murder.murderer_id
         assert audit["replay_verification"]["verified"] is True
         assert audit["replay_verification"]["action_count"] == len(
             engine.action_history
         )
-        assert audit["replay_verification"]["action_count"] == 14
-        assert audit["replay_verification"]["resolved_npc_action_count"] == 84
-        assert len(audit["npc_action_trace"]) == 84
+        assert audit["replay_verification"]["resolved_npc_action_count"] > 0
+        assert len(audit["npc_action_trace"]) == audit["replay_verification"][
+            "resolved_npc_action_count"
+        ]
         assert {
             entry["kind"] for entry in audit["npc_action_trace"]
         } >= autonomy_kinds

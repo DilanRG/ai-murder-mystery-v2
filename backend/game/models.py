@@ -130,6 +130,29 @@ class TimelineEventType(str, Enum):
     MEETING = "meeting"
 
 
+class DeathMode(str, Enum):
+    """Canonical death responsibility independent of current homicide runtime roles."""
+
+    HOMICIDE = "homicide"
+    SUICIDE = "suicide"
+
+
+class CausalEventRole(str, Enum):
+    """Host-owned event roles used to validate a causal death chain."""
+
+    PREPARATION = "preparation"
+    ACQUISITION = "acquisition"
+    PLACEMENT = "placement"
+    DELIVERY = "delivery"
+    EXPOSURE = "exposure"
+    CONFRONTATION = "confrontation"
+    INJURY = "injury"
+    INCAPACITATION = "incapacitation"
+    DEATH = "death"
+    CONCEALMENT = "concealment"
+    DISCOVERY = "discovery"
+
+
 class SearchDifficulty(int, Enum):
     OBVIOUS = 1
     CAREFUL = 2
@@ -318,6 +341,19 @@ class PotentialWeaponDefinition(FrozenModel):
     compatible_methods: tuple[str, ...]
 
 
+class CaseMeansDefinition(FrozenModel):
+    """A case-specific means compiled from accepted model-authored semantics."""
+
+    id: BoundedIdentifier
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=800)
+    provenance: str = Field(min_length=1, max_length=1_000)
+    causal_mechanism: str = Field(min_length=1, max_length=1_000)
+    delivery_mode: Literal["direct", "delayed", "environmental", "self_administered"]
+    initial_room_id: BoundedIdentifier
+    source_object_id: BoundedIdentifier | None = None
+
+
 class ItemDefinition(FrozenModel):
     id: str
     name: str
@@ -446,6 +482,11 @@ class CanonicalTimelineEvent(FrozenModel):
     summary: str
     fact_ids: tuple[str, ...]
     observed_by: tuple[str, ...] = Field(default_factory=tuple)
+    causal_role: CausalEventRole | None = None
+    dependency_event_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=8)
+    means_id: str | None = Field(default=None, max_length=100)
+    requires_actor_victim_colocation: bool = False
+    victim_encounters_means: bool = False
 
 
 class EvidenceProvenance(FrozenModel):
@@ -485,8 +526,10 @@ class EvidenceDefinition(FrozenModel):
 
 
 class MurderTruth(FrozenModel):
+    death_mode: DeathMode = DeathMode.HOMICIDE
     victim_id: str
     murderer_id: str
+    responsible_actor_id: str | None = None
     method: str
     means: str
     weapon_id: str
@@ -541,12 +584,14 @@ class CaseDefinition(FrozenModel):
     title: str
     seed: int
     location_package_id: str
+    stage1_contract_version: Literal["legacy", "semantic-v1"] = "legacy"
     investigation_start_minute: int = Field(ge=0)
     turn_minutes: int = Field(default=10, ge=1, le=60)
     max_turns: int = Field(default=36, ge=1, le=200)
     initial_player_room_id: str
     character_ids: tuple[str, ...]
     murder: MurderTruth
+    case_means: dict[str, CaseMeansDefinition] = Field(default_factory=dict, max_length=8)
     facts: dict[str, FactDefinition]
     timeline: tuple[CanonicalTimelineEvent, ...]
     overlays: dict[str, CharacterCaseOverlay]

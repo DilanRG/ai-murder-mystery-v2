@@ -611,6 +611,34 @@ def generated_stage_response(
     raise AssertionError(f"unexpected scenario stage: {task_role}")
 
 
+class SemanticScenarioFixture:
+    """Adapt a legacy fixture's cast to the production semantic Stage 1 seam."""
+
+    def __init__(self, document: dict[str, object]) -> None:
+        case = document["case"]
+        assert isinstance(case, dict)
+        overlays = case["overlays"]
+        assert isinstance(overlays, dict)
+        self.character_ids = tuple(str(value) for value in overlays)
+        self.payloads: dict[str, dict[str, object]] | None = None
+
+    def response(self, messages, task_role: str) -> dict[str, object]:
+        if task_role == "stage1_semantic_plan":
+            request = __import__("json").loads(messages[-1].content)
+            from semantic_pipeline_fixture import semantic_pipeline_payloads
+
+            self.payloads = semantic_pipeline_payloads(
+                character_ids=self.character_ids,
+                semantic_plan=request["valid_example"],
+            )
+            return deepcopy(self.payloads[task_role])
+        if self.payloads is None:
+            raise AssertionError("semantic Stage 1 must precede downstream fixture stages")
+        if task_role in self.payloads:
+            return deepcopy(self.payloads[task_role])
+        raise AssertionError(f"unexpected scenario stage: {task_role}")
+
+
 def make_location(id: str, name: str, connected_to: list[str] | None = None) -> LocationDef:
     return LocationDef(
         id=id,

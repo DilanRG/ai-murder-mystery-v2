@@ -7,7 +7,8 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
-from conftest import generated_stage_response, make_dummy_generated_document
+from conftest import make_dummy_generated_document
+from semantic_pipeline_fixture import semantic_pipeline_payloads
 
 from game.case_generation import (
     GeneratedScenarioError,
@@ -239,14 +240,14 @@ def test_generation_context_contains_selected_cards_and_location_but_no_card_pro
 @pytest.mark.asyncio
 async def test_invalid_generation_retries_with_feedback_then_accepts_dummy_case() -> None:
     source = load_case("ashwick_sample")
-    document = _dummy_document()
+    payloads = semantic_pipeline_payloads(295)
     llm = DummyScenarioLLM(
         [
             "{not json",
             *[
-                json.dumps(generated_stage_response(document, role))
+                json.dumps(payloads[role])
                 for role in (
-                    "case_generation_core",
+                    "stage1_semantic_plan",
                     "case_generation_proof_blueprint",
                     "case_generation_evidence_realization",
                     "case_generation_misdirection",
@@ -267,8 +268,12 @@ async def test_invalid_generation_retries_with_feedback_then_accepts_dummy_case(
 
     assert result.case.seed == 295
     assert len(llm.calls) == 7
-    assert "previous attempt was rejected" in llm.calls[1]["messages"][2].content.lower()  # type: ignore[index]
-    assert "inert story data" in llm.calls[0]["messages"][0].content.lower()  # type: ignore[index]
+    assert [call["task_role"] for call in llm.calls[:2]] == [
+        "stage1_semantic_plan",
+        "stage1_semantic_plan",
+    ]
+    assert "inert data" in llm.calls[0]["messages"][0].content.lower()  # type: ignore[index]
+    assert "stage schemas" not in llm.calls[0]["messages"][0].content.lower()  # type: ignore[index]
     assert all(call["json_mode"] is True for call in llm.calls)
 
 

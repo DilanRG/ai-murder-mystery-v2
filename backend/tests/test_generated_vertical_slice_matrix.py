@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from conftest import generated_stage_response, make_dummy_generated_document
+from conftest import SemanticScenarioFixture, make_dummy_generated_document
 from game.case_generation import select_generation_cast
 from game.content import (
     CHARACTER_CARDS_DIR,
@@ -32,21 +32,19 @@ class ProjectedScenarioProvider:
 
     def __init__(self, document: dict[str, object]) -> None:
         self.document = document
+        self.scenario = SemanticScenarioFixture(document)
         self.scenario_calls = 0
         self.calls = 0
         self.scenario_cast: tuple[str, ...] | None = None
 
     async def generate(self, messages, **kwargs):
         self.calls += 1
-        system = messages[0].content
-        if "canonical scenario architect" in system:
+        task_role = kwargs.get("task_role", "")
+        if task_role == "stage1_semantic_plan" or task_role.startswith("case_generation_"):
             self.scenario_calls += 1
-            request = json.loads(messages[1].content)
-            self.scenario_cast = tuple(
-                request["generation_context"]["selected_character_ids"]
-            )
+            self.scenario_cast = self.scenario.character_ids
             return SimpleNamespace(
-                content=json.dumps(generated_stage_response(self.document, kwargs["task_role"]))
+                content=json.dumps(self.scenario.response(messages, task_role))
             )
         # Every non-scenario provider boundary is independently fail-closed.
         return SimpleNamespace(content="{}")
@@ -120,8 +118,7 @@ def _start_generated(
         for character_id in selected
     }
     assert set(main._session.engine.case.character_ids) == set(selected)
-    source = load_case("ashwick_sample")
-    culprit = dict(zip(source.character_ids, selected, strict=True))[source.murder.murderer_id]
+    culprit = main._session.engine.case.murder.murderer_id
     return provider, payload, culprit
 
 
@@ -178,24 +175,44 @@ def test_authored_projection_can_save_reload_after_turn_six_and_win(
             json={"kind": "examine_body"},
         ).json()["accepted"]
         game = client.get("/api/game/state").json()
-        desk = next(
-            item["id"]
-            for item in game["player_room"]["searchable_objects"]
-            if "desk" in item["name"].lower()
-        )
-        fireplace = next(
-            item["id"]
-            for item in game["player_room"]["searchable_objects"]
-            if "fireplace" in item["name"].lower()
-        )
+        engine = main._session.engine
+        route = engine.case.solution.evidence_routes[0]
+        evidence_ids = [
+            *route.method_evidence_ids,
+            *route.motive_evidence_ids,
+            *route.opportunity_evidence_ids,
+        ]
         public_events: list[str] = []
-        for object_id in (desk, desk, fireplace, fireplace):
-            response = client.post(
+        for evidence_id in evidence_ids:
+            action = engine.case.evidence[evidence_id].discoverable_via[0]
+            object_id = action.split(":", 1)[1]
+            room_id = engine.location.searchable_objects[object_id].room_id
+            game = client.get("/api/game/state").json()
+            for destination in _route(
+                location["doors"], game["player_room"]["id"], room_id
+            ):
+                moved = client.post(
+                    "/api/game/action",
+                    json={"kind": "move", "room_id": destination},
+                )
+                assert moved.status_code == 200 and moved.json()["accepted"]
+                public_events.extend(moved.json()["events"])
+            for _ in range(engine.case.evidence[evidence_id].difficulty.value):
+                response = client.post(
+                    "/api/game/action",
+                    json={"kind": "search", "object_id": object_id},
+                )
+                assert response.status_code == 200 and response.json()["accepted"]
+                turn = response.json()
+                game = turn["game"]
+                public_events.extend(turn["events"])
+        while game["turn"] < 6:
+            object_id = game["player_room"]["searchable_objects"][0]["id"]
+            turn = client.post(
                 "/api/game/action",
                 json={"kind": "search", "object_id": object_id},
-            )
-            assert response.status_code == 200 and response.json()["accepted"]
-            turn = response.json()
+            ).json()
+            assert turn["accepted"]
             game = turn["game"]
             public_events.extend(turn["events"])
         assert game["turn"] >= 6
@@ -204,8 +221,20 @@ def test_authored_projection_can_save_reload_after_turn_six_and_win(
             in public_events
         )
         facts = {fact["id"]: fact["statement"] for fact in game["known_facts"]}
-        assert {"fact_murder_method", "fact_financial_exposure", "fact_murder_time"} <= set(facts)
-        evidence_ids = [item["id"] for item in game["discovered_evidence"]]
+        method_fact = next(
+            engine.case.facts[fact_id]
+            for evidence_id in route.method_evidence_ids
+            for fact_id in engine.case.evidence[evidence_id].fact_ids
+            if engine.case.facts[fact_id].category.value == "means"
+        )
+        motive_fact = next(
+            engine.case.facts[fact_id]
+            for evidence_id in route.motive_evidence_ids
+            for fact_id in engine.case.evidence[evidence_id].fact_ids
+            if engine.case.facts[fact_id].category.value == "motive"
+        )
+        timeline_fact_id = route.timeline_fact_ids[0]
+        assert {method_fact.id, motive_fact.id, timeline_fact_id} <= set(facts)
 
         save = client.post("/api/game/saves/v1", json={"filename": f"generated-{seed}.json"})
         assert save.status_code == 200
@@ -224,10 +253,10 @@ def test_authored_projection_can_save_reload_after_turn_six_and_win(
                 "kind": "accuse",
                 "character_id": culprit_id,
                 "evidence_ids": evidence_ids,
-                "method": facts["fact_murder_method"],
-                "motive": facts["fact_financial_exposure"],
-                "timeline": facts["fact_murder_time"],
-                "timeline_fact_ids": ["fact_murder_time"],
+                "method": method_fact.statement,
+                "motive": motive_fact.statement,
+                "timeline": facts[timeline_fact_id],
+                "timeline_fact_ids": [timeline_fact_id],
             },
         )
         assert accusation.status_code == 200

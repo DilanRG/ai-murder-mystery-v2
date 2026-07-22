@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 
-from conftest import generated_stage_response, make_dummy_generated_document
+from conftest import SemanticScenarioFixture, make_dummy_generated_document
 from experiments.run_deepseek_v4_generation import (
     _has_generation_intent,
     run_generation_matrix,
@@ -53,7 +53,7 @@ class _OfflineMeasuredClient:
 
     async def generate(self, messages, **kwargs) -> LLMResponse:
         assert kwargs["task_role"] in {
-            "case_generation_core",
+            "stage1_semantic_plan",
             "case_generation_proof_blueprint",
             "case_generation_evidence_realization",
             "case_generation_misdirection",
@@ -100,10 +100,6 @@ class _OfflineMeasuredClient:
         return response
 
 
-def _stage_document(document: dict[str, object], role: str) -> dict[str, object]:
-    return generated_stage_response(document, role)
-
-
 def test_generation_matrix_uses_production_admission_and_private_snapshots(
     tmp_path: Path,
 ) -> None:
@@ -121,9 +117,10 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
         pair = planned_pairs[clients_built // 2]
         clients_built += 1
         document = make_dummy_generated_document(character_ids=tuple(pair["cast_ids"]))
+        scenario = SemanticScenarioFixture(document)
 
-        def content_factory(_messages, role):
-            return _stage_document(document, role)
+        def content_factory(messages, role):
+            return scenario.response(messages, role)
 
         return _OfflineMeasuredClient(
             model=model,
@@ -197,7 +194,7 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
     request_intents = (tmp_path / "request_intents.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(request_intents) == 36
     assert {json.loads(record)["task_role"] for record in request_records} == {
-        "case_generation_core",
+        "stage1_semantic_plan",
         "case_generation_proof_blueprint",
         "case_generation_evidence_realization",
         "case_generation_misdirection",
@@ -285,8 +282,8 @@ def test_generation_matrix_counts_three_rejected_candidates_without_outer_retry(
     assert all(outcome["admitted"] is False for outcome in outcomes)
     assert all(outcome["candidate_attempts"] == 1 for outcome in outcomes)
     assert all(outcome["stage_requests"] == 3 for outcome in outcomes)
-    assert all(outcome["failed_stage"] == "case_generation_core" for outcome in outcomes)
-    assert all(outcome["failure_code"] == "invalid_generated_case" for outcome in outcomes)
+    assert all(outcome["failed_stage"] == "stage1_semantic_plan" for outcome in outcomes)
+    assert all(outcome["failure_code"] == "malformed_json" for outcome in outcomes)
     assert len((tmp_path / "requests.jsonl").read_text(encoding="utf-8").splitlines()) == 18
     attempts = [
         json.loads(record)
@@ -296,7 +293,7 @@ def test_generation_matrix_counts_three_rejected_candidates_without_outer_retry(
     ]
     assert len(attempts) == 18
     assert all(record["failure_category"] == "malformed_json" for record in attempts)
-    assert [record["repair_feedback_used"] for record in attempts[:3]] == [False, True, True]
+    assert [record["repair_feedback_used"] for record in attempts[:3]] == [False, False, False]
     assert all(record["candidate_attempt"] == 1 for record in attempts)
     assert [record["stage_attempt"] for record in attempts[:3]] == [1, 2, 3]
 

@@ -196,7 +196,7 @@ def validate_runtime_state(
     door_ids = {door.id for door in location.doors}
     object_ids = set(location.searchable_objects)
     item_ids = set(location.items)
-    weapon_ids = set(location.potential_weapons)
+    weapon_ids = set(location.potential_weapons) | set(case.case_means)
     slot_ids = set(location.evidence_slots)
     fact_ids = set(case.facts)
     private_memory_topics = {

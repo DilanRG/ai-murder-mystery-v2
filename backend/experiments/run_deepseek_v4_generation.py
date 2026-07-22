@@ -481,7 +481,16 @@ async def run_generation_matrix(
                         difficulty="normal",
                     )
                 except GeneratedScenarioError as error:
-                    if error.code != "invalid_generated_case":
+                    model_rejection_codes = {
+                        "invalid_generated_case",
+                        "output_truncated",
+                        "empty_response",
+                        "malformed_json",
+                        "schema_invalid_json",
+                        "semantic_validation_failed",
+                        "host_compilation_failed",
+                    }
+                    if error.code not in model_rejection_codes:
                         raise ExperimentSafetyError(
                             f"Provider execution stopped during {run_id}: {error.code}."
                         ) from error

@@ -1,9 +1,8 @@
-"""Strict LLM blueprint admission for canonical generated mysteries.
+"""Strict staged admission for procedurally generated mysteries.
 
-The provider proposes immutable case truth.  It never receives a state-patch
-interface and its document is not playable until Pydantic validation, host
-field injection, cross-document validation, and public-presentation validation
-all succeed.
+Stage 1 is a compact model-authored semantic plan compiled by the authoritative
+host. Later stages remain immutable deltas, and no document is playable until
+cross-document and public-presentation validation succeed.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from pydantic import Field, ValidationError
 from game.content import CHARACTER_CARDS_DIR, list_content_ids, load_character_card
 from game.models import (
     CanonicalTimelineEvent,
+    CaseMeansDefinition,
     CaseDefinition,
     CharacterCaseOverlay,
     EvidenceDefinition,
@@ -39,6 +39,12 @@ from game.story_director import (
     StoryPresentationDraft,
     StoryPresentationPatch,
     validate_story_presentation,
+)
+from game.stage1_semantic import (
+    Stage1SemanticError,
+    compiled_causal_chain_issues,
+    generate_stage1_boundary,
+    select_stage1_roles,
 )
 from game.validator import validate_case
 from llm.client import LLMMessage, LLMProviderError
@@ -83,9 +89,11 @@ class GeneratedCaseBlueprint(FrozenModel):
     """The complete provider-authored truth minus host-controlled identity."""
 
     schema_version: Literal[1] = 1
+    stage1_contract_version: Literal["legacy", "semantic-v1"] = "legacy"
     title: str = Field(min_length=1, max_length=120)
     investigation_start_minute: int = Field(ge=0)
     murder: MurderTruth
+    case_means: dict[str, CaseMeansDefinition] = Field(default_factory=dict, max_length=8)
     facts: dict[str, FactDefinition] = Field(min_length=6, max_length=64)
     timeline: tuple[CanonicalTimelineEvent, ...] = Field(min_length=3, max_length=64)
     overlays: dict[str, GeneratedCharacterCaseOverlay] = Field(
@@ -109,9 +117,13 @@ class GeneratedCrimeTimelineStage(FrozenModel):
     """Stage 1: the crime spine, chronology, and fact register."""
 
     schema_version: Literal[1] = 1
+    stage1_contract_version: Literal["legacy", "semantic-v1"] = "legacy"
+    role_assignment_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    semantic_plan_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
     title: str = Field(min_length=1, max_length=120)
     investigation_start_minute: int = Field(ge=0)
     murder: MurderTruth
+    case_means: dict[str, CaseMeansDefinition] = Field(default_factory=dict, max_length=8)
     facts: dict[str, FactDefinition] = Field(min_length=6, max_length=64)
     timeline: tuple[CanonicalTimelineEvent, ...] = Field(min_length=3, max_length=64)
     opening: GeneratedDiscoveryOpening
@@ -501,9 +513,11 @@ def assemble_generated_case_blueprint(
         for fact_id, fact in crime.facts.items()
     }
     return GeneratedCaseBlueprint(
+        stage1_contract_version=crime.stage1_contract_version,
         title=crime.title,
         investigation_start_minute=crime.investigation_start_minute,
         murder=crime.murder,
+        case_means=crime.case_means,
         facts=linked_facts,
         timeline=crime.timeline,
         overlays=overlays.overlays,
@@ -891,12 +905,14 @@ def compile_generated_case_blueprint(
             title=blueprint.title,
             seed=seed,
             location_package_id=location.id,
+            stage1_contract_version=blueprint.stage1_contract_version,
             investigation_start_minute=blueprint.investigation_start_minute,
             turn_minutes=10,
             max_turns=36,
             initial_player_room_id=location.assembly_room_id,
             character_ids=character_ids,
             murder=blueprint.murder,
+            case_means=blueprint.case_means,
             facts=blueprint.facts,
             timeline=blueprint.timeline,
             overlays=blueprint.overlays,
@@ -1039,22 +1055,28 @@ def _validate_core_stage(
     murder = stage.murder
     if murder.victim_id not in cast or murder.murderer_id not in cast:
         issues.append("victim and murderer must both be selected characters")
-    if murder.victim_id == murder.murderer_id:
+    if stage.stage1_contract_version == "legacy" and murder.victim_id == murder.murderer_id:
         issues.append("victim and murderer must be distinct")
     if murder.room_id not in rooms:
         issues.append(f"murder room {murder.room_id!r} is unknown")
-    weapon = location.potential_weapons.get(murder.weapon_id)
-    if weapon is None:
-        issues.append(f"murder weapon {murder.weapon_id!r} is unknown")
-    elif murder.method not in weapon.compatible_methods:
-        issues.append("murder method is incompatible with the selected weapon")
-    if not any(
-        murder.room_id in rule.room_ids
-        and murder.weapon_id in rule.weapon_ids
-        and murder.method in rule.compatible_methods
-        for rule in location.murder_opportunity_rules
-    ):
-        issues.append("murder combination violates every opportunity rule")
+    if stage.stage1_contract_version == "legacy":
+        weapon = location.potential_weapons.get(murder.weapon_id)
+        if weapon is None:
+            issues.append(f"murder weapon {murder.weapon_id!r} is unknown")
+        elif murder.method not in weapon.compatible_methods:
+            issues.append("murder method is incompatible with the selected weapon")
+        if not any(
+            murder.room_id in rule.room_ids
+            and murder.weapon_id in rule.weapon_ids
+            and murder.method in rule.compatible_methods
+            for rule in location.murder_opportunity_rules
+        ):
+            issues.append("murder combination violates every opportunity rule")
+    else:
+        if stage.role_assignment_fingerprint is None:
+            issues.append("semantic Stage 1 lacks a role-assignment fingerprint")
+        if stage.semantic_plan_fingerprint is None:
+            issues.append("semantic Stage 1 lacks a semantic-plan fingerprint")
     timeline_ids: set[str] = set()
     previous_minute = -1
     for event in stage.timeline:
@@ -1070,14 +1092,27 @@ def _validate_core_stage(
             issues.append(f"timeline event {event.id!r} names an unknown character")
         if set(event.fact_ids) - fact_ids:
             issues.append(f"timeline event {event.id!r} names an unknown fact")
-    if not any(
-        event.minute == murder.minute
-        and event.room_id == murder.room_id
-        and event.event_type.value == "murder"
-        and {murder.victim_id, murder.murderer_id} <= set(event.actor_ids)
-        for event in stage.timeline
-    ):
-        issues.append("timeline lacks a co-located murder event")
+    if stage.stage1_contract_version == "legacy":
+        if not any(
+            event.minute == murder.minute
+            and event.room_id == murder.room_id
+            and event.event_type.value == "murder"
+            and {murder.victim_id, murder.murderer_id} <= set(event.actor_ids)
+            for event in stage.timeline
+        ):
+            issues.append("timeline lacks a co-located murder event")
+    else:
+        issues.extend(
+            issue.message
+            for issue in compiled_causal_chain_issues(
+                murder=murder,
+                timeline=stage.timeline,
+                case_means=stage.case_means,
+                opening=stage.opening,
+                character_ids=character_ids,
+                location=location,
+            )
+        )
     opening = stage.opening
     survivors = cast - {murder.victim_id}
     if opening.discoverer_id not in survivors:
@@ -1983,24 +2018,48 @@ async def generate_validated_scenario(
         difficulty=difficulty,
     )
     prefix = _stage_prefix(context)
-    core = await _generate_stage(
-        llm,
-        prefix=prefix,
-        role="case_generation_core",
-        model_type=GeneratedCrimeTimelineStage,
-        instruction=(
-            "Create the crime, fact register, sorted canonical timeline, and discovery opening. "
-            "Fact related_evidence_ids are ignored and deterministically derived later."
-        ),
-        upstream={},
-        max_tokens=20_000,
-        max_attempts=max_attempts,
-        validator=lambda value: _validate_core_stage(
-            value, character_ids=character_ids, location=location
-        ),
-        attempt_observer=attempt_observer,
-        accepted_stage_observer=accepted_stage_observer,
+    role_assignment = select_stage1_roles(
+        character_ids=character_ids,
+        seed=seed,
     )
+
+    def admit_compiled_stage_1(document: dict[str, object]) -> None:
+        compiled = GeneratedCrimeTimelineStage.model_validate(document)
+        _validate_core_stage(
+            compiled,
+            character_ids=character_ids,
+            location=location,
+        )
+
+    try:
+        def persist_compiled_stage_1(record: dict[str, object]) -> None:
+            if accepted_stage_observer is None:
+                return
+            try:
+                accepted_stage_observer(record)
+            except Exception as error:
+                raise GenerationObserverError(
+                    "durable generation observer failed after accepting case_generation_core"
+                ) from error
+
+        stage1_boundary = await generate_stage1_boundary(
+            llm,
+            character_ids=character_ids,
+            location=location,
+            seed=seed,
+            assignment=role_assignment,
+            repair_llm=llm,
+            max_initial_attempts=max_attempts,
+            max_delta_repairs=2,
+            compiled_validator=admit_compiled_stage_1,
+            attempt_observer=attempt_observer,
+            accepted_stage_observer=persist_compiled_stage_1,
+        )
+        core = GeneratedCrimeTimelineStage.model_validate(
+            stage1_boundary.compiled_document
+        )
+    except Stage1SemanticError as error:
+        raise GeneratedScenarioError(str(error), code=error.code) from error
     proof_catalog = build_proof_support_catalog(core)
     proof_catalog_fingerprint = proof_support_catalog_fingerprint(proof_catalog)
     proof_selection = await _generate_stage(

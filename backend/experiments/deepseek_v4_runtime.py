@@ -75,12 +75,18 @@ class DeepSeekRequestObserver:
         metrics_path: Path,
         context: RunContext,
         record_observer: Callable[[Mapping[str, Any]], None] | None = None,
+        reasoning_by_task_role: Mapping[str, str | None] | None = None,
     ) -> None:
         self.ledger = ledger
         self.metrics_path = metrics_path
         self.intent_path = metrics_path.with_name("request_intents.jsonl")
         self.context = context
         self.record_observer = record_observer
+        self.reasoning_by_task_role = (
+            dict(reasoning_by_task_role)
+            if reasoning_by_task_role is not None
+            else None
+        )
         self._reservations: dict[str, Reservation] = {}
         self._lock = threading.Lock()
         self.last_record: dict[str, Any] | None = None
@@ -101,15 +107,25 @@ class DeepSeekRequestObserver:
             raise ExperimentSafetyError("Measured request used an unapproved model slug.")
         if data.get("transport") != "deepseek_direct" or data.get("provider_routing") is not None:
             raise ExperimentSafetyError("Measured request was not pinned to direct DeepSeek.")
-        if data.get("reasoning_effort") != "high":
-            raise ExperimentSafetyError("Measured request did not use high reasoning effort.")
+        task_role = str(data.get("task_role", ""))
+        expected_reasoning = (
+            self.reasoning_by_task_role.get(task_role, "high")
+            if self.reasoning_by_task_role is not None
+            else "high"
+        )
+        if data.get("reasoning_effort") != expected_reasoning:
+            raise ExperimentSafetyError("Measured request used the wrong reasoning mode.")
+        reasoning_label = expected_reasoning or "none"
         reservation = self.ledger.reserve(
             provider="deepseek",
             model=model,  # type: ignore[arg-type]
             prompt_tokens_upper_bound=int(data.get("prompt_tokens_upper_bound", 0)),
             max_output_tokens=int(data.get("max_tokens", 0)),
-            parameters={"transport": "deepseek_direct", "thinking": "enabled"},
-            reasoning="high",
+            parameters={
+                "transport": "deepseek_direct",
+                "thinking": "enabled" if expected_reasoning is not None else "disabled",
+            },
+            reasoning=reasoning_label,
             allow_fallbacks=False,
         )
         self._reservations[request_id] = reservation
