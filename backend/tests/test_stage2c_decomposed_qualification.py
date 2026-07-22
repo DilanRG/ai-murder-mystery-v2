@@ -28,6 +28,7 @@ def test_decomposed_manifest_is_frozen_without_provider_access() -> None:
         (("model_order",), ["pro", "flash"]),
         (("provider_fallbacks",), True),
         (("source_stage2", "git_sha"), "0" * 40),
+        (("source_stage2c_revision15", "results_sha256"), "0" * 64),
         (("source_stage2", "accepted_compiled_stage2", "pro", "stage_2b"), "0" * 64),
         (("limits", "stage_2c_realization_max_tokens"), 9_000),
         (("reasoning", "stage_2c_realizations"), "high"),
@@ -47,12 +48,14 @@ def test_decomposed_manifest_tampering_fails_closed(
         controller.validate_manifest(manifest)
 
 
-def test_only_plan_is_high_reasoning_and_no_stage3_role_exists() -> None:
+def test_only_plan_items_are_high_reasoning_and_no_stage3_role_exists() -> None:
     roles = controller._reasoning_map()
-    assert roles["stage2_semantic_2c_p"] == "high"
+    assert roles["stage2_semantic_2c_p1"] == "high"
+    assert roles["stage2_semantic_2c_p2"] == "high"
     assert roles["stage2_semantic_2c_r1"] is None
     assert roles["stage2_semantic_2c_r2"] is None
-    assert roles["stage2_semantic_2c_p_delta_repair"] is None
+    assert roles["stage2_semantic_2c_p1_delta_repair"] is None
+    assert roles["stage2_semantic_2c_p2_delta_repair"] is None
     assert roles["stage2c_exact_model_preflight"] is None
     assert not any("stage3" in role or "overlay" in role for role in roles)
 
@@ -66,8 +69,8 @@ def _current_checkpoint(manifest: dict, *, git_sha: str) -> dict:
         "git_sha": git_sha,
         "model_key": "flash",
         "model": controller.EXPECTED_MODELS["flash"],
-        "prompt_revision": controller.STAGE2C_DECOMPOSED_PROMPT_REVISION,
-        "schema_revision": controller.STAGE2C_DECOMPOSED_SCHEMA_REVISION,
+        "prompt_revision": controller.STAGE2C_PLAN_ITEMS_PROMPT_REVISION,
+        "schema_revision": controller.STAGE2C_PLAN_ITEMS_SCHEMA_REVISION,
         "source_stage2_git_sha": manifest["source_stage2"]["git_sha"],
         "source_stage2_manifest_fingerprint": manifest["source_stage2"]["manifest_fingerprint"],
         "source_stage1_fingerprints": manifest["accepted_stage1"]["flash"],
@@ -95,7 +98,7 @@ def test_current_checkpoint_rejects_skip_duplicate_and_provenance_tampering(
         source_provenance={"source_checkpoint_sha256": "f" * 64},
     ) == []
 
-    checkpoint["accepted_stage_records"] = [{"stage": "stage2_semantic_2c_r1"}]
+    checkpoint["accepted_stage_records"] = [{"stage": "stage2_semantic_2c_p2"}]
     path.write_text(json.dumps(checkpoint), encoding="utf-8")
     with pytest.raises(ExperimentSafetyError, match="order is invalid"):
         controller._load_current_records(
@@ -107,8 +110,8 @@ def test_current_checkpoint_rejects_skip_duplicate_and_provenance_tampering(
         )
 
     checkpoint["accepted_stage_records"] = [
-        {"stage": "stage2_semantic_2c_p"},
-        {"stage": "stage2_semantic_2c_p"},
+        {"stage": "stage2_semantic_2c_p1"},
+        {"stage": "stage2_semantic_2c_p1"},
     ]
     path.write_text(json.dumps(checkpoint), encoding="utf-8")
     with pytest.raises(ExperimentSafetyError, match="order is invalid"):
@@ -210,11 +213,11 @@ def test_historical_loader_reuses_only_exact_prefix_and_excludes_flash_suffix(
     ]
 
 
-def test_budget_policy_carries_forward_revision14_cost() -> None:
+def test_budget_policy_carries_forward_revision14_and_15_cost() -> None:
     manifest = controller.load_manifest()
     policy = controller._budget_policy(manifest)
-    assert policy.soft_stop_usd == Decimal("8.43944655")
-    assert policy.hard_stop_usd == Decimal("9.43944655")
+    assert policy.soft_stop_usd == Decimal("8.42786546")
+    assert policy.hard_stop_usd == Decimal("9.42786546")
 
 
 def test_qualification_commit_must_descend_from_frozen_baseline(monkeypatch) -> None:
@@ -240,8 +243,8 @@ def test_request_history_is_exact_commit_bound_and_duplicate_safe(
         {
             "request_id": f"request-{index}",
             "git_sha": "a" * 40,
-            "run_id": "stage2c-decomposed-flash",
-            "task_role": "stage2_semantic_2c_p",
+            "run_id": "stage2c-plan-items-flash",
+            "task_role": "stage2_semantic_2c_p1",
             "total_external_cost_usd": "0.001",
         }
         for index in range(2)
@@ -371,7 +374,8 @@ def test_terminal_pass_requires_measured_exact_model_p_r1_r2_requests(
     git_sha = "a" * 40
     model = controller.EXPECTED_MODELS["flash"]
     roles = [
-        "stage2_semantic_2c_p",
+        "stage2_semantic_2c_p1",
+        "stage2_semantic_2c_p2",
         "stage2_semantic_2c_r1",
         "stage2_semantic_2c_r2",
     ]
@@ -379,7 +383,7 @@ def test_terminal_pass_requires_measured_exact_model_p_r1_r2_requests(
         {
             "request_id": f"request-{index}",
             "git_sha": git_sha,
-            "run_id": "stage2c-decomposed-flash",
+            "run_id": "stage2c-plan-items-flash",
             "task_role": role,
             "requested_model": model,
             "actual_model": model,
@@ -399,8 +403,8 @@ def test_terminal_pass_requires_measured_exact_model_p_r1_r2_requests(
     )
     monkeypatch.setattr(controller, "REQUESTS_PATH", path)
     row = {
-        "request_records": 3,
-        "locally_estimated_cost_usd": "0.003",
+        "request_records": 4,
+        "locally_estimated_cost_usd": "0.004",
         "request_roles": roles,
     }
     controller._validate_pass_request_evidence(

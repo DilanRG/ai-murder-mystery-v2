@@ -20,6 +20,8 @@ from game.stage2_semantic import (
     Stage2BRealizationProposal,
     Stage2BSemanticCandidate,
     Stage2CRedHerringProposal,
+    Stage2CP1Candidate,
+    Stage2CP2Candidate,
     Stage2CPlanCandidate,
     Stage2CRealizationCandidate,
     Stage2CSemanticCandidate,
@@ -28,6 +30,7 @@ from game.stage2_semantic import (
     Stage2SemanticPatch,
     _generate_semantic_stage,
     apply_stage2_semantic_patch,
+    assemble_stage2c_plan_candidate,
     assemble_stage2c_semantic_candidate,
     assemble_stage2_artifact,
     build_discovery_affordance_catalogue,
@@ -37,6 +40,7 @@ from game.stage2_semantic import (
     build_stage2b_messages,
     build_stage2c_messages,
     build_stage2c_plan_messages,
+    build_stage2c_plan_item_messages,
     build_stage2c_realization_messages,
     compile_stage2a_candidate,
     compile_stage2b_candidate,
@@ -53,6 +57,7 @@ from game.stage2_semantic import (
     stage2b_valid_example,
     stage2c_valid_example,
     stage2c_plan_valid_example,
+    stage2c_plan_item_valid_example,
     stage2c_realization_valid_example,
     validate_assembled_stage2,
     validate_stage2a_candidate,
@@ -62,6 +67,8 @@ from game.stage2_semantic import (
     validate_stage2c_candidate,
     validate_decomposed_stage2c_candidate,
     validate_stage2c_plan_candidate,
+    validate_stage2c_p1_candidate,
+    validate_stage2c_p2_candidate,
     validate_stage2c_realization_candidate,
 )
 from semantic_pipeline_fixture import semantic_pipeline_payloads
@@ -565,6 +572,119 @@ def test_stage2c_plan_allows_one_seed_for_two_distinct_innocent_suspects() -> No
     assert report.is_valid
 
 
+def _plan_item_deltas(f: dict[str, object]) -> tuple[Stage2CP1Candidate, Stage2CP2Candidate]:
+    p1 = stage2c_plan_item_valid_example(
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        plan_index=1,
+    )
+    assert isinstance(p1, Stage2CP1Candidate)
+    p2 = stage2c_plan_item_valid_example(
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        plan_index=2,
+        accepted_p1=p1,
+    )
+    assert isinstance(p2, Stage2CP2Candidate)
+    return p1, p2
+
+
+def test_stage2c_plan_item_deltas_host_assemble_unchanged_plan_contract() -> None:
+    f = _fixture()
+    p1, p2 = _plan_item_deltas(f)
+    assert validate_stage2c_p1_candidate(
+        p1,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    ).is_valid
+    assert validate_stage2c_p2_candidate(
+        p2,
+        accepted_p1=p1,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    ).is_valid
+    assembled = assemble_stage2c_plan_candidate(p1, p2)
+    assert assembled == f["plan_c"]
+    assert validate_stage2c_plan_candidate(
+        assembled,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    ).is_valid
+
+
+def test_stage2c_p1_rejects_upstream_binding_tampering() -> None:
+    f = _fixture()
+    p1, _ = _plan_item_deltas(f)
+    report = validate_stage2c_p1_candidate(
+        p1.model_copy(update={"compiled_stage_2b_fingerprint": "0" * 64}),
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    )
+    assert "stage_2c_plan_rewrites_true_evidence" in _codes(report)
+
+
+@pytest.mark.parametrize(
+    "mutation,code",
+    [
+        ("stale_p1", "stale_stage_2c_p1"),
+        ("duplicate_suspect", "duplicate_red_herring_suspect"),
+        ("duplicate_channel", "duplicate_red_herring_channel"),
+        ("cosmetic", "cosmetic_red_herring_variation"),
+    ],
+)
+def test_stage2c_p2_rejects_stale_or_non_distinct_delta(
+    mutation: str, code: str
+) -> None:
+    f = _fixture()
+    p1, p2 = _plan_item_deltas(f)
+    if mutation == "stale_p1":
+        p2 = p2.model_copy(update={"accepted_p1_fingerprint": "0" * 64})
+    else:
+        plan = p2.plan
+        updates: dict[str, object] = {}
+        if mutation == "duplicate_suspect":
+            updates["suspect_ref"] = p1.plan.suspect_ref
+        elif mutation == "duplicate_channel":
+            updates["suspicious_evidence_channel"] = p1.plan.suspicious_evidence_channel
+        else:
+            updates.update(
+                {
+                    "secondary_event_summary": p1.plan.secondary_event_summary,
+                    "appears_murder_related": p1.plan.appears_murder_related,
+                    "innocent_explanation": p1.plan.innocent_explanation,
+                }
+            )
+        p2 = p2.model_copy(update={"plan": plan.model_copy(update=updates)})
+    report = validate_stage2c_p2_candidate(
+        p2,
+        accepted_p1=p1,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    )
+    assert code in _codes(report)
+    if mutation != "stale_p1":
+        assert all(not path.startswith("/plans/") for issue in report.issues for path in issue.allowed_paths)
+
+
 @pytest.mark.parametrize(
     "mutation,code",
     [
@@ -851,6 +971,114 @@ async def test_legacy_stage2c_path_remains_monolithic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_plan_item_decomposition_reaches_unchanged_stage3_ready_gate() -> None:
+    f = _fixture()
+    route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
+    route_2 = stage2a_route_delta_valid_example(
+        f["support"],
+        route_index=2,
+        accepted_route_1=route_1.route,
+        discovery_catalogue=f["discovery"],
+        core=f["core"],
+    ).model_copy(update={"route": f["candidate_a"].routes[1]})
+    p1, p2 = _plan_item_deltas(f)
+    llm = _FakeLLM(
+        [
+            SimpleNamespace(content=route_1.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=route_2.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["candidate_b"].model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=p1.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=p2.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["realization_c1"].model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["realization_c2"].model_dump_json(), finish_reason="stop"),
+        ]
+    )
+    result = await generate_stage2_boundary(
+        llm,
+        repair_llm=llm,
+        decomposed_stage2c=True,
+        decomposed_stage2c_plan_items=True,
+        core=f["core"],
+        character_ids=f["case"].character_ids,
+        location=f["location"],
+    )
+    assert result.stage_2c_plan == f["plan_c"]
+    assert result.artifact.stage_3_readiness.is_valid
+    assert llm.calls == [
+        "stage2_semantic_2a_route_1",
+        "stage2_semantic_2a_route_2",
+        "stage2_semantic_2b",
+        "stage2_semantic_2c_p1",
+        "stage2_semantic_2c_p2",
+        "stage2_semantic_2c_r1",
+        "stage2_semantic_2c_r2",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_plan_item_checkpoint_resumes_after_p1_without_duplicate_call() -> None:
+    f = _fixture()
+    route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
+    route_2 = stage2a_route_delta_valid_example(
+        f["support"],
+        route_index=2,
+        accepted_route_1=route_1.route,
+        discovery_catalogue=f["discovery"],
+        core=f["core"],
+    ).model_copy(update={"route": f["candidate_a"].routes[1]})
+    p1, p2 = _plan_item_deltas(f)
+    records: list[dict[str, object]] = []
+    first_llm = _FakeLLM(
+        [
+            SimpleNamespace(content=route_1.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=route_2.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["candidate_b"].model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=p1.model_dump_json(), finish_reason="stop"),
+        ]
+    )
+
+    def interrupt_after_p1(record: dict[str, object]) -> None:
+        records.append(record)
+        if record["stage"] == "stage2_semantic_2c_p1":
+            raise RuntimeError("interrupt after P1")
+
+    with pytest.raises(RuntimeError, match="interrupt after P1"):
+        await generate_stage2_boundary(
+            first_llm,
+            repair_llm=first_llm,
+            decomposed_stage2c=True,
+            decomposed_stage2c_plan_items=True,
+            core=f["core"],
+            character_ids=f["case"].character_ids,
+            location=f["location"],
+            accepted_stage_observer=interrupt_after_p1,
+        )
+    resumed_llm = _FakeLLM(
+        [
+            SimpleNamespace(content=p2.model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["realization_c1"].model_dump_json(), finish_reason="stop"),
+            SimpleNamespace(content=f["realization_c2"].model_dump_json(), finish_reason="stop"),
+        ]
+    )
+    result = await generate_stage2_boundary(
+        resumed_llm,
+        repair_llm=resumed_llm,
+        decomposed_stage2c=True,
+        decomposed_stage2c_plan_items=True,
+        core=f["core"],
+        character_ids=f["case"].character_ids,
+        location=f["location"],
+        resume_stage_records={str(record["stage"]): record for record in records},
+    )
+    assert result.artifact.stage_3_readiness.is_valid
+    assert resumed_llm.calls == [
+        "stage2_semantic_2c_p2",
+        "stage2_semantic_2c_r1",
+        "stage2_semantic_2c_r2",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_accepted_stage2a_route_checkpoint_resumes_without_duplicate_call() -> None:
     f = _fixture()
     route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
@@ -1078,6 +1306,7 @@ def test_schema_prevents_host_from_inventing_missing_semantic_meaning() -> None:
 def test_prompts_expose_only_current_substage_schema() -> None:
     f = _fixture()
     route_1 = stage2a_route_delta_valid_example(f["support"], route_index=1)
+    p1, _ = _plan_item_deltas(f)
     messages = [
         build_stage2a_route_messages(
             f["support"], f["discovery"], route_index=1, core=f["core"]
@@ -1106,6 +1335,21 @@ def test_prompts_expose_only_current_substage_schema() -> None:
             discovery_catalogue=f["discovery"],
             secondary_catalogue=f["secondary"],
         ),
+        build_stage2c_plan_item_messages(
+            stage_2a=f["stage_a"],
+            stage_2b=f["stage_b"],
+            discovery_catalogue=f["discovery"],
+            secondary_catalogue=f["secondary"],
+            plan_index=1,
+        ),
+        build_stage2c_plan_item_messages(
+            stage_2a=f["stage_a"],
+            stage_2b=f["stage_b"],
+            discovery_catalogue=f["discovery"],
+            secondary_catalogue=f["secondary"],
+            plan_index=2,
+            accepted_p1=p1,
+        ),
         build_stage2c_realization_messages(
             plan=f["plan_c"],
             red_herring_index=1,
@@ -1129,3 +1373,10 @@ def test_prompts_expose_only_current_substage_schema() -> None:
     )
     assert "suspect_ref" not in realization_schema
     assert "secondary_secret_alias" not in realization_schema
+    p1_payload = json.loads(messages[5][1].content)
+    p2_payload = json.loads(messages[6][1].content)
+    assert "plans" not in json.dumps(p1_payload["schema"])
+    assert "compiled_stage_2a_fingerprint" not in json.dumps(p2_payload["schema"])
+    assert p2_payload["context"]["accepted_p1_fingerprint"] == content_fingerprint(
+        p1.model_dump(mode="json")
+    )

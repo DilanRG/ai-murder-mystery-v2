@@ -32,11 +32,15 @@ from game.stage2_semantic import (
     STAGE2C_PLAN_MAX_TOKENS,
     STAGE2C_REALIZATION_MAX_TOKENS,
     STAGE2_DELTA_REPAIR_MAX_TOKENS,
-    STAGE2C_DECOMPOSED_PROMPT_REVISION,
-    STAGE2C_DECOMPOSED_SCHEMA_REVISION,
+    STAGE2C_PLAN_ITEMS_PROMPT_REVISION,
+    STAGE2C_PLAN_ITEMS_SCHEMA_REVISION,
     STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
     DecomposedStage2CandidateArtifact,
+    Stage2CP1Candidate,
+    Stage2CP2Candidate,
+    Stage2CPlanCandidate,
     Stage2SemanticError,
+    assemble_stage2c_plan_candidate,
     generate_stage2_boundary,
 )
 from llm.client import LLMClient, LLMMessage, LLMProviderError
@@ -48,7 +52,8 @@ REPOSITORY_ROOT = BACKEND_ROOT.parent
 MANIFEST_PATH = Path(__file__).with_name("stage2c_decomposed_qualification_manifest.json")
 SOURCE_MANIFEST_PATH = Path(__file__).with_name("stage2_semantic_qualification_manifest.json")
 SOURCE_ROOT = REPOSITORY_ROOT / ".private" / "stage2_semantic_qualification"
-ARTIFACT_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_decomposed_qualification"
+REVISION15_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_decomposed_qualification"
+ARTIFACT_ROOT = REPOSITORY_ROOT / ".private" / "stage2c_plan_items_qualification"
 ATTEMPTS_PATH = ARTIFACT_ROOT / "attempts.jsonl"
 REQUESTS_PATH = ARTIFACT_ROOT / "requests.jsonl"
 LEDGER_PATH = ARTIFACT_ROOT / "cost_ledger.jsonl"
@@ -57,7 +62,7 @@ RESULTS_PATH = ARTIFACT_ROOT / "qualification_results.json"
 PREFLIGHTS_PATH = ARTIFACT_ROOT / "verified_preflights.json"
 EXPECTED_BRANCH = "development"
 EXPECTED_MODELS = {"flash": "deepseek-v4-flash", "pro": "deepseek-v4-pro"}
-EXPERIMENT_REVISION = 15
+EXPERIMENT_REVISION = 16
 SOURCE_PREFIX_STAGES = (
     "stage2_semantic_2a_route_1",
     "stage2_semantic_2a_route_2",
@@ -65,6 +70,8 @@ SOURCE_PREFIX_STAGES = (
     "stage2_semantic_2b",
 )
 CURRENT_CHECKPOINT_STAGES = (
+    "stage2_semantic_2c_p1",
+    "stage2_semantic_2c_p2",
     "stage2_semantic_2c_p",
     "stage2_semantic_2c_r1",
     "stage2_semantic_2c_r2",
@@ -97,7 +104,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         raise ExperimentSafetyError("decomposed Stage 2C branch changed")
     if manifest.get("development_baseline_sha") != "a2f76a33649b0a87c84ea22b5e4f14359c80cca3":
         raise ExperimentSafetyError("development baseline changed")
-    if manifest.get("prompt_revision") != STAGE2C_DECOMPOSED_PROMPT_REVISION or manifest.get("schema_revision") != STAGE2C_DECOMPOSED_SCHEMA_REVISION:
+    if manifest.get("prompt_revision") != STAGE2C_PLAN_ITEMS_PROMPT_REVISION or manifest.get("schema_revision") != STAGE2C_PLAN_ITEMS_SCHEMA_REVISION:
         raise ExperimentSafetyError("decomposed Stage 2C prompt or schema revision differs from code")
     if manifest.get("transport") != "deepseek_direct" or manifest.get("provider_fallbacks") is not False:
         raise ExperimentSafetyError("qualification requires direct DeepSeek with no fallback")
@@ -132,6 +139,17 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     }
     if source.get("accepted_compiled_stage2") != expected_compiled:
         raise ExperimentSafetyError("accepted Stage 2A/2B fingerprints changed")
+    if manifest.get("source_stage2c_revision15") != {
+        "git_sha": "f723042780f77a5c85ccbb615d80791978f207cf",
+        "manifest_fingerprint": "8b0cbfe7a3ef1176eb669b64aa6b806e24f7b78feae341a7a8dfa2d521070324",
+        "results_sha256": "089e5da9edd1fa3d302f0245ab2a672e118f2755e9c128792d762b22fb7b036f",
+        "ledger_sha256": "16268bcfaa8693fbe91317efbba7c5af5310a4f1f708fd089539f9b6f67b2b5b",
+        "settled_cost_usd": "0.01158109",
+        "cumulative_stage2_cost_usd": "0.07213454",
+        "status": "completed_with_failures",
+        "stage_3_requests": 0,
+    }:
+        raise ExperimentSafetyError("Revision 15 baseline provenance changed")
     expected_limits = {
         "initial_attempts_per_substage_per_model": 3,
         "delta_repairs_per_parsed_candidate": 2,
@@ -143,15 +161,15 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     if manifest.get("limits") != expected_limits:
         raise ExperimentSafetyError("Stage 2C output or retry limits changed")
     if manifest.get("reasoning") != {
-        "stage_2c_plan": "high",
+        "stage_2c_plan_items": "high",
         "stage_2c_realizations": "disabled",
         "syntax_repair": "disabled",
         "delta_repair": "disabled",
     }:
         raise ExperimentSafetyError("Stage 2C reasoning policy changed")
     if manifest.get("budget") != {
-        "namespace": "stage2c_decomposed_qualification",
-        "carry_in_stage2_cost_usd": "0.06055345",
+        "namespace": "stage2c_plan_items_qualification",
+        "carry_in_stage2_cost_usd": "0.07213454",
         "cumulative_soft_stop_usd": "8.50",
         "cumulative_hard_stop_usd": "9.50",
         "uncertainty_reserve_usd": "0.50",
@@ -159,6 +177,44 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         raise ExperimentSafetyError("decomposed Stage 2C budget policy changed")
     if manifest.get("stop_boundary") != "stage3_private_overlays":
         raise ExperimentSafetyError("Stage 3 stop boundary changed")
+
+
+def verify_revision15_baseline(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Prove the observed Revision 15 failures before starting a new ledger."""
+
+    source = manifest["source_stage2c_revision15"]
+    results_path = REVISION15_ROOT / "qualification_results.json"
+    ledger_path = REVISION15_ROOT / "cost_ledger.jsonl"
+    if _file_fingerprint(results_path) != source["results_sha256"]:
+        raise ExperimentSafetyError("Revision 15 result artifact fingerprint mismatched")
+    if _file_fingerprint(ledger_path) != source["ledger_sha256"]:
+        raise ExperimentSafetyError("Revision 15 ledger fingerprint mismatched")
+    results = _load_json(results_path, label="Revision 15 qualification results")
+    if (
+        results.get("schema_version") != 1
+        or results.get("experiment_revision") != 15
+        or results.get("git_sha") != source["git_sha"]
+        or results.get("manifest_fingerprint") != source["manifest_fingerprint"]
+        or results.get("status") != source["status"]
+        or results.get("stage_3_requests") != source["stage_3_requests"]
+        or results.get("cumulative_stage2_estimated_cost_usd")
+        != source["cumulative_stage2_cost_usd"]
+        or not isinstance(results.get("budget"), dict)
+        or results["budget"].get("settled_usd") != source["settled_cost_usd"]
+        or results["budget"].get("open_reservations") != 0
+    ):
+        raise ExperimentSafetyError("Revision 15 result disposition mismatched")
+    dispositions = {
+        str(row.get("model_key")): (row.get("status"), row.get("failure_code"))
+        for row in results.get("model_results", [])
+        if isinstance(row, dict)
+    }
+    if dispositions != {
+        "flash": ("failed", "semantic_validation_failed"),
+        "pro": ("failed", "output_truncated"),
+    }:
+        raise ExperimentSafetyError("Revision 15 model failures were reinterpreted")
+    return results
 
 
 def qualification_git_identity(*, require_clean: bool) -> tuple[str, str]:
@@ -242,12 +298,18 @@ def verify_historical_prefix(
 
 def _reasoning_map() -> dict[str, str | None]:
     result: dict[str, str | None] = {
-        "stage2_semantic_2c_p": "high",
+        "stage2_semantic_2c_p1": "high",
+        "stage2_semantic_2c_p2": "high",
         "stage2_semantic_2c_r1": None,
         "stage2_semantic_2c_r2": None,
         "stage2c_exact_model_preflight": None,
     }
-    for role in ("stage2_semantic_2c_p", "stage2_semantic_2c_r1", "stage2_semantic_2c_r2"):
+    for role in (
+        "stage2_semantic_2c_p1",
+        "stage2_semantic_2c_p2",
+        "stage2_semantic_2c_r1",
+        "stage2_semantic_2c_r2",
+    ):
         result[f"{role}_syntax_repair"] = None
         result[f"{role}_delta_repair"] = None
     return result
@@ -257,12 +319,17 @@ def _client(
     *, api_key: str, model: str, observer: DeepSeekRequestObserver, reasoning: str | None
 ) -> LLMClient:
     if reasoning == "high":
-        limits = {"stage2_semantic_2c_p": STAGE2C_PLAN_MAX_TOKENS}
+        limits = {
+            "stage2_semantic_2c_p1": STAGE2C_PLAN_MAX_TOKENS,
+            "stage2_semantic_2c_p2": STAGE2C_PLAN_MAX_TOKENS,
+        }
         max_tokens = STAGE2C_PLAN_MAX_TOKENS
     else:
         limits = {
-            "stage2_semantic_2c_p_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
-            "stage2_semantic_2c_p_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
+            "stage2_semantic_2c_p1_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
+            "stage2_semantic_2c_p1_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
+            "stage2_semantic_2c_p2_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
+            "stage2_semantic_2c_p2_delta_repair": STAGE2_DELTA_REPAIR_MAX_TOKENS,
             "stage2_semantic_2c_r1": STAGE2C_REALIZATION_MAX_TOKENS,
             "stage2_semantic_2c_r2": STAGE2C_REALIZATION_MAX_TOKENS,
             "stage2_semantic_2c_r1_syntax_repair": STAGE2_SYNTAX_REPAIR_MAX_TOKENS,
@@ -305,8 +372,8 @@ def _load_current_records(
         "git_sha": git_sha,
         "model_key": model_key,
         "model": EXPECTED_MODELS[model_key],
-        "prompt_revision": STAGE2C_DECOMPOSED_PROMPT_REVISION,
-        "schema_revision": STAGE2C_DECOMPOSED_SCHEMA_REVISION,
+        "prompt_revision": STAGE2C_PLAN_ITEMS_PROMPT_REVISION,
+        "schema_revision": STAGE2C_PLAN_ITEMS_SCHEMA_REVISION,
         "source_stage2_git_sha": manifest["source_stage2"]["git_sha"],
         "source_stage2_manifest_fingerprint": manifest["source_stage2"]["manifest_fingerprint"],
         "source_stage1_fingerprints": manifest["accepted_stage1"][model_key],
@@ -356,7 +423,7 @@ def _run_request_records(*, model_key: str, git_sha: str) -> list[dict[str, Any]
                 raise ValueError("request record is not an object")
             if (
                 value.get("git_sha") == git_sha
-                and value.get("run_id") == f"stage2c-decomposed-{model_key}"
+                and value.get("run_id") == f"stage2c-plan-items-{model_key}"
             ):
                 records.append(value)
     except (OSError, json.JSONDecodeError, ValueError) as error:
@@ -387,7 +454,8 @@ def _validate_pass_request_evidence(
 ) -> None:
     records = _run_request_records(model_key=model_key, git_sha=git_sha)
     required_roles = {
-        "stage2_semantic_2c_p",
+        "stage2_semantic_2c_p1",
+        "stage2_semantic_2c_p2",
         "stage2_semantic_2c_r1",
         "stage2_semantic_2c_r2",
     }
@@ -490,6 +558,11 @@ def _validate_terminal_result(
         artifact = DecomposedStage2CandidateArtifact.model_validate(
             accepted["stage_2_artifact"]
         )
+        p1 = Stage2CP1Candidate.model_validate(accepted["stage_2c_p1"])
+        p2 = Stage2CP2Candidate.model_validate(accepted["stage_2c_p2"])
+        plan = Stage2CPlanCandidate.model_validate(accepted["stage_2c_plan"])
+        if assemble_stage2c_plan_candidate(p1, p2) != plan:
+            raise ValueError("accepted P1/P2 do not assemble the accepted plan")
     except (KeyError, TypeError, ValueError) as error:
         raise ExperimentSafetyError(f"accepted {model_key} artifact is malformed") from error
     artifact_payload = artifact.model_dump(mode="json")
@@ -499,6 +572,10 @@ def _validate_terminal_result(
         raise ExperimentSafetyError(f"accepted {model_key} artifact fingerprint mismatched")
     if (
         row.get("accepted_stage_2_artifact_fingerprint") != artifact.artifact_fingerprint
+        or row.get("stage_2c_p1_fingerprint")
+        != content_fingerprint(accepted.get("stage_2c_p1"))
+        or row.get("stage_2c_p2_fingerprint")
+        != content_fingerprint(accepted.get("stage_2c_p2"))
         or row.get("compiled_stage_2c_fingerprint")
         != content_fingerprint(artifact.compiled_stage_2c.model_dump(mode="json"))
         or row.get("stage_2c_plan_fingerprint")
@@ -566,7 +643,7 @@ async def _preflight(
         context=RunContext(
             experiment_revision=EXPERIMENT_REVISION,
             git_sha=git_sha,
-            run_id=f"stage2c-preflight-{model_key}",
+            run_id=f"stage2c-plan-items-preflight-{model_key}",
             phase="stage2c_exact_commit_preflight",
             pair_id="Q2C",
             case_fingerprint="preflight",
@@ -612,8 +689,8 @@ async def _run_model(
         context=RunContext(
             experiment_revision=EXPERIMENT_REVISION,
             git_sha=git_sha,
-            run_id=f"stage2c-decomposed-{model_key}",
-            phase="stage2c_decomposed_qualification",
+            run_id=f"stage2c-plan-items-{model_key}",
+            phase="stage2c_plan_items_qualification",
             pair_id="Q2C",
             case_fingerprint=str(manifest["accepted_stage1"][model_key]["compiled_stage_1_fingerprint"]),
         ),
@@ -631,7 +708,8 @@ async def _run_model(
     )
     diagnostics: list[dict[str, object]] = []
     initial_roles = (
-        "stage2_semantic_2c_p",
+        "stage2_semantic_2c_p1",
+        "stage2_semantic_2c_p2",
         "stage2_semantic_2c_r1",
         "stage2_semantic_2c_r2",
     )
@@ -640,7 +718,24 @@ async def _run_model(
     if any(str(row.get("task_role", "")) not in allowed_request_roles for row in prior_requests):
         raise ExperimentSafetyError(f"{model_key} has an undeclared Stage 2C request role")
     accepted_stage_names = {str(row.get("stage", "")) for row in current_records}
-    next_stage_index = min(len(current_records), 3)
+    next_stage_index = next(
+        (
+            index
+            for index, role in enumerate(initial_roles)
+            if role not in accepted_stage_names
+        ),
+        len(initial_roles),
+    )
+    if (
+        "stage2_semantic_2c_p" not in accepted_stage_names
+        and any(
+            row.get("task_role") in {"stage2_semantic_2c_r1", "stage2_semantic_2c_r2"}
+            for row in prior_requests
+        )
+    ):
+        raise ExperimentSafetyError(
+            f"{model_key} realization request lacks an assembled plan checkpoint"
+        )
     for later_role in initial_roles[next_stage_index + 1 :]:
         if any(row.get("task_role") == later_role for row in prior_requests):
             raise ExperimentSafetyError(f"{model_key} request history skipped a Stage 2C checkpoint")
@@ -713,8 +808,8 @@ async def _run_model(
                 "git_sha": git_sha,
                 "model_key": model_key,
                 "model": model,
-                "prompt_revision": STAGE2C_DECOMPOSED_PROMPT_REVISION,
-                "schema_revision": STAGE2C_DECOMPOSED_SCHEMA_REVISION,
+                "prompt_revision": STAGE2C_PLAN_ITEMS_PROMPT_REVISION,
+                "schema_revision": STAGE2C_PLAN_ITEMS_SCHEMA_REVISION,
                 "source_stage2_git_sha": manifest["source_stage2"]["git_sha"],
                 "source_stage2_manifest_fingerprint": manifest["source_stage2"]["manifest_fingerprint"],
                 "source_stage1_fingerprints": manifest["accepted_stage1"][model_key],
@@ -736,6 +831,7 @@ async def _run_model(
             repair_llm=realization_client,
             stage2c_realization_llm=realization_client,
             decomposed_stage2c=True,
+            decomposed_stage2c_plan_items=True,
             core=core,
             character_ids=character_ids,
             location=location,
@@ -768,6 +864,15 @@ async def _run_model(
     request_roles = set(request_metrics["request_roles"])
     if any("stage3" in role or "overlay" in role for role in request_roles):
         raise ExperimentSafetyError("Stage 3 provider activity crossed the stop boundary")
+    accepted_by_stage = {
+        str(record["stage"]): record for record in current_records
+    }
+    p1_document = accepted_by_stage["stage2_semantic_2c_p1"][
+        "model_authored_document"
+    ]
+    p2_document = accepted_by_stage["stage2_semantic_2c_p2"][
+        "model_authored_document"
+    ]
     private_document = {
         "schema_version": 1,
         "experiment_revision": EXPERIMENT_REVISION,
@@ -775,6 +880,8 @@ async def _run_model(
         "model_key": model_key,
         "model": model,
         "source_provenance": provenance,
+        "stage_2c_p1": p1_document,
+        "stage_2c_p2": p2_document,
         "stage_2c_plan": boundary.stage_2c_plan.model_dump(mode="json"),
         "stage_2c_r1": boundary.stage_2c_r1.model_dump(mode="json"),
         "stage_2c_r2": boundary.stage_2c_r2.model_dump(mode="json"),
@@ -790,6 +897,8 @@ async def _run_model(
         "started_at": started_at,
         "completed_at": datetime.now(UTC).isoformat(),
         **provenance,
+        "stage_2c_p1_fingerprint": content_fingerprint(p1_document),
+        "stage_2c_p2_fingerprint": content_fingerprint(p2_document),
         "stage_2c_plan_fingerprint": content_fingerprint(boundary.stage_2c_plan.model_dump(mode="json")),
         "stage_2c_r1_fingerprint": content_fingerprint(boundary.stage_2c_r1.model_dump(mode="json")),
         "stage_2c_r2_fingerprint": content_fingerprint(boundary.stage_2c_r2.model_dump(mode="json")),
@@ -805,6 +914,7 @@ async def _run_model(
 
 async def run_paid_qualification(manifest: Mapping[str, Any]) -> dict[str, Any]:
     branch, git_sha = qualification_git_identity(require_clean=True)
+    verify_revision15_baseline(manifest)
     verified = {key: verify_historical_prefix(manifest, key)[1] for key in manifest["model_order"]}
     historical_flash = REPOSITORY_ROOT / str(manifest["historical_flash_artifact"])
     historical_flash_sha256 = _file_fingerprint(historical_flash)
@@ -927,6 +1037,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     manifest = load_manifest()
     validate_manifest(manifest)
+    revision15 = verify_revision15_baseline(manifest)
     verified = {key: verify_historical_prefix(manifest, key)[1] for key in manifest["model_order"]}
     branch, git_sha = qualification_git_identity(require_clean=args.execute)
     if not args.execute:
@@ -936,6 +1047,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "git_sha": git_sha,
             "manifest": str(MANIFEST_PATH.relative_to(REPOSITORY_ROOT)),
             "verified_source_provenance": verified,
+            "revision15_results_sha256": manifest["source_stage2c_revision15"]["results_sha256"],
+            "revision15_status": revision15["status"],
             "policy_fingerprint": content_fingerprint(QUALIFICATION_POLICY.model_dump(mode="json")),
             "paid_calls_made": 0,
         }, indent=2, sort_keys=True))

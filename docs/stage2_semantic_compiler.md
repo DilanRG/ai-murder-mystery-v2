@@ -54,7 +54,9 @@ Independence is mechanical. For every route the engine constructs critical nodes
 
 ## Stage 2C — truthful misdirection
 
-Revision 15 decomposes this phase. Stage 2C-P uses high reasoning to propose two compact semantic plans: innocent suspect, secondary-secret seed, secondary-event meaning, apparent murder relevance and accusation axes, innocent explanation, intended suspicious and resolution channels, and the reason the plans are materially distinct. The host validates and fingerprints that plan before realization.
+Revision 15 first decomposed this phase into a compact high-reasoning plan plus two reasoning-disabled realizations. Its paid result showed that the two-item plan was still too coupled: five of six initial model attempts truncated at the fixed 2,600-token cap, and the one parsed Flash plan did not pass the unchanged semantic gate.
+
+Revision 16 splits only that planning boundary. Stage 2C-P1 proposes one compact plan item with the immutable Stage 2A, Stage 2B, discovery-catalogue, and secondary-secret fingerprints. Stage 2C-P2 proposes only the second item and binds the exact accepted P1 fingerprint; it cannot restate P1 or upstream fields. Both retain high reasoning and the same bounded output/repair policy. The host then reconstructs the existing two-item `Stage2CPlanCandidate` and runs the unchanged combined-plan validator before any realization.
 
 Stage 2C-R1 and Stage 2C-R2 use reasoning-disabled calls to realize one accepted plan item at a time. Each supplies the suspicious trace, causal origin, event detail, offered discovery and resolution affordances, misleading interpretation, exact accepted innocent explanation, contradiction hook, and post-resolution inference. R2 binds both the plan fingerprint and exact accepted R1 fingerprint.
 

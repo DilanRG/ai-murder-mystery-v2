@@ -1,9 +1,15 @@
 # Stage 2C Decomposition Failure Taxonomy
 
 **Date:** 2026-07-23
-**Scope:** Revision 15 decomposed Stage 2C qualification only.
+**Scope:** Revision 15 baseline and Revision 16 plan-item decomposition.
 
 This taxonomy preserves Revision 14 as the immutable baseline. Flash completed the old monolithic Stage 2C contract. Pro made three valid provider calls, but each exhausted the fixed 4,000-token completion allowance before returning a complete candidate. Those Pro attempts are output-budget failures, not semantic-validator rejections.
+
+## Revision 15 observed result
+
+Revision 15 made eight measured semantic requests plus two exact-model preflights at exact commit `f723042780f77a5c85ccbb615d80791978f207cf`. Flash's first two combined-plan attempts stopped at the 2,600-token cap. Its third parsed but failed the unchanged semantic validator; one repair remained invalid and one was unauthorized. Pro's three combined-plan attempts all stopped at the same cap. Neither model reached R1 or R2. New estimated cost was USD 0.01158109, cumulative Stage 2 cost was USD 0.07213454, the ledger had zero open reservations, and Stage 3 request count was zero. The private result and ledger fingerprints are frozen in the Revision 16 manifest.
+
+This is observed evidence that even the two-item planning response still couples too much high-reasoning work. Revision 16 therefore splits only P: P1 proposes one item with upstream bindings; P2 proposes only the second item and binds the exact accepted P1 fingerprint. The host assembles the existing two-item `Stage2CPlanCandidate` and runs its unchanged combined validator. R1, R2, the whole-Stage-2 validator, and the Stage-3-readiness gate remain unchanged.
 
 ## Baseline failure classes
 
@@ -27,9 +33,10 @@ Both accepted Stage 1 artifacts expose one secondary-secret seed. Stage 2C-P may
 
 ## Phase ownership and repair
 
-- Stage 2C-P owns suspect, seed, event meaning, apparent murder relevance, innocent explanation, intended channels, and distinctiveness.
+- Stage 2C-P1 owns the first item's suspect, seed, event meaning, apparent murder relevance, innocent explanation, intended channels, and distinctiveness.
+- Stage 2C-P2 owns the same fields for the second item, binds exact P1, and must satisfy the pairwise independence rules. It cannot restate P1 or upstream fingerprints.
 - Stage 2C-R1 owns the first concrete suspicious trace and its independent resolution.
 - Stage 2C-R2 owns the second realization and must bind the exact accepted R1 fingerprint.
 - The host owns exact canonical structure and runs the complete Stage 2C, assembled Stage 2, and Stage-3-readiness validators.
 
-A downstream delta may not compensate for an upstream defect. Changing P invalidates R1, R2, and assembly. Changing R1 invalidates R2 and assembly. No partial phase is a complete Stage 2 result.
+A downstream delta may not compensate for an upstream defect. Changing P1 invalidates P2, R1, R2, and assembly; changing P2 invalidates R1, R2, and assembly. Changing R1 invalidates R2 and assembly. No partial phase is a complete Stage 2 result.

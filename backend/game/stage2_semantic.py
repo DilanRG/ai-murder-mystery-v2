@@ -48,6 +48,8 @@ STAGE2_PROMPT_REVISION = "stage2-semantic-v3"
 STAGE2_SCHEMA_REVISION = "stage2-semantic-schema-v2"
 STAGE2C_DECOMPOSED_PROMPT_REVISION = "stage2c-decomposed-v1"
 STAGE2C_DECOMPOSED_SCHEMA_REVISION = "stage2c-decomposed-schema-v1"
+STAGE2C_PLAN_ITEMS_PROMPT_REVISION = "stage2c-plan-items-v1"
+STAGE2C_PLAN_ITEMS_SCHEMA_REVISION = "stage2c-plan-items-schema-v1"
 STAGE2A_MAX_TOKENS = 5_000
 STAGE2B_MAX_TOKENS = 7_000
 STAGE2C_MAX_TOKENS = 4_000
@@ -419,6 +421,25 @@ class Stage2CPlanCandidate(FrozenModel):
     discovery_affordance_catalogue_fingerprint: str = Field(min_length=64, max_length=64)
     secondary_secret_catalogue_fingerprint: str = Field(min_length=64, max_length=64)
     plans: tuple[Stage2CPlanItem, Stage2CPlanItem]
+
+
+class Stage2CP1Candidate(FrozenModel):
+    """The first compact red-herring plan with immutable upstream bindings."""
+
+    schema_version: Literal[1] = 1
+    compiled_stage_2a_fingerprint: str = Field(min_length=64, max_length=64)
+    compiled_stage_2b_fingerprint: str = Field(min_length=64, max_length=64)
+    discovery_affordance_catalogue_fingerprint: str = Field(min_length=64, max_length=64)
+    secondary_secret_catalogue_fingerprint: str = Field(min_length=64, max_length=64)
+    plan: Stage2CPlanItem
+
+
+class Stage2CP2Candidate(FrozenModel):
+    """The second compact plan bound to, but unable to rewrite, accepted P1."""
+
+    schema_version: Literal[1] = 1
+    accepted_p1_fingerprint: str = Field(min_length=64, max_length=64)
+    plan: Stage2CPlanItem
 
 
 class Stage2CRealizationCandidate(FrozenModel):
@@ -1725,6 +1746,86 @@ def compile_stage2b_candidate(
     )
 
 
+def _validate_stage2c_plan_item(
+    item: Stage2CPlanItem,
+    *,
+    path: str,
+    issues: list[Stage2Issue],
+    stage_2a: CompiledStage2A,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+    secondary_catalogue: SecondarySecretCatalogue,
+    core: GeneratedCrimeTimelineStage,
+) -> None:
+    responsible = core.murder.responsible_actor_id or core.murder.murderer_id
+    innocent_aliases = {
+        alias
+        for alias, actor_id in discovery_catalogue.actor_aliases.items()
+        if actor_id not in {responsible, core.murder.victim_id}
+    }
+    true_fact_ids = {
+        fact_id
+        for role in stage_2a.roles.values()
+        for fact_id in role.canonical_fact_ids
+    }
+    support = secondary_catalogue.entries.get(item.secondary_secret_alias)
+    if item.suspect_ref not in innocent_aliases:
+        _issue(
+            issues,
+            "red_herring_targets_non_innocent",
+            f"{path}/suspect_ref",
+            "A red-herring plan may target only a living innocent actor.",
+            f"{path}/suspect_ref",
+        )
+    if support is None:
+        _issue(
+            issues,
+            "unknown_secondary_secret_alias",
+            f"{path}/secondary_secret_alias",
+            "The selected secondary-secret seed is not in the accepted catalogue.",
+            f"{path}/secondary_secret_alias",
+        )
+    elif support.canonical_fact_id in true_fact_ids:
+        _issue(
+            issues,
+            "red_herring_contaminates_true_route",
+            f"{path}/secondary_secret_alias",
+            "A red-herring seed cannot also support an accepted true route.",
+            f"{path}/secondary_secret_alias",
+        )
+    for field_name, channel in (
+        ("suspicious_evidence_channel", item.suspicious_evidence_channel),
+        ("resolution_evidence_channel", item.resolution_evidence_channel),
+    ):
+        if not any(
+            channel in affordance.compatible_channels
+            for affordance in discovery_catalogue.affordances.values()
+        ):
+            _issue(
+                issues,
+                "unrealizable_red_herring_channel",
+                f"{path}/{field_name}",
+                "No accepted discovery affordance can realize this evidence channel.",
+                f"{path}/{field_name}",
+            )
+    protected_text = " ".join(
+        (
+            item.secondary_event_summary,
+            item.appears_murder_related,
+            item.innocent_explanation,
+        )
+    ).casefold()
+    if "responsible_actor" in protected_text or "victim" in protected_text:
+        _issue(
+            issues,
+            "red_herring_plan_references_protected_actor",
+            path,
+            "The plan may not recruit the murderer or victim into its secondary event.",
+            f"{path}/secondary_event_summary",
+            f"{path}/appears_murder_related",
+            f"{path}/innocent_explanation",
+        )
+
+
 def validate_stage2c_plan_candidate(
     candidate: Stage2CPlanCandidate,
     *,
@@ -1763,29 +1864,18 @@ def validate_stage2c_plan_candidate(
         if actual != wanted:
             _issue(issues, code, path, "Stage 2C-P changed or lost an immutable binding.")
 
-    responsible = core.murder.responsible_actor_id or core.murder.murderer_id
-    innocent_aliases = {
-        alias
-        for alias, actor_id in discovery_catalogue.actor_aliases.items()
-        if actor_id not in {responsible, core.murder.victim_id}
-    }
-    true_fact_ids = {
-        fact_id
-        for role in stage_2a.roles.values()
-        for fact_id in role.canonical_fact_ids
-    }
     seen_suspects: set[str] = set()
     for index, item in enumerate(candidate.plans):
         path = f"/plans/{index}"
-        support = secondary_catalogue.entries.get(item.secondary_secret_alias)
-        if item.suspect_ref not in innocent_aliases:
-            _issue(
-                issues,
-                "red_herring_targets_non_innocent",
-                f"{path}/suspect_ref",
-                "A red-herring plan may target only a living innocent actor.",
-                f"{path}/suspect_ref",
-            )
+        _validate_stage2c_plan_item(
+            item,
+            path=path,
+            issues=issues,
+            stage_2a=stage_2a,
+            discovery_catalogue=discovery_catalogue,
+            secondary_catalogue=secondary_catalogue,
+            core=core,
+        )
         if item.suspect_ref in seen_suspects:
             _issue(
                 issues,
@@ -1795,54 +1885,6 @@ def validate_stage2c_plan_candidate(
                 f"{path}/suspect_ref",
             )
         seen_suspects.add(item.suspect_ref)
-        if support is None:
-            _issue(
-                issues,
-                "unknown_secondary_secret_alias",
-                f"{path}/secondary_secret_alias",
-                "The selected secondary-secret seed is not in the accepted catalogue.",
-                f"{path}/secondary_secret_alias",
-            )
-        elif support.canonical_fact_id in true_fact_ids:
-            _issue(
-                issues,
-                "red_herring_contaminates_true_route",
-                f"{path}/secondary_secret_alias",
-                "A red-herring seed cannot also support an accepted true route.",
-                f"{path}/secondary_secret_alias",
-            )
-        for field_name, channel in (
-            ("suspicious_evidence_channel", item.suspicious_evidence_channel),
-            ("resolution_evidence_channel", item.resolution_evidence_channel),
-        ):
-            if not any(
-                channel in affordance.compatible_channels
-                for affordance in discovery_catalogue.affordances.values()
-            ):
-                _issue(
-                    issues,
-                    "unrealizable_red_herring_channel",
-                    f"{path}/{field_name}",
-                    "No accepted discovery affordance can realize this evidence channel.",
-                    f"{path}/{field_name}",
-                )
-        protected_text = " ".join(
-            (
-                item.secondary_event_summary,
-                item.appears_murder_related,
-                item.innocent_explanation,
-            )
-        ).casefold()
-        if "responsible_actor" in protected_text or "victim" in protected_text:
-            _issue(
-                issues,
-                "red_herring_plan_references_protected_actor",
-                path,
-                "The plan may not recruit the murderer or victim into its secondary event.",
-                f"{path}/secondary_event_summary",
-                f"{path}/appears_murder_related",
-                f"{path}/innocent_explanation",
-            )
 
     left, right = candidate.plans
     if left.suspicious_evidence_channel == right.suspicious_evidence_channel:
@@ -1869,6 +1911,122 @@ def validate_stage2c_plan_candidate(
             "/plans/1/distinctiveness",
         )
     return Stage2ValidationReport(phase="stage_2c_plan", issues=tuple(issues))
+
+
+def assemble_stage2c_plan_candidate(
+    p1: Stage2CP1Candidate,
+    p2: Stage2CP2Candidate,
+) -> Stage2CPlanCandidate:
+    """Assemble immutable P1/P2 deltas into the existing accepted plan shape."""
+
+    if p2.accepted_p1_fingerprint != content_fingerprint(p1.model_dump(mode="json")):
+        raise Stage2SemanticError(
+            "Stage 2C-P2 is not bound to the accepted P1 delta",
+            code="stage_2c_p2_stale_p1",
+        )
+    return Stage2CPlanCandidate(
+        compiled_stage_2a_fingerprint=p1.compiled_stage_2a_fingerprint,
+        compiled_stage_2b_fingerprint=p1.compiled_stage_2b_fingerprint,
+        discovery_affordance_catalogue_fingerprint=(
+            p1.discovery_affordance_catalogue_fingerprint
+        ),
+        secondary_secret_catalogue_fingerprint=(
+            p1.secondary_secret_catalogue_fingerprint
+        ),
+        plans=(p1.plan, p2.plan),
+    )
+
+
+def validate_stage2c_p1_candidate(
+    candidate: Stage2CP1Candidate,
+    *,
+    stage_2a: CompiledStage2A,
+    stage_2b: CompiledStage2B,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+    secondary_catalogue: SecondarySecretCatalogue,
+    core: GeneratedCrimeTimelineStage,
+) -> Stage2ValidationReport:
+    issues: list[Stage2Issue] = []
+    expected = (
+        ("/compiled_stage_2a_fingerprint", candidate.compiled_stage_2a_fingerprint, compiled_stage2a_fingerprint(stage_2a), "stage_2c_plan_rewrites_true_routes"),
+        ("/compiled_stage_2b_fingerprint", candidate.compiled_stage_2b_fingerprint, compiled_stage2b_fingerprint(stage_2b), "stage_2c_plan_rewrites_true_evidence"),
+        ("/discovery_affordance_catalogue_fingerprint", candidate.discovery_affordance_catalogue_fingerprint, discovery_affordance_catalogue_fingerprint(discovery_catalogue), "stale_discovery_affordance_catalogue"),
+        ("/secondary_secret_catalogue_fingerprint", candidate.secondary_secret_catalogue_fingerprint, secondary_secret_catalogue_fingerprint(secondary_catalogue), "stale_secondary_secret_catalogue"),
+    )
+    for path, actual, wanted, code in expected:
+        if actual != wanted:
+            _issue(issues, code, path, "Stage 2C-P1 changed or lost an immutable binding.")
+    _validate_stage2c_plan_item(
+        candidate.plan,
+        path="/plan",
+        issues=issues,
+        stage_2a=stage_2a,
+        discovery_catalogue=discovery_catalogue,
+        secondary_catalogue=secondary_catalogue,
+        core=core,
+    )
+    return Stage2ValidationReport(phase="stage_2c_plan", issues=tuple(issues))
+
+
+def validate_stage2c_p2_candidate(
+    candidate: Stage2CP2Candidate,
+    *,
+    accepted_p1: Stage2CP1Candidate,
+    stage_2a: CompiledStage2A,
+    stage_2b: CompiledStage2B,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+    secondary_catalogue: SecondarySecretCatalogue,
+    core: GeneratedCrimeTimelineStage,
+) -> Stage2ValidationReport:
+    issues: list[Stage2Issue] = []
+    if candidate.accepted_p1_fingerprint != content_fingerprint(
+        accepted_p1.model_dump(mode="json")
+    ):
+        _issue(
+            issues,
+            "stale_stage_2c_p1",
+            "/accepted_p1_fingerprint",
+            "P2 must bind the exact accepted P1 delta.",
+        )
+        return Stage2ValidationReport(phase="stage_2c_plan", issues=tuple(issues))
+    combined = assemble_stage2c_plan_candidate(accepted_p1, candidate)
+    combined_report = validate_stage2c_plan_candidate(
+        combined,
+        stage_2a=stage_2a,
+        stage_2b=stage_2b,
+        discovery_catalogue=discovery_catalogue,
+        secondary_catalogue=secondary_catalogue,
+        core=core,
+    )
+    translated: list[Stage2Issue] = []
+    for issue in combined_report.issues:
+        if issue.path.startswith("/plans/0"):
+            raise Stage2SemanticError(
+                "accepted Stage 2C-P1 failed during P2 validation",
+                code="checkpoint_invalid",
+                issues=(issue,),
+            )
+
+        def p2_path(path: str) -> str:
+            if path == "/plans":
+                return "/plan"
+            if path.startswith("/plans/1"):
+                return "/plan" + path[len("/plans/1") :]
+            return path
+
+        translated.append(
+            issue.model_copy(
+                update={
+                    "path": p2_path(issue.path),
+                    "allowed_paths": tuple(
+                        p2_path(path)
+                        for path in issue.allowed_paths
+                        if not path.startswith("/plans/0")
+                    ),
+                }
+            )
+        )
+    return Stage2ValidationReport(phase="stage_2c_plan", issues=tuple(translated))
 
 
 def validate_stage2c_realization_candidate(
@@ -3293,6 +3451,43 @@ def stage2c_plan_valid_example(
     )
 
 
+def stage2c_plan_item_valid_example(
+    *,
+    stage_2a: CompiledStage2A,
+    stage_2b: CompiledStage2B,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+    secondary_catalogue: SecondarySecretCatalogue,
+    plan_index: Literal[1, 2],
+    accepted_p1: Stage2CP1Candidate | None = None,
+) -> Stage2CP1Candidate | Stage2CP2Candidate:
+    combined = stage2c_plan_valid_example(
+        stage_2a=stage_2a,
+        stage_2b=stage_2b,
+        discovery_catalogue=discovery_catalogue,
+        secondary_catalogue=secondary_catalogue,
+    )
+    if plan_index == 1:
+        return Stage2CP1Candidate(
+            compiled_stage_2a_fingerprint=combined.compiled_stage_2a_fingerprint,
+            compiled_stage_2b_fingerprint=combined.compiled_stage_2b_fingerprint,
+            discovery_affordance_catalogue_fingerprint=(
+                combined.discovery_affordance_catalogue_fingerprint
+            ),
+            secondary_secret_catalogue_fingerprint=(
+                combined.secondary_secret_catalogue_fingerprint
+            ),
+            plan=combined.plans[0],
+        )
+    if accepted_p1 is None:
+        raise ValueError("Stage 2C-P2 example requires accepted P1")
+    return Stage2CP2Candidate(
+        accepted_p1_fingerprint=content_fingerprint(
+            accepted_p1.model_dump(mode="json")
+        ),
+        plan=combined.plans[1],
+    )
+
+
 def stage2c_realization_valid_example(
     *,
     plan: Stage2CPlanCandidate,
@@ -3670,6 +3865,100 @@ def build_stage2c_plan_messages(
             secondary_catalogue=secondary_catalogue,
         ).model_dump(mode="json"),
         prompt_revision=STAGE2C_DECOMPOSED_PROMPT_REVISION,
+    )
+
+
+def build_stage2c_plan_item_messages(
+    *,
+    stage_2a: CompiledStage2A,
+    stage_2b: CompiledStage2B,
+    discovery_catalogue: DiscoveryAffordanceCatalogue,
+    secondary_catalogue: SecondarySecretCatalogue,
+    plan_index: Literal[1, 2],
+    accepted_p1: Stage2CP1Candidate | None = None,
+) -> tuple[LLMMessage, LLMMessage]:
+    if plan_index == 2 and accepted_p1 is None:
+        raise ValueError("Stage 2C-P2 prompt requires accepted P1")
+    responsible = stage_2a.responsible_actor_id
+    innocent_actor_refs = sorted(
+        alias
+        for alias, actor_id in discovery_catalogue.actor_aliases.items()
+        if actor_id not in {responsible}
+        and alias != "victim"
+    )
+    channel_counts = {
+        channel.value: sum(
+            channel in affordance.compatible_channels
+            for affordance in discovery_catalogue.affordances.values()
+        )
+        for channel in EvidenceKind
+    }
+    context: dict[str, object] = {
+        "eligible_innocent_actor_refs": innocent_actor_refs,
+        "available_channel_counts": channel_counts,
+        "secondary_secret_catalogue": secondary_catalogue.provider_view(),
+        "accepted_true_evidence_themes": [
+            {
+                "evidence_concept": record.name,
+                "channel": record.kind.value,
+            }
+            for record in sorted(stage_2b.evidence.values(), key=lambda value: value.role_ref)
+        ],
+    }
+    if plan_index == 1:
+        context.update(
+            {
+                "compiled_stage_2a_fingerprint": compiled_stage2a_fingerprint(stage_2a),
+                "compiled_stage_2b_fingerprint": compiled_stage2b_fingerprint(stage_2b),
+                "discovery_affordance_catalogue_fingerprint": (
+                    discovery_affordance_catalogue_fingerprint(discovery_catalogue)
+                ),
+            }
+        )
+        candidate_type: type[Stage2CP1Candidate] | type[Stage2CP2Candidate] = (
+            Stage2CP1Candidate
+        )
+        task = "Plan the first compact truthful red herring as one semantic delta."
+        rules = (
+            "Return one plan item only; do not realize evidence or restate the case.",
+            "Choose one offered living innocent suspect, one offered secondary-secret seed, and executable suspicious and resolution channels.",
+            "A seed supplies causal material; the chosen innocent suspect may be a distinct participant in that secondary event.",
+            "Do not recruit the victim or responsible actor, rewrite an upstream stage, or overlap accepted true evidence.",
+        )
+    else:
+        assert accepted_p1 is not None
+        context.update(
+            {
+                "accepted_p1_fingerprint": content_fingerprint(
+                    accepted_p1.model_dump(mode="json")
+                ),
+                "accepted_p1_plan": accepted_p1.plan.model_dump(mode="json"),
+            }
+        )
+        candidate_type = Stage2CP2Candidate
+        task = "Plan the second compact truthful red herring as one P1-bound semantic delta."
+        rules = (
+            "Return one second plan item only; do not restate or alter accepted P1.",
+            "Choose a different innocent suspect and suspicious-evidence channel from P1.",
+            "Make the event, apparent implication, innocent explanation, and distinctiveness materially different from P1.",
+            "The same offered seed may be reused only as causal material for a genuinely distinct secondary event.",
+            "Do not realize evidence, recruit a protected actor, rewrite an upstream stage, or overlap accepted true evidence.",
+        )
+    example = stage2c_plan_item_valid_example(
+        stage_2a=stage_2a,
+        stage_2b=stage_2b,
+        discovery_catalogue=discovery_catalogue,
+        secondary_catalogue=secondary_catalogue,
+        plan_index=plan_index,
+        accepted_p1=accepted_p1,
+    )
+    return _messages(
+        task=task,
+        schema=candidate_type.model_json_schema(),
+        context=context,
+        rules=rules,
+        example=example.model_dump(mode="json"),
+        prompt_revision=STAGE2C_PLAN_ITEMS_PROMPT_REVISION,
     )
 
 
@@ -4183,6 +4472,7 @@ async def generate_stage2_boundary(
     repair_llm: Any,
     stage2c_realization_llm: Any | None = None,
     decomposed_stage2c: bool = False,
+    decomposed_stage2c_plan_items: bool = False,
     core: GeneratedCrimeTimelineStage,
     character_ids: tuple[str, ...],
     location: LocationPackage,
@@ -4197,6 +4487,8 @@ async def generate_stage2_boundary(
 
     if llm is None or repair_llm is None:
         raise Stage2SemanticError("scenario provider is not configured", code="provider_not_configured")
+    if decomposed_stage2c_plan_items and not decomposed_stage2c:
+        raise ValueError("Stage 2C plan-item decomposition requires decomposed Stage 2C")
     if not 1 <= max_initial_attempts <= 3 or not 0 <= max_delta_repairs <= 2:
         raise ValueError("Stage 2 attempt limits exceed the declared policy")
     per_role_attempts = dict(initial_attempts_by_role or {})
@@ -4206,6 +4498,8 @@ async def generate_stage2_boundary(
         "stage2_semantic_2b",
         "stage2_semantic_2c",
         "stage2_semantic_2c_p",
+        "stage2_semantic_2c_p1",
+        "stage2_semantic_2c_p2",
         "stage2_semantic_2c_r1",
         "stage2_semantic_2c_r2",
     }
@@ -4239,6 +4533,13 @@ async def generate_stage2_boundary(
                 "stage2_semantic_2c_r2",
             }
         )
+        if decomposed_stage2c_plan_items:
+            allowed_resume_stages.update(
+                {
+                    "stage2_semantic_2c_p1",
+                    "stage2_semantic_2c_p2",
+                }
+            )
     if set(resumed) - allowed_resume_stages:
         raise Stage2SemanticError("checkpoint contains an unknown stage", code="checkpoint_invalid")
     if "stage2_semantic_2a_route_2" in resumed and "stage2_semantic_2a_route_1" not in resumed:
@@ -4251,6 +4552,16 @@ async def generate_stage2_boundary(
     if "stage2_semantic_2b" in resumed and "stage2_semantic_2a" not in resumed:
         raise Stage2SemanticError("Stage 2B checkpoint lacks Stage 2A", code="checkpoint_invalid")
     if decomposed_stage2c:
+        if decomposed_stage2c_plan_items:
+            if "stage2_semantic_2c_p1" in resumed and "stage2_semantic_2b" not in resumed:
+                raise Stage2SemanticError("Stage 2C-P1 checkpoint lacks Stage 2B", code="checkpoint_invalid")
+            if "stage2_semantic_2c_p2" in resumed and "stage2_semantic_2c_p1" not in resumed:
+                raise Stage2SemanticError("Stage 2C-P2 checkpoint lacks P1", code="checkpoint_invalid")
+            if "stage2_semantic_2c_p" in resumed and not {
+                "stage2_semantic_2c_p1",
+                "stage2_semantic_2c_p2",
+            } <= set(resumed):
+                raise Stage2SemanticError("assembled Stage 2C-P checkpoint lacks P1 or P2", code="checkpoint_invalid")
         if "stage2_semantic_2c_p" in resumed and "stage2_semantic_2b" not in resumed:
             raise Stage2SemanticError("Stage 2C-P checkpoint lacks Stage 2B", code="checkpoint_invalid")
         if "stage2_semantic_2c_r1" in resumed and "stage2_semantic_2c_p" not in resumed:
@@ -4550,7 +4861,133 @@ async def generate_stage2_boundary(
         core=core,
     )
     compile_delta = lambda value: value
-    if "stage2_semantic_2c_p" in resumed:
+    if decomposed_stage2c_plan_items:
+        validate_p1 = lambda value: validate_stage2c_p1_candidate(
+            value,
+            stage_2a=stage_2a,
+            stage_2b=stage_2b,
+            discovery_catalogue=discovery,
+            secondary_catalogue=secondary,
+            core=core,
+        )
+        if "stage2_semantic_2c_p1" in resumed:
+            stage_2c_p1, _ = _resume_semantic_stage(
+                resumed["stage2_semantic_2c_p1"],
+                role="stage2_semantic_2c_p1",
+                candidate_type=Stage2CP1Candidate,
+                validator=validate_p1,
+                compiler=compile_delta,
+            )
+        else:
+            stage_2c_p1, _ = await _generate_semantic_stage(
+                llm,
+                repair_llm=repair_llm,
+                role="stage2_semantic_2c_p1",
+                messages=build_stage2c_plan_item_messages(
+                    stage_2a=stage_2a,
+                    stage_2b=stage_2b,
+                    discovery_catalogue=discovery,
+                    secondary_catalogue=secondary,
+                    plan_index=1,
+                ),
+                candidate_type=Stage2CP1Candidate,
+                validator=validate_p1,
+                compiler=compile_delta,
+                max_tokens=STAGE2C_PLAN_MAX_TOKENS,
+                immutable_paths=(
+                    "/schema_version",
+                    "/compiled_stage_2a_fingerprint",
+                    "/compiled_stage_2b_fingerprint",
+                    "/discovery_affordance_catalogue_fingerprint",
+                    "/secondary_secret_catalogue_fingerprint",
+                ),
+                max_initial_attempts=attempts_for("stage2_semantic_2c_p1"),
+                max_delta_repairs=max_delta_repairs,
+                attempt_observer=attempt_observer,
+                accepted_stage_observer=accepted_stage_observer,
+            )
+        validate_p2 = lambda value: validate_stage2c_p2_candidate(
+            value,
+            accepted_p1=stage_2c_p1,
+            stage_2a=stage_2a,
+            stage_2b=stage_2b,
+            discovery_catalogue=discovery,
+            secondary_catalogue=secondary,
+            core=core,
+        )
+        if "stage2_semantic_2c_p2" in resumed:
+            stage_2c_p2, _ = _resume_semantic_stage(
+                resumed["stage2_semantic_2c_p2"],
+                role="stage2_semantic_2c_p2",
+                candidate_type=Stage2CP2Candidate,
+                validator=validate_p2,
+                compiler=compile_delta,
+            )
+        else:
+            stage_2c_p2, _ = await _generate_semantic_stage(
+                llm,
+                repair_llm=repair_llm,
+                role="stage2_semantic_2c_p2",
+                messages=build_stage2c_plan_item_messages(
+                    stage_2a=stage_2a,
+                    stage_2b=stage_2b,
+                    discovery_catalogue=discovery,
+                    secondary_catalogue=secondary,
+                    plan_index=2,
+                    accepted_p1=stage_2c_p1,
+                ),
+                candidate_type=Stage2CP2Candidate,
+                validator=validate_p2,
+                compiler=compile_delta,
+                max_tokens=STAGE2C_PLAN_MAX_TOKENS,
+                immutable_paths=(
+                    "/schema_version",
+                    "/accepted_p1_fingerprint",
+                ),
+                max_initial_attempts=attempts_for("stage2_semantic_2c_p2"),
+                max_delta_repairs=max_delta_repairs,
+                attempt_observer=attempt_observer,
+                accepted_stage_observer=accepted_stage_observer,
+            )
+        assembled_plan = assemble_stage2c_plan_candidate(stage_2c_p1, stage_2c_p2)
+        if "stage2_semantic_2c_p" in resumed:
+            stage_2c_plan, _ = _resume_semantic_stage(
+                resumed["stage2_semantic_2c_p"],
+                role="stage2_semantic_2c_p",
+                candidate_type=Stage2CPlanCandidate,
+                validator=validate_plan,
+                compiler=compile_delta,
+            )
+            if stage_2c_plan != assembled_plan:
+                raise Stage2SemanticError(
+                    "assembled Stage 2C-P checkpoint differs from P1/P2 deltas",
+                    code="checkpoint_invalid",
+                )
+        else:
+            plan_report = validate_plan(assembled_plan)
+            if not plan_report.is_valid:
+                raise Stage2SemanticError(
+                    "accepted Stage 2C plan-item deltas failed combined validation",
+                    code="stage_2c_plan_combined_rejection",
+                    issues=plan_report.issues,
+                )
+            stage_2c_plan = assembled_plan
+            if accepted_stage_observer is not None:
+                accepted_stage_observer(
+                    {
+                        "stage": "stage2_semantic_2c_p",
+                        "source": "host_assembled_plan_item_deltas",
+                        "semantic_candidate_fingerprint": content_fingerprint(
+                            stage_2c_plan.model_dump(mode="json")
+                        ),
+                        "compiled_fingerprint": content_fingerprint(
+                            stage_2c_plan.model_dump(mode="json")
+                        ),
+                        "model_authored_document": stage_2c_plan.model_dump(mode="json"),
+                        "document": stage_2c_plan.model_dump(mode="json"),
+                    }
+                )
+    elif "stage2_semantic_2c_p" in resumed:
         stage_2c_plan, _ = _resume_semantic_stage(
             resumed["stage2_semantic_2c_p"],
             role="stage2_semantic_2c_p",
