@@ -28,7 +28,7 @@ GIT_SHA = "b" * 40
 def _preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 9,
+            "experiment_revision": 10,
             "git_sha": GIT_SHA,
             "model": model,
             "actual_model": model,
@@ -155,6 +155,30 @@ def test_generation_matrix_uses_production_admission_and_private_snapshots(
     assert all(outcome["stage_requests"] == 6 for outcome in outcomes)
     assert all(len(outcome["case_fingerprint"]) == 64 for outcome in outcomes)
     assert all((tmp_path / outcome["canonical_artifact"]).is_file() for outcome in outcomes)
+    accepted_stage_states = [
+        json.loads((tmp_path / outcome["accepted_stage_artifact"]).read_text(encoding="utf-8"))
+        for outcome in outcomes
+    ]
+    assert all(
+        set(state["stages"])
+        == {
+            "case_generation_core",
+            "case_generation_proof_blueprint",
+            "case_generation_proof_blueprint_compiled",
+            "case_generation_evidence_realization",
+            "case_generation_misdirection",
+            "case_generation_overlays",
+            "case_generation_presentation",
+        }
+        for state in accepted_stage_states
+    )
+    assert all(
+        len(stage["stage_fingerprint"]) == 64
+        and isinstance(stage["document"], dict)
+        and stage["actual_model"] == state["model"]
+        for state in accepted_stage_states
+        for stage in state["stages"].values()
+    )
     progress = json.loads((tmp_path / "generation_results.json").read_text(encoding="utf-8"))
     assert progress["status"] == "completed"
     assert progress["pair_ids"] == ["P2", "P3", "R1"]
@@ -303,7 +327,7 @@ def test_generation_matrix_refuses_unverified_revision_before_building_client(
     assert built is False
 
 
-def test_revision9_refuses_any_reserve_replacement_other_than_interrupted_p1(
+def test_revision10_refuses_any_reserve_replacement_other_than_interrupted_p1(
     tmp_path: Path,
 ) -> None:
     manifest = load_manifest()
@@ -329,7 +353,9 @@ def test_revision9_refuses_any_reserve_replacement_other_than_interrupted_p1(
     assert built is False
 
 
-def test_revision9_orphan_guard_ignores_archived_revision7_and_8_intents(tmp_path: Path) -> None:
+def test_revision10_orphan_guard_ignores_archived_revision7_8_and_9_intents(
+    tmp_path: Path,
+) -> None:
     intent_path = tmp_path / "request_intents.jsonl"
     intent_path.write_text(
         json.dumps(
@@ -355,8 +381,6 @@ def test_revision9_orphan_guard_ignores_archived_revision7_and_8_intents(tmp_pat
             + "\n"
         )
 
-    assert _has_generation_intent(intent_path, experiment_revision=9) is False
-
     with intent_path.open("a", encoding="utf-8") as handle:
         handle.write(
             json.dumps(
@@ -368,7 +392,21 @@ def test_revision9_orphan_guard_ignores_archived_revision7_and_8_intents(tmp_pat
             )
             + "\n"
         )
-    assert _has_generation_intent(intent_path, experiment_revision=9) is True
+
+    assert _has_generation_intent(intent_path, experiment_revision=10) is False
+
+    with intent_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "experiment_revision": 10,
+                    "phase": "generation",
+                }
+            )
+            + "\n"
+        )
+    assert _has_generation_intent(intent_path, experiment_revision=10) is True
 
 
 class _CrashAfterReservationClient:

@@ -24,7 +24,7 @@ from experiments.deepseek_v4_runner import (
 def _verified_preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 9,
+            "experiment_revision": 10,
             "model": slug,
             "actual_model": slug,
             "upstream_provider": "deepseek",
@@ -42,17 +42,19 @@ def _verified_preflights() -> dict[str, object]:
 def test_manifest_is_frozen_fair_and_has_declared_pairs() -> None:
     manifest = load_manifest()
 
-    assert manifest["manifest_revision"] == 9
-    assert manifest["supersedes_revision"] == 8
-    assert manifest["prompt_revision"] == "procedural-case-generation-staged-v5"
-    assert manifest["schema_revision"] == "procedural-case-schema-staged-v5"
+    assert manifest["manifest_revision"] == 10
+    assert manifest["supersedes_revision"] == 9
+    assert manifest["prompt_revision"] == "procedural-case-generation-staged-v6"
+    assert manifest["schema_revision"] == "procedural-case-schema-staged-v6"
     assert manifest["revision_reason"] == (
-        "Revision 7's monolithic baseline admitted 0/6 cells. Revision 8's partial protocol "
-        "was intentionally operationally stopped and superseded after two settled P2 Pro core "
-        "rejections and one unresolved third intent, before any Stage 2 result. Revision 9 "
-        "adopts the owner-specified Stage 2A proof blueprint, 2B evidence "
-        "realization/provenance, and 2C misdirection split while retaining the P2/P3/R1 matrix, "
-        "fairness controls, direct models, budget, and R1 provenance."
+        "Revision 9's responsibility-split baseline admitted 0/6 cells: P2 Flash exhausted "
+        "Stage 1 and the other five cells exhausted Stage 2A because free-form fact/event "
+        "references repeatedly violated category, provenance, culprit-linkage, timeline, or "
+        "independence rules. Revision 10 retains Stage 2A/2B/2C and the exact P2/P3/R1 "
+        "comparison, but Stage 2A now selects opaque entries from a deterministic host-verified "
+        "Stage 1 support catalog. The model still owns route logic, evidence forms, and "
+        "independence rationale; the unchanged downstream and whole-case validators remain "
+        "authoritative."
     )
     assert manifest["git_checkpoint"] == "0166ca14c80a5e84c1322e93667d71eea1461aa6"
     assert manifest["gateway"] == "deepseek_direct"

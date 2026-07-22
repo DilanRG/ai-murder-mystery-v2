@@ -13,7 +13,7 @@ from typing import Any, Literal, Mapping, Sequence
 from experiments.deepseek_v4_runner import (
     EXPECTED_MODELS,
     EXPECTED_REPLACED_PAIR_ID,
-    EXPECTED_REVISION9_PAIR_IDS,
+    EXPECTED_REVISION10_PAIR_IDS,
     PRIVATE_ARTIFACT_ROOT,
     ExperimentSafetyError,
     validate_manifest,
@@ -162,7 +162,7 @@ def select_first_admitted_cases(
         generation_results.get("git_sha") != git_sha
         or generation_results.get("experiment_revision") != manifest["manifest_revision"]
         or generation_results.get("manifest_sha256") != manifest_digest
-        or generation_results.get("pair_ids") != list(EXPECTED_REVISION9_PAIR_IDS)
+        or generation_results.get("pair_ids") != list(EXPECTED_REVISION10_PAIR_IDS)
         or generation_results.get("reserve_activation") != expected_activation
         or generation_results.get("status") != "completed"
     ):
@@ -185,7 +185,7 @@ def select_first_admitted_cases(
     }
     expected_cells = [
         (pair_id, str(model_key))
-        for pair_id in EXPECTED_REVISION9_PAIR_IDS
+        for pair_id in EXPECTED_REVISION10_PAIR_IDS
         for model_key in pairs_by_id[pair_id]["model_order"]
     ]
     if list(indexed) != expected_cells:
@@ -197,7 +197,7 @@ def select_first_admitted_cases(
 
     selected: dict[str, SelectedGeneratedCase] = {}
     for model_key in ("pro", "flash"):
-        for pair_id in EXPECTED_REVISION9_PAIR_IDS:
+        for pair_id in EXPECTED_REVISION10_PAIR_IDS:
             pair = pairs_by_id[pair_id]
             outcome = indexed.get((str(pair["pair_id"]), model_key))
             if outcome is not None and outcome.get("admitted") is True:

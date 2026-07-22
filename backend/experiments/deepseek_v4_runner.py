@@ -25,12 +25,12 @@ EXPECTED_MODELS = {
     "flash": "deepseek-v4-flash",
 }
 EXPECTED_RESOLVED_MODELS = dict(EXPECTED_MODELS)
-EXPECTED_MANIFEST_REVISION = 9
+EXPECTED_MANIFEST_REVISION = 10
 EXPECTED_GIT_CHECKPOINT = "0166ca14c80a5e84c1322e93667d71eea1461aa6"
 EXPECTED_GATEWAY = "deepseek_direct"
 EXPECTED_ROUTING = None
-EXPECTED_PROMPT_REVISION = "procedural-case-generation-staged-v5"
-EXPECTED_SCHEMA_REVISION = "procedural-case-schema-staged-v5"
+EXPECTED_PROMPT_REVISION = "procedural-case-generation-staged-v6"
+EXPECTED_SCHEMA_REVISION = "procedural-case-schema-staged-v6"
 EXPECTED_ROLE_MAX_TOKENS = {
     "case_generation_core": 20_000,
     "case_generation_proof_blueprint": 12_000,
@@ -108,10 +108,11 @@ EXPECTED_RESERVE_PAIR = {
         "failures in the report and stay below the hard operational stop."
     ),
 }
-EXPECTED_REVISION9_PAIR_IDS = ("P2", "P3", "R1")
-# Revision 9 retains the Revision 7/8 zero-admission P2/P3/R1 comparison matrix.
+EXPECTED_REVISION10_PAIR_IDS = ("P2", "P3", "R1")
+# Revision 10 retains the Revision 7/8/9 zero-admission P2/P3/R1 comparison matrix.
 # Keep the historical alias for readers that report the original baseline provenance.
-EXPECTED_REVISION7_PAIR_IDS = EXPECTED_REVISION9_PAIR_IDS
+EXPECTED_REVISION9_PAIR_IDS = EXPECTED_REVISION10_PAIR_IDS
+EXPECTED_REVISION7_PAIR_IDS = EXPECTED_REVISION10_PAIR_IDS
 EXPECTED_REPLACED_PAIR_ID = "P1"
 
 
@@ -149,15 +150,15 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
     """Reject changes that would make the paired measurement unfair or unsafe."""
 
     if manifest.get("manifest_revision") != EXPECTED_MANIFEST_REVISION:
-        raise ExperimentSafetyError("Only frozen manifest revision 9 is accepted.")
+        raise ExperimentSafetyError("Only frozen manifest revision 10 is accepted.")
     if manifest.get("git_checkpoint") != EXPECTED_GIT_CHECKPOINT:
         raise ExperimentSafetyError("Manifest must retain the revision-4 direct-provider checkpoint.")
     if (
-        manifest.get("supersedes_revision") != 8
+        manifest.get("supersedes_revision") != 9
         or manifest.get("gateway") != EXPECTED_GATEWAY
         or manifest.get("model_fallbacks") != []
     ):
-        raise ExperimentSafetyError("Manifest revision 9 must require direct DeepSeek without fallback.")
+        raise ExperimentSafetyError("Manifest revision 10 must require direct DeepSeek without fallback.")
     if manifest.get("models") != EXPECTED_MODELS:
         raise ExperimentSafetyError("Manifest model slugs must be the exact DeepSeek V4 pair.")
     if manifest.get("resolved_models") != EXPECTED_RESOLVED_MODELS:
@@ -168,7 +169,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> None:
         manifest.get("prompt_revision") != EXPECTED_PROMPT_REVISION
         or manifest.get("schema_revision") != EXPECTED_SCHEMA_REVISION
     ):
-        raise ExperimentSafetyError("Manifest must use the frozen staged-v5 prompt and schema revisions.")
+        raise ExperimentSafetyError("Manifest must use the frozen staged-v6 prompt and schema revisions.")
 
     settings = manifest.get("runtime_settings")
     if not isinstance(settings, Mapping) or settings.get("reasoning_effort") != "high":

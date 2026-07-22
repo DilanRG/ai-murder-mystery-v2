@@ -135,6 +135,62 @@ class GeneratedProofClaimBlueprint(FrozenModel):
     required_form: EvidenceKind
 
 
+class GeneratedProofClaimSelection(FrozenModel):
+    """Provider-authored claim logic bound to one host-verified support candidate."""
+
+    support_candidate_id: str = Field(min_length=1, max_length=100)
+    claim: str = Field(min_length=1, max_length=600)
+    evidence_role_summary: str = Field(min_length=1, max_length=500)
+    required_form: EvidenceKind
+
+
+class GeneratedProofRouteSelection(FrozenModel):
+    """Stage 2A provider delta: route reasoning without free-form truth references."""
+
+    label: str = Field(min_length=1, max_length=160)
+    method: GeneratedProofClaimSelection
+    motive: GeneratedProofClaimSelection
+    opportunity: GeneratedProofClaimSelection
+    independence_rationale: str = Field(min_length=1, max_length=800)
+
+
+class GeneratedProofRouteSelectionStage(FrozenModel):
+    """Stage 2A response bound to an exact host-derived Stage 1 support catalog."""
+
+    schema_version: Literal[1] = 1
+    culprit_id: str = Field(min_length=1, max_length=100)
+    proof_catalog_fingerprint: str = Field(min_length=64, max_length=64)
+    routes: tuple[GeneratedProofRouteSelection, ...] = Field(
+        min_length=2,
+        max_length=2,
+    )
+
+
+class ProofSupportCandidate(FrozenModel):
+    """Mechanical Stage 1 fact/event projection exposed to Stage 2A."""
+
+    candidate_id: str = Field(min_length=1, max_length=100)
+    axis: Literal["method", "motive", "opportunity"]
+    fact_ids: tuple[str, ...] = Field(min_length=1, max_length=16)
+    facts: dict[str, str] = Field(min_length=1, max_length=16)
+    source_event_id: str = Field(min_length=1, max_length=100)
+    event_minute: int = Field(ge=0)
+    event_room_id: str = Field(min_length=1, max_length=100)
+    event_type: str = Field(min_length=1, max_length=100)
+    event_summary: str = Field(min_length=1, max_length=1_000)
+    actor_ids: tuple[str, ...] = Field(default_factory=tuple, max_length=8)
+    observed_by: tuple[str, ...] = Field(default_factory=tuple, max_length=8)
+    causal_signature: str = Field(min_length=64, max_length=64)
+
+
+class ProofSupportCatalog(FrozenModel):
+    """Deterministic catalog; it enumerates truth but authors no causal meaning."""
+
+    schema_version: Literal[1] = 1
+    stage_1_fingerprint: str = Field(min_length=64, max_length=64)
+    candidates: dict[str, ProofSupportCandidate] = Field(min_length=1, max_length=192)
+
+
 class GeneratedProofRouteBlueprint(FrozenModel):
     """Stage 2A reasoning for one independently complete proof route."""
 
@@ -262,6 +318,10 @@ class GeneratedScenarioError(ValueError):
     ) -> None:
         super().__init__(message)
         self.code = code
+
+
+class GenerationObserverError(RuntimeError):
+    """Durable experiment observer failed after a provider response; never retry it."""
 
 
 def select_generation_cast(
@@ -451,6 +511,166 @@ def assemble_generated_case_blueprint(
         opening=crime.opening,
         solution=evidence.solution,
     )
+
+
+def _content_fingerprint(value: object) -> str:
+    """Hash one normalized JSON-compatible document without adding semantics."""
+
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_proof_support_catalog(core: GeneratedCrimeTimelineStage) -> ProofSupportCatalog:
+    """Project event-grounded culprit-linked fact groups from accepted Stage 1."""
+
+    categories_by_axis = {
+        "method": {"means"},
+        "motive": {"motive"},
+        "opportunity": {"opportunity", "timeline"},
+    }
+    candidates: dict[str, ProofSupportCandidate] = {}
+    for event in sorted(core.timeline, key=lambda value: (value.minute, value.id)):
+        signature = _content_fingerprint(
+            {
+                "minute": event.minute,
+                "room_id": event.room_id,
+                "characters": sorted((*event.actor_ids, *event.observed_by)),
+                "event_type": event.event_type.value,
+            }
+        )
+        for axis, categories in categories_by_axis.items():
+            eligible_fact_ids = tuple(
+                fact_id
+                for fact_id in sorted(set(event.fact_ids))
+                if (fact := core.facts.get(fact_id)) is not None
+                and fact.category.value in categories
+                and core.murder.murderer_id in fact.related_character_ids
+            )
+            if eligible_fact_ids:
+                candidate_id = (
+                    f"support_{axis}_"
+                    f"{_content_fingerprint([event.id, *eligible_fact_ids])[:16]}"
+                )
+                candidate = ProofSupportCandidate(
+                    candidate_id=candidate_id,
+                    axis=axis,
+                    fact_ids=eligible_fact_ids,
+                    facts={
+                        fact_id: core.facts[fact_id].statement
+                        for fact_id in eligible_fact_ids
+                    },
+                    source_event_id=event.id,
+                    event_minute=event.minute,
+                    event_room_id=event.room_id,
+                    event_type=event.event_type.value,
+                    event_summary=event.summary,
+                    actor_ids=event.actor_ids,
+                    observed_by=event.observed_by,
+                    causal_signature=signature,
+                )
+                existing = candidates.get(candidate_id)
+                if existing is not None and existing != candidate:
+                    raise GeneratedScenarioError("proof support candidate ID collision")
+                candidates[candidate_id] = candidate
+    try:
+        return ProofSupportCatalog(
+            stage_1_fingerprint=_content_fingerprint(core.model_dump(mode="json")),
+            candidates=dict(sorted(candidates.items())),
+        )
+    except ValidationError as error:
+        raise GeneratedScenarioError(f"invalid proof support catalog: {error}") from error
+
+
+def proof_support_catalog_fingerprint(catalog: ProofSupportCatalog) -> str:
+    """Bind Stage 2A selections to the exact deterministic catalog."""
+
+    return _content_fingerprint(catalog.model_dump(mode="json"))
+
+
+def _validate_proof_route_selection_stage(
+    stage: GeneratedProofRouteSelectionStage,
+    *,
+    catalog: ProofSupportCatalog,
+    core: GeneratedCrimeTimelineStage,
+) -> None:
+    """Reject stale, wrong-axis, or non-independent support selections."""
+
+    issues: list[str] = []
+    if stage.culprit_id != core.murder.murderer_id:
+        issues.append("proof selection culprit must equal the Stage 1 murderer")
+    if stage.proof_catalog_fingerprint != proof_support_catalog_fingerprint(catalog):
+        issues.append("proof selection catalog fingerprint does not match accepted Stage 1")
+    selected_by_axis: dict[str, list[tuple[ProofSupportCandidate, EvidenceKind]]] = {
+        "method": [],
+        "motive": [],
+        "opportunity": [],
+    }
+    for route_index, route in enumerate(stage.routes, start=1):
+        for axis in ("method", "motive", "opportunity"):
+            selection = getattr(route, axis)
+            candidate = catalog.candidates.get(selection.support_candidate_id)
+            if candidate is None:
+                issues.append(f"route {route_index} {axis} selects an unknown support candidate")
+                continue
+            if candidate.axis != axis:
+                issues.append(f"route {route_index} {axis} selects a wrong-axis candidate")
+                continue
+            selected_by_axis[axis].append((candidate, selection.required_form))
+    for axis, selections in selected_by_axis.items():
+        if len(selections) != 2:
+            continue
+        (left, left_form), (right, right_form) = selections
+        if left_form == right_form and left.causal_signature == right.causal_signature:
+            issues.append(
+                f"proof routes reuse the same {axis} causal channel; corresponding roles "
+                "must use a different evidence form or disjoint Stage 1 events"
+            )
+    _reject_stage("proof selection", issues)
+
+
+def compile_proof_route_selection(
+    stage: GeneratedProofRouteSelectionStage,
+    *,
+    catalog: ProofSupportCatalog,
+    core: GeneratedCrimeTimelineStage,
+) -> GeneratedProofRouteBlueprintStage:
+    """Resolve opaque selections into the immutable Stage 2A blueprint contract."""
+
+    _validate_proof_route_selection_stage(stage, catalog=catalog, core=core)
+    routes: list[GeneratedProofRouteBlueprint] = []
+    for route in stage.routes:
+        claims: dict[str, GeneratedProofClaimBlueprint] = {}
+        for axis in ("method", "motive", "opportunity"):
+            selection = getattr(route, axis)
+            candidate = catalog.candidates[selection.support_candidate_id]
+            claims[axis] = GeneratedProofClaimBlueprint(
+                claim=selection.claim,
+                fact_ids=candidate.fact_ids,
+                source_event_ids=(candidate.source_event_id,),
+                evidence_role_summary=selection.evidence_role_summary,
+                required_form=selection.required_form,
+            )
+        routes.append(
+            GeneratedProofRouteBlueprint(
+                label=route.label,
+                method=claims["method"],
+                motive=claims["motive"],
+                opportunity=claims["opportunity"],
+                timeline_fact_ids=claims["opportunity"].fact_ids,
+                independence_rationale=route.independence_rationale,
+            )
+        )
+    blueprint = GeneratedProofRouteBlueprintStage(
+        culprit_id=core.murder.murderer_id,
+        routes=tuple(routes),
+    )
+    _validate_proof_blueprint_stage(blueprint, core=core)
+    return blueprint
 
 
 def _proof_role_contracts(
@@ -744,7 +964,7 @@ def _system_prompt() -> str:
     schemas = {
         "case_generation_core": GeneratedCrimeTimelineStage.model_json_schema(),
         "case_generation_proof_blueprint": (
-            GeneratedProofRouteBlueprintStage.model_json_schema()
+            GeneratedProofRouteSelectionStage.model_json_schema()
         ),
         "case_generation_evidence_realization": (
             GeneratedEvidenceRealizationStage.model_json_schema()
@@ -875,6 +1095,16 @@ def _validate_core_stage(
     if set(opening.post_meeting_room_ids.values()) - rooms:
         issues.append("post-meeting rooms contain an unknown room")
     _reject_stage("core", issues)
+    catalog = build_proof_support_catalog(stage)
+    available_axes = {candidate.axis for candidate in catalog.candidates.values()}
+    missing_axes = {"method", "motive", "opportunity"} - available_axes
+    _reject_stage(
+        "core",
+        [
+            f"accepted Stage 1 cannot support a proof candidate for {axis}"
+            for axis in sorted(missing_axes)
+        ],
+    )
 
 
 def _validate_evidence_stage(
@@ -1575,6 +1805,7 @@ async def _generate_stage(
     role: str,
     model_type: type[GeneratedCrimeTimelineStage]
     | type[GeneratedEvidenceSolutionStage]
+    | type[GeneratedProofRouteSelectionStage]
     | type[GeneratedProofRouteBlueprintStage]
     | type[GeneratedEvidenceRealizationStage]
     | type[GeneratedMisdirectionConnectiveStage]
@@ -1586,6 +1817,7 @@ async def _generate_stage(
     max_attempts: int,
     validator: Callable[[Any], None],
     attempt_observer: Callable[[dict[str, object]], None] | None,
+    accepted_stage_observer: Callable[[dict[str, object]], None] | None,
 ) -> Any:
     feedback = ""
     last_error: BaseException | None = None
@@ -1627,18 +1859,36 @@ async def _generate_stage(
                 raise GeneratedScenarioError("generated stage must be a JSON object")
             parsed = model_type.model_validate(raw)
             validator(parsed)
-            if attempt_observer is not None:
-                attempt_observer(
-                    {
-                        "stage": role,
-                        "attempt": attempt_index,
-                        "result": "admitted",
-                        "failure_category": None,
-                        "failure_code": None,
-                        "repair_feedback_used": repair_feedback_used,
-                    }
-                )
+            try:
+                if attempt_observer is not None:
+                    attempt_observer(
+                        {
+                            "stage": role,
+                            "attempt": attempt_index,
+                            "result": "admitted",
+                            "failure_category": None,
+                            "failure_code": None,
+                            "repair_feedback_used": repair_feedback_used,
+                        }
+                    )
+                if accepted_stage_observer is not None:
+                    normalized = parsed.model_dump(mode="json")
+                    accepted_stage_observer(
+                        {
+                            "stage": role,
+                            "stage_attempt": attempt_index,
+                            "stage_fingerprint": _content_fingerprint(normalized),
+                            "document": normalized,
+                            "source": "provider",
+                        }
+                    )
+            except Exception as error:
+                raise GenerationObserverError(
+                    f"durable generation observer failed after accepting {role}"
+                ) from error
             return parsed
+        except GenerationObserverError:
+            raise
         except asyncio.CancelledError:
             raise
         except (json.JSONDecodeError, GeneratedScenarioError, ValidationError) as error:
@@ -1715,6 +1965,7 @@ async def generate_validated_scenario(
     difficulty: str = "normal",
     max_attempts: int = 3,
     attempt_observer: Callable[[dict[str, object]], None] | None = None,
+    accepted_stage_observer: Callable[[dict[str, object]], None] | None = None,
 ) -> ValidatedGeneratedScenario:
     """Generate four conceptual phases with three bounded Stage 2 deltas."""
 
@@ -1748,29 +1999,64 @@ async def generate_validated_scenario(
             value, character_ids=character_ids, location=location
         ),
         attempt_observer=attempt_observer,
+        accepted_stage_observer=accepted_stage_observer,
     )
-    proof_blueprint = await _generate_stage(
+    proof_catalog = build_proof_support_catalog(core)
+    proof_catalog_fingerprint = proof_support_catalog_fingerprint(proof_catalog)
+    proof_selection = await _generate_stage(
         llm,
         prefix=prefix,
         role="case_generation_proof_blueprint",
-        model_type=GeneratedProofRouteBlueprintStage,
+        model_type=GeneratedProofRouteSelectionStage,
         instruction=(
-            "Design exactly two abstract and materially independent proof routes grounded only "
-            "in the accepted Stage 1 facts and events. Each route owns one method, motive, and "
-            "opportunity/timeline claim, its supporting fact/event IDs, one required evidence "
-            "form per claim, and an independence rationale. For each corresponding axis, use "
-            "a different evidence form or disjoint causal Stage 1 events so the routes cannot "
-            "collapse onto one proof channel. Every listed source event must independently "
-            "contain every fact claimed by that role. "
+            "Design exactly two abstract and materially independent proof routes using only the "
+            "opaque candidates in the host-verified proof support catalog. Each route selects one "
+            "method, motive, and opportunity candidate, authors the causal claim and required "
+            "evidence form for each, and explains route independence. Echo the exact catalog "
+            "fingerprint. For each corresponding axis, select different causal events or different "
+            "evidence forms so the routes cannot collapse onto one proof channel. Do not output "
+            "fact IDs, event IDs, timeline fact IDs, or replacement Stage 1 fields; the host resolves "
+            "those mechanical references from each selected candidate. "
             "Do not create evidence objects, placements, discovery actions, red herrings, or "
-            "player-facing prose. Return only the proof-route blueprint."
+            "player-facing prose. Return only the proof-route selection delta."
         ),
-        upstream={"accepted_stage_1": core.model_dump(mode="json")},
+        upstream={
+            "accepted_stage_1_identity": {
+                "stage_fingerprint": proof_catalog.stage_1_fingerprint,
+                "murder": core.murder.model_dump(mode="json"),
+            },
+            "proof_support_catalog": {
+                **proof_catalog.model_dump(mode="json"),
+                "proof_catalog_fingerprint": proof_catalog_fingerprint,
+            },
+        },
         max_tokens=12_000,
         max_attempts=max_attempts,
-        validator=lambda value: _validate_proof_blueprint_stage(value, core=core),
+        validator=lambda value: _validate_proof_route_selection_stage(
+            value,
+            catalog=proof_catalog,
+            core=core,
+        ),
         attempt_observer=attempt_observer,
+        accepted_stage_observer=accepted_stage_observer,
     )
+    proof_blueprint = compile_proof_route_selection(
+        proof_selection,
+        catalog=proof_catalog,
+        core=core,
+    )
+    if accepted_stage_observer is not None:
+        normalized_blueprint = proof_blueprint.model_dump(mode="json")
+        accepted_stage_observer(
+            {
+                "stage": "case_generation_proof_blueprint_compiled",
+                "stage_attempt": 0,
+                "stage_fingerprint": _content_fingerprint(normalized_blueprint),
+                "document": normalized_blueprint,
+                "source": "host_compiler",
+                "proof_catalog_fingerprint": proof_catalog_fingerprint,
+            }
+        )
     proof_contract = {
         role_id: {
             "route_id": route_id,
@@ -1823,6 +2109,7 @@ async def generate_validated_scenario(
             location=location,
         ),
         attempt_observer=attempt_observer,
+        accepted_stage_observer=accepted_stage_observer,
     )
     connective = await _generate_stage(
         llm,
@@ -1855,6 +2142,7 @@ async def generate_validated_scenario(
             location=location,
         ),
         attempt_observer=attempt_observer,
+        accepted_stage_observer=accepted_stage_observer,
     )
     evidence = assemble_evidence_solution_stage(
         proof_blueprint,
@@ -1895,6 +2183,7 @@ async def generate_validated_scenario(
         max_attempts=max_attempts,
         validator=validate_complete_overlays,
         attempt_observer=attempt_observer,
+        accepted_stage_observer=accepted_stage_observer,
     )
     blueprint = assemble_generated_case_blueprint(core, evidence, overlays)
     admitted_case = compile_generated_case_blueprint(
@@ -1933,6 +2222,7 @@ async def generate_validated_scenario(
             location=location,
         ),
         attempt_observer=attempt_observer,
+        accepted_stage_observer=accepted_stage_observer,
     )
     return compile_generated_scenario(
         GeneratedScenarioDocument(

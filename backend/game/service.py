@@ -75,6 +75,7 @@ class GameService:
         npc_llm: Any | None = None,
         portrayal_llm: Any | None = None,
         generation_attempt_observer: Callable[[dict[str, object]], None] | None = None,
+        generation_stage_observer: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         self.save_root = Path(save_root)
         # ``llm`` remains the production/default provider for compatibility.
@@ -88,6 +89,7 @@ class GameService:
         self._generation_metadata: dict[str, object] | None = None
         self._generation_attempt_diagnostics: list[dict[str, object]] = []
         self._generation_attempt_observer = generation_attempt_observer
+        self._generation_stage_observer = generation_stage_observer
         self._runtime_diagnostics: list[dict[str, object]] = []
         self._action_lock = asyncio.Lock()
 
@@ -132,6 +134,14 @@ class GameService:
         """Attach an experiment-only durable observer without changing game truth."""
 
         self._generation_attempt_observer = observer
+
+    def set_generation_stage_observer(
+        self,
+        observer: Callable[[dict[str, object]], None] | None,
+    ) -> None:
+        """Attach private accepted-stage persistence without exposing truth in diagnostics."""
+
+        self._generation_stage_observer = observer
 
     def _record_generation_attempt(self, record: dict[str, object]) -> None:
         snapshot = dict(record)
@@ -252,6 +262,7 @@ class GameService:
                 seed=seed,
                 difficulty=difficulty,
                 attempt_observer=self._record_generation_attempt,
+                accepted_stage_observer=self._generation_stage_observer,
             )
             candidate = GameEngine.create(
                 generated.case,

@@ -29,7 +29,7 @@ GIT_SHA = "d" * 40
 def _preflights() -> dict[str, object]:
     return {
         key: {
-            "experiment_revision": 9,
+            "experiment_revision": 10,
             "git_sha": GIT_SHA,
             "model": model,
             "actual_model": model,
@@ -124,7 +124,7 @@ def _generation_results(
     ).hexdigest()
     return {
         "schema_version": 2,
-        "experiment_revision": 9,
+        "experiment_revision": 10,
         "git_sha": GIT_SHA,
         "manifest_sha256": manifest_digest,
         "pair_ids": ["P2", "P3", "R1"],
@@ -139,7 +139,7 @@ def _generation_results(
     }
 
 
-def test_selector_uses_first_admitted_revision9_pair_order(tmp_path: Path) -> None:
+def test_selector_uses_first_admitted_revision10_pair_order(tmp_path: Path) -> None:
     manifest = load_manifest()
     results = _generation_results(
         tmp_path,

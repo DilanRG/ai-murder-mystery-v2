@@ -245,7 +245,7 @@ def make_dummy_generated_document(
 def generated_stage_payloads(
     document: dict[str, object],
 ) -> dict[str, dict[str, object]]:
-    """Project one valid fixture across the Revision 9 immutable stage seams."""
+    """Project one valid fixture across the Revision 10 immutable stage seams."""
 
     case = document["case"]
     assert isinstance(case, dict)
@@ -470,6 +470,58 @@ def generated_stage_payloads(
 
     timeline.sort(key=lambda event: (event["minute"], event["id"]))
 
+    from game.case_generation import (
+        GeneratedCrimeTimelineStage,
+        build_proof_support_catalog,
+        proof_support_catalog_fingerprint,
+    )
+
+    core_payload = {
+        "schema_version": 1,
+        **{
+            key: case[key]
+            for key in (
+                "title",
+                "investigation_start_minute",
+                "murder",
+                "facts",
+                "opening",
+            )
+        },
+        "timeline": timeline,
+    }
+    core_stage = GeneratedCrimeTimelineStage.model_validate(core_payload)
+    proof_catalog = build_proof_support_catalog(core_stage)
+    selection_routes: list[dict[str, object]] = []
+    for route_index, route in enumerate(proof_routes, start=1):
+        selections: dict[str, object] = {}
+        for axis in ("method", "motive", "opportunity"):
+            claim = route[axis]
+            candidate = next(
+                value
+                for value in proof_catalog.candidates.values()
+                if value.axis == axis
+                and set(claim["fact_ids"]) <= set(value.fact_ids)
+                and value.source_event_id == claim["source_event_ids"][0]
+            )
+            claim["fact_ids"] = list(candidate.fact_ids)
+            realizations[f"route_{route_index}_{axis}"]["supported_fact_ids"] = list(
+                candidate.fact_ids
+            )
+            selections[axis] = {
+                "support_candidate_id": candidate.candidate_id,
+                "claim": claim["claim"],
+                "evidence_role_summary": claim["evidence_role_summary"],
+                "required_form": claim["required_form"],
+            }
+        selection_routes.append(
+            {
+                "label": route["label"],
+                **selections,
+                "independence_rationale": route["independence_rationale"],
+            }
+        )
+
     red_sources = [
         (evidence_id, item)
         for evidence_id, item in evidence.items()
@@ -524,25 +576,12 @@ def generated_stage_payloads(
     for overlay in overlays.values():
         overlay["supporting_evidence_ids"] = []
     return {
-        "case_generation_core": {
-            "schema_version": 1,
-            **{
-                key: case[key]
-                for key in (
-                    "title",
-                    "investigation_start_minute",
-                    "murder",
-                    "facts",
-                    "timeline",
-                    "opening",
-                )
-            },
-            "timeline": timeline,
-        },
+        "case_generation_core": core_payload,
         "case_generation_proof_blueprint": {
             "schema_version": 1,
             "culprit_id": solution["culprit_id"],
-            "routes": proof_routes,
+            "proof_catalog_fingerprint": proof_support_catalog_fingerprint(proof_catalog),
+            "routes": selection_routes,
         },
         "case_generation_evidence_realization": {
             "schema_version": 1,

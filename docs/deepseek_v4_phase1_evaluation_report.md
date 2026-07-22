@@ -1,13 +1,13 @@
 # DeepSeek V4 Phase 1 Evaluation Report
 
-**Status:** Incomplete — Revision 7 completed with zero admissions; Revision 8 preserved partial; Revision 9 Stage 2A/2B/2C verified offline
+**Status:** Incomplete — Revision 7 and Revision 9 completed with zero admissions; Revision 8 preserved partial; Revision 10 support-catalog correction under verification
 **Experiment date:** 2026-07-21 to 2026-07-22
 **Product:** AI Murder Mystery Game
 **Frozen input manifest:** [`backend/experiments/deepseek_v4_manifest.json`](../backend/experiments/deepseek_v4_manifest.json)
 
 This is a live evidence report, not a Phase 1 or MVP completion claim. The experiment must ultimately stop at the human blind-playtest gate.
 
-## Current measured result
+## Measured baselines
 
 Revision 7 ran against exact Git SHA `e0047c3a480e193dc22a6d280ea3a2b88bd6149b`. Direct preflights passed for both exact models with `deepseek_direct`, no fallback, complete token accounting, and exact returned-model identity. The frozen P2/P3/R1 matrix completed all six model/cast cells and 31 chargeable generation requests.
 
@@ -29,9 +29,23 @@ The failure concentration is unambiguous. Stage 2 repeatedly violated exact disc
 
 Revision 8 was started at exact Git SHA `80a55425ea4fef6b7bb06df3de82e9331c0d7f4f` and is preserved as a superseded partial result. Exact Pro/Flash preflights passed for USD 0.00002013. P2/Pro made two settled core attempts: one consumed the 20,000-token allowance on reasoning and returned no JSON; the second returned a document rejected for incompatible weapon/method and opportunity. They cost USD 0.03571806. A third P2/Pro core request was reserved and locally stopped when the experiment contract changed; it remains operationally unresolved and is not a model-quality result or completed cell.
 
-Revision 9 retains the four conceptual ownership phases and splits Stage 2 by reasoning responsibility: 2A proves two abstract independent routes from accepted Stage 1 facts/events; 2B realizes six concrete evidence roles with causal provenance and executable discovery; 2C adds only causally explained misdirection and connective structure after both true routes pass. The host assigns mechanical IDs and exact engine actions but does not invent evidence meaning. Each delta receives local and cross-stage validation, and the assembled evidence contract plus whole-case validator remain unchanged. Provider-free verification is 395 passing backend tests, 16 passing frontend tests, a successful Vite production build, and a passing packaged Windows smoke test.
+Revision 9 completed at exact Git SHA `d466c683083195b3b3b9886d40afd792bcb95706`. Exact direct preflights passed for Pro and Flash. The balanced P2/P3/R1 matrix completed all six cells and 30 unique settled generation requests with requested model equal to returned model, direct DeepSeek transport, and no fallback or failover.
 
-The Revision 7 archive does not contain normalized accepted Stage 1 documents and exact content fingerprints, so none can be reused under the declared provenance rule. Revision 9 must regenerate Stage 1; reconstructing it from metrics or manually editing truth is forbidden.
+| Revision 9 result | Pro | Flash |
+|---|---:|---:|
+| Formal cells completed | 3 / 3 | 3 / 3 |
+| Stage 1 ultimately accepted | 3 / 3 | 2 / 3 |
+| Stage 2A ultimately accepted | 0 / 3 | 0 / 2 reached |
+| Stage 2B / 2C reached | 0 | 0 |
+| Whole cases admitted | 0 / 3 | 0 / 3 |
+| Chargeable generation requests | 16 | 14 |
+| Settled generation cost | USD 0.19194635 | USD 0.02860753 |
+
+P2/Flash exhausted Stage 1. Every other cell accepted Stage 1 and exhausted Stage 2A. Rejections overwhelmingly came from freely authored wrong-category facts, fact/event non-containment, missing culprit linkage, invalid timeline references, or reused causal channels; one Pro Stage 2A response was malformed/truncated. No Stage 2B, Stage 2C, overlay, presentation, whole-case, crossed-NPC, intended-play, or adversarial result exists for Revision 9. Generation cost was USD 0.22055388 and preflights cost USD 0.00002013. Cumulative provider-confirmed local settlement is USD 0.76622322. Nine older open reservations remain USD 2.21134080 of conservative exposure, leaving USD 5.02243598 before the soft stop after holds and the accounting margin.
+
+Revision 10 retains the four conceptual ownership phases and Stage 2A/2B/2C responsibilities. It changes only the demonstrated Stage 2A reference-copying boundary. The host deterministically projects each accepted Stage 1 event's eligible same-axis, culprit-linked facts into a fingerprinted support catalog. The provider selects opaque candidate IDs and still authors each route's causal claim, evidence form, pairing, and independence rationale. The host compiles those selections into the existing immutable proof blueprint and runs the existing Stage 2A defense-in-depth, Stage 2B/2C, and whole-case validators unchanged. Unknown, stale, wrong-axis, injected, or same-channel/same-form selections fail closed. Accepted provider deltas and the compiled blueprint are stored privately with exact fingerprints and provider-request provenance.
+
+The Revision 7 and Revision 9 archives do not contain normalized accepted Stage 1 documents and exact content fingerprints, so none can be reused under the declared provenance rule. Revision 10 must regenerate Stage 1; reconstructing it from metrics or manually editing truth is forbidden.
 
 A post-hoc audit also corrected the Revision 6 history below. The shell controller timed out, but its background process continued and settled nine generation requests: three P1/Flash core rejections, plus a P1/Pro core accepted on attempt three followed by three evidence rejections. Those records and costs remain preserved. Because the controller boundary was operationally invalid, they are excluded from the formal Revision 7 comparison denominator; the recovered request dispositions are reported as post-hoc validation evidence, not as completed model-quality cells.
 
@@ -108,8 +122,8 @@ Provider tests remain explicitly opt-in. The ordinary suite makes no paid calls.
 
 ## Current remaining work
 
-1. Commit and push Revision 9 on `experiment`, then record both tiny direct DeepSeek preflights against the exact clean SHA.
-2. Execute the same six P2/P3/R1 model cells under the frozen Revision 9 Stage 2A/2B/2C split, retaining every rejection and stopping on incomplete safety state or the budget threshold.
+1. Finish the Revision 10 regression/build/package gate, commit and push it on `experiment`, then record both tiny direct DeepSeek preflights against the exact clean SHA.
+2. Execute the same six P2/P3/R1 model cells under the frozen Revision 10 support-catalog Stage 2A and unchanged Stage 2B/2C pipeline, retaining every rejection and stopping on incomplete safety state or the budget threshold.
 3. Only if at least one Pro and one Flash case pass the complete validator, select the first admitted cases and run crossed Phase A cells A-D through the restricted player interface.
 4. Freeze Phase A transcripts/reports and inspect post-game truth/action/knowledge audits. Phase B begins only after the declared Phase A gate passes.
 5. Fix only demonstrated in-scope defects, run the frozen adversarial surface, then rerun ordinary intended play.
