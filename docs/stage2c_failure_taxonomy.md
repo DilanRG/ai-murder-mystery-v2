@@ -1,7 +1,7 @@
 # Stage 2C Decomposition Failure Taxonomy
 
 **Date:** 2026-07-23
-**Scope:** Revision 15 baseline, Revision 16 plan-item decomposition, and Revision 17 P2 output-bound correction.
+**Scope:** Revision 15 baseline through Revision 18's field-specific protected-token repair correction.
 
 This taxonomy preserves Revision 14 as the immutable baseline. Flash completed the old monolithic Stage 2C contract. Pro made three valid provider calls, but each exhausted the fixed 4,000-token completion allowance before returning a complete candidate. Those Pro attempts are output-budget failures, not semantic-validator rejections.
 
@@ -16,6 +16,12 @@ This is observed evidence that even the two-item planning response still couples
 Revision 16 ran at exact commit `2428e5699dabe9f19faaaf9e997057e153990739`. Flash accepted P1 and P2, passed the unchanged pair validator, realized both items, and passed whole-Stage-2 plus Stage-3-readiness. Pro accepted P1, then all three P2 attempts exhausted the fixed 2,600-token allowance. No Pro P2 candidate reached schema or semantic validation, so the remaining failure is classified as output-length rather than model-quality or semantic failure. New estimated cost was USD 0.01262878, cumulative Stage 2 cost was USD 0.08476332, with zero open reservations and zero Stage 3 requests.
 
 Revision 17 preserves the exact accepted P1 fingerprints (`fc318565...2c20` for Flash and `cbb888f5...0e00` for Pro) and excludes every dependent Revision 16 suffix. P2 alone receives a 4,000-token output allowance under the same model-paired contract. This is not a hidden retry reset: the new manifest and run namespace identify the new experiment revision, while immutable Revision 16 results remain the baseline.
+
+## Revision 17 observed result
+
+The 4,000-token bound removed Pro's truncation failure: all three Pro P2 candidates parsed. Each was rejected because one or more free-text fields contained the exact protected role tokens `victim` or `responsible_actor`. The two repairs attached to every candidate failed because the issue authorized all three plan text fields rather than identifying the field that actually contained the token. Flash independently passed the complete pipeline, including a valid second-attempt R2 and Stage-3-readiness.
+
+Revision 18 does not weaken that protected-role rule or increase attempts. It emits one issue per defective field with one exact allowed repair path, and the prompt states the literal lexical constraint. This makes the declared delta-repair mechanism actionable without letting the repair rewrite other accepted plan meaning.
 
 ## Baseline failure classes
 

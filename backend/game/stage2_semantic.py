@@ -48,7 +48,7 @@ STAGE2_PROMPT_REVISION = "stage2-semantic-v3"
 STAGE2_SCHEMA_REVISION = "stage2-semantic-schema-v2"
 STAGE2C_DECOMPOSED_PROMPT_REVISION = "stage2c-decomposed-v1"
 STAGE2C_DECOMPOSED_SCHEMA_REVISION = "stage2c-decomposed-schema-v1"
-STAGE2C_PLAN_ITEMS_PROMPT_REVISION = "stage2c-plan-items-v1"
+STAGE2C_PLAN_ITEMS_PROMPT_REVISION = "stage2c-plan-items-v2"
 STAGE2C_PLAN_ITEMS_SCHEMA_REVISION = "stage2c-plan-items-schema-v1"
 STAGE2A_MAX_TOKENS = 5_000
 STAGE2B_MAX_TOKENS = 7_000
@@ -1808,23 +1808,25 @@ def _validate_stage2c_plan_item(
                 "No accepted discovery affordance can realize this evidence channel.",
                 f"{path}/{field_name}",
             )
-    protected_text = " ".join(
-        (
-            item.secondary_event_summary,
-            item.appears_murder_related,
-            item.innocent_explanation,
-        )
-    ).casefold()
-    if "responsible_actor" in protected_text or "victim" in protected_text:
-        _issue(
-            issues,
-            "red_herring_plan_references_protected_actor",
-            path,
-            "The plan may not recruit the murderer or victim into its secondary event.",
-            f"{path}/secondary_event_summary",
-            f"{path}/appears_murder_related",
-            f"{path}/innocent_explanation",
-        )
+    for field_name in (
+        "secondary_event_summary",
+        "appears_murder_related",
+        "innocent_explanation",
+    ):
+        field_path = f"{path}/{field_name}"
+        protected_text = str(getattr(item, field_name)).casefold()
+        if "responsible_actor" in protected_text or "victim" in protected_text:
+            _issue(
+                issues,
+                "red_herring_plan_references_protected_actor",
+                field_path,
+                (
+                    "This field may not contain the literal protected role tokens "
+                    "'victim' or 'responsible_actor'; describe apparent crime relevance "
+                    "without naming either protected role."
+                ),
+                field_path,
+            )
 
 
 def validate_stage2c_plan_candidate(
@@ -3925,6 +3927,7 @@ def build_stage2c_plan_item_messages(
             "Choose one offered living innocent suspect, one offered secondary-secret seed, and executable suspicious and resolution channels.",
             "A seed supplies causal material; the chosen innocent suspect may be a distinct participant in that secondary event.",
             "Do not recruit the victim or responsible actor, rewrite an upstream stage, or overlap accepted true evidence.",
+            "Never write the literal tokens victim or responsible_actor in any plan text; describe apparent crime relevance through method, motive, opportunity, concealment, or timing instead.",
         )
     else:
         assert accepted_p1 is not None
@@ -3944,6 +3947,7 @@ def build_stage2c_plan_item_messages(
             "Make the event, apparent implication, innocent explanation, and distinctiveness materially different from P1.",
             "The same offered seed may be reused only as causal material for a genuinely distinct secondary event.",
             "Do not realize evidence, recruit a protected actor, rewrite an upstream stage, or overlap accepted true evidence.",
+            "Never write the literal tokens victim or responsible_actor in any plan text; describe apparent crime relevance through method, motive, opportunity, concealment, or timing instead.",
         )
     example = stage2c_plan_item_valid_example(
         stage_2a=stage_2a,

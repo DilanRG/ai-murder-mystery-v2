@@ -686,6 +686,41 @@ def test_stage2c_p2_rejects_stale_or_non_distinct_delta(
 
 
 @pytest.mark.parametrize(
+    "field_name,protected_token",
+    [
+        ("secondary_event_summary", "victim"),
+        ("appears_murder_related", "responsible_actor"),
+        ("innocent_explanation", "victim"),
+    ],
+)
+def test_stage2c_p2_protected_text_repair_targets_only_the_defective_field(
+    field_name: str, protected_token: str
+) -> None:
+    f = _fixture()
+    p1, p2 = _plan_item_deltas(f)
+    changed_plan = p2.plan.model_copy(
+        update={field_name: f"A claim names the {protected_token} role."}
+    )
+    report = validate_stage2c_p2_candidate(
+        p2.model_copy(update={"plan": changed_plan}),
+        accepted_p1=p1,
+        stage_2a=f["stage_a"],
+        stage_2b=f["stage_b"],
+        discovery_catalogue=f["discovery"],
+        secondary_catalogue=f["secondary"],
+        core=f["core"],
+    )
+    issue = next(
+        issue
+        for issue in report.issues
+        if issue.code == "red_herring_plan_references_protected_actor"
+    )
+    assert issue.path == f"/plan/{field_name}"
+    assert issue.allowed_paths == (f"/plan/{field_name}",)
+    assert "literal protected role tokens" in issue.message
+
+
+@pytest.mark.parametrize(
     "mutation,code",
     [
         ("stale_2a", "stage_2c_plan_rewrites_true_routes"),
@@ -1379,4 +1414,7 @@ def test_prompts_expose_only_current_substage_schema() -> None:
     assert "compiled_stage_2a_fingerprint" not in json.dumps(p2_payload["schema"])
     assert p2_payload["context"]["accepted_p1_fingerprint"] == content_fingerprint(
         p1.model_dump(mode="json")
+    )
+    assert "Never write the literal tokens victim or responsible_actor" in " ".join(
+        p2_payload["validator_requirements"]
     )

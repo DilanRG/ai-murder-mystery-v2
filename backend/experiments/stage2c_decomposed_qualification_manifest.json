@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "experiment_revision": 17,
+  "experiment_revision": 18,
   "branch": "development",
   "development_baseline_sha": "a2f76a33649b0a87c84ea22b5e4f14359c80cca3",
   "stage1_qualification_code_sha": "bbf7d1f46cfc138f442c298e0a57ead0a7bacab4",
-  "prompt_revision": "stage2c-plan-items-v1",
+  "prompt_revision": "stage2c-plan-items-v2",
   "schema_revision": "stage2c-plan-items-schema-v1",
   "transport": "deepseek_direct",
   "provider_fallbacks": false,
@@ -72,6 +72,27 @@
       }
     }
   },
+  "source_stage2c_revision17": {
+    "git_sha": "40431f671f2efb6eb9a686257bfca48ae3f435ae",
+    "manifest_fingerprint": "cc1d4c21165dd399f9cc56cb03473e9782d18d0a3358eaa2b4c441656f4d7710",
+    "results_sha256": "53d0ec03b87832ca93d2e79ae3f086205683ddc6abae7584b938a4e0231f609c",
+    "ledger_sha256": "7b1e551561aeef360ef7a76826c6b11b6a8984ddd169221597e682f8dd55fd05",
+    "requests_sha256": "f37f2523d1c5752d03465599791d486b775909213b44f299c621d8e2c4d5d3c2",
+    "attempts_sha256": "5a75f0f72701d6b7fee4b66eab4da00f31b3db207f1bc022916921904c79e56d",
+    "settled_cost_usd": "0.01206920",
+    "cumulative_stage2_cost_usd": "0.09683252",
+    "status": "completed_with_failures",
+    "stage_3_requests": 0,
+    "accepted_flash_artifact_fingerprint": "379a45baf20c8c80dd3b6da756142d0f0a9fb48fcf058b72845b5630d30f9f19",
+    "flash_checkpoint": {
+      "filename": "checkpoint_flash_40431f671f2efb6eb9a686257bfca48ae3f435ae.json",
+      "sha256": "df40c219e8be0487e614f186eab1c866aa31cc163f52877a0535bc9903809647"
+    },
+    "flash_artifact": {
+      "filename": "accepted_flash.json",
+      "sha256": "95485f7e1a64898358353f74c978c29882c4645050b807ff63bbb8ac0efc7e7b"
+    }
+  },
   "accepted_stage1": {
     "flash": {
       "semantic_plan_fingerprint": "5428e613bfbbaed4c149843f913d5007a3e59914c02a65de034fb3ae186dbbf4",
@@ -100,8 +121,8 @@
     "delta_repair": "disabled"
   },
   "budget": {
-    "namespace": "stage2c_p2_extended_qualification",
-    "carry_in_stage2_cost_usd": "0.08476332",
+    "namespace": "stage2c_p2_protected_text_qualification",
+    "carry_in_stage2_cost_usd": "0.09683252",
     "cumulative_soft_stop_usd": "8.50",
     "cumulative_hard_stop_usd": "9.50",
     "uncertainty_reserve_usd": "0.50"
